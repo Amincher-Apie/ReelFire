@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CV 综合项目实战 - 方向B：智能视频精彩片段提取</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f5f7fa; color: #333; }
+        
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; text-align: center; }
+        .header h1 { font-size: 24px; margin-bottom: 5px; }
+        .header p { font-size: 14px; opacity: 0.9; }
+        
+        .container { max-width: 1200px; margin: 20px auto; padding: 0 20px; }
+        
+        .upload-section { background: white; border-radius: 10px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); margin-bottom: 20px; }
+        .upload-section h2 { color: #667eea; margin-bottom: 20px; font-size: 18px; }
+        
+        .upload-area { border: 2px dashed #ddd; border-radius: 10px; padding: 40px; text-align: center; cursor: pointer; transition: all 0.3s; }
+        .upload-area:hover { border-color: #667eea; background: #f8f9ff; }
+        .upload-area.dragover { border-color: #667eea; background: #eef2ff; }
+        .upload-area i { font-size: 48px; color: #667eea; margin-bottom: 10px; }
+        .upload-area span { display: block; color: #666; }
+        
+        input[type="file"] { display: none; }
+        input[type="text"] { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; margin-bottom: 15px; font-size: 14px; }
+        
+        .btn { background: #667eea; color: white; border: none; padding: 12px 30px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all 0.3s; }
+        .btn:hover { background: #5a6fd6; transform: translateY(-1px); }
+        .btn:disabled { background: #ccc; cursor: not-allowed; transform: none; }
+        
+        .jobs-section { background: white; border-radius: 10px; padding: 30px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .jobs-section h2 { color: #667eea; margin-bottom: 20px; font-size: 18px; }
+        
+        .job-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px; }
+        
+        .job-card { border: 1px solid #ddd; border-radius: 8px; padding: 15px; transition: all 0.3s; }
+        .job-card:hover { box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+        .job-card .job-id { font-size: 12px; color: #999; margin-bottom: 5px; }
+        .job-card .job-name { font-weight: bold; margin-bottom: 5px; }
+        .job-card .job-status { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 12px; margin-bottom: 10px; }
+        .status-completed { background: #d4edda; color: #155724; }
+        .status-running { background: #fff3cd; color: #856404; }
+        .status-failed { background: #f8d7da; color: #721c24; }
+        .status-created { background: #d1ecf1; color: #0c5460; }
+        
+        .job-card .job-time { font-size: 12px; color: #999; }
+        .job-card .actions { margin-top: 10px; }
+        .job-card .actions button { margin-right: 5px; padding: 5px 10px; font-size: 12px; border-radius: 4px; border: 1px solid #ddd; cursor: pointer; }
+        .job-card .actions button:hover { background: #f5f5f5; }
+        
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: white; border-radius: 10px; padding: 20px; width: 90%; max-width: 800px; max-height: 80vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .modal-header h3 { color: #667eea; }
+        .modal-close { font-size: 24px; cursor: pointer; color: #999; }
+        
+        .analysis-result { margin-top: 20px; }
+        .result-section { margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px; }
+        .result-section h4 { color: #667eea; margin-bottom: 10px; }
+        
+        .keyframes-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+        .keyframe-item { text-align: center; }
+        .keyframe-item img { width: 100%; border-radius: 4px; margin-bottom: 5px; }
+        .keyframe-item .score { font-size: 12px; color: #666; }
+        
+        .loading { text-align: center; padding: 40px; color: #667eea; }
+        .loading .spinner { border: 4px solid #f3f3f3; border-top: 4px solid #667eea; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; margin: 0 auto 10px; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        
+        .error-message { color: #dc3545; background: #f8d7da; padding: 10px; border-radius: 4px; margin-top: 10px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>CV 综合项目实战</h1>
+        <p>方向B：智能视频精彩片段提取系统</p>
+    </div>
+    
+    <div class="container">
+        <div class="upload-section">
+            <h2>上传视频素材</h2>
+            <input type="text" id="projectName" placeholder="项目名称（可选）">
+            <div class="upload-area" id="uploadArea">
+                <i>📁</i>
+                <span>点击或拖拽视频文件到此处上传</span>
+            </div>
+            <input type="file" id="fileInput" accept="video/*">
+            <button class="btn" id="uploadBtn" style="margin-top: 15px;">开始分析</button>
+            <div id="uploadError" class="error-message" style="display: none;"></div>
+        </div>
+        
+        <div class="jobs-section">
+            <h2>任务列表</h2>
+            <div id="jobList" class="job-list">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>加载任务列表...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="modal" id="resultModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>分析结果</h3>
+                <span class="modal-close" onclick="closeModal()">&times;</span>
+            </div>
+            <div id="modalContent">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    <p>加载分析结果...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const uploadArea = document.getElementById('uploadArea');
+        const fileInput = document.getElementById('fileInput');
+        const uploadBtn = document.getElementById('uploadBtn');
+        const projectNameInput = document.getElementById('projectName');
+        const jobList = document.getElementById('jobList');
+        const resultModal = document.getElementById('resultModal');
+        const modalContent = document.getElementById('modalContent');
+        
+        uploadArea.addEventListener('click', () => fileInput.click());
+        uploadArea.addEventListener('dragover', (e) => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+        uploadArea.addEventListener('drop', (e) => { e.preventDefault(); uploadArea.classList.remove('dragover'); fileInput.files = e.dataTransfer.files; });
+        
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                uploadArea.innerHTML = `<i>✓</i><span>已选择：${fileInput.files[0].name}</span>`;
+            }
+        });
+        
+        uploadBtn.addEventListener('click', async () => {
+            if (fileInput.files.length === 0) {
+                showError('请先选择视频文件');
+                return;
+            }
+            
+            const file = fileInput.files[0];
+            const projectName = projectNameInput.value || 'CV Project';
+            
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = '上传中...';
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('project_name', projectName);
+            
+            try {
+                const response = await fetch('/api/jobs', { method: 'POST', body: formData });
+                const data = await response.json();
+                
+                if (data.ok) {
+                    await analyzeJob(data.job_id);
+                    loadJobs();
+                    fileInput.value = '';
+                    uploadArea.innerHTML = '<i>📁</i><span>点击或拖拽视频文件到此处上传</span>';
+                } else {
+                    showError(data.error);
+                }
+            } catch (error) {
+                showError('上传失败：' + error.message);
+            } finally {
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = '开始分析';
+            }
+        });
+        
+        async function analyzeJob(jobId) {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/analyze`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (!data.ok) {
+                    showError(data.error);
+                }
+            } catch (error) {
+                showError('分析启动失败：' + error.message);
+            }
+        }
+        
+        async function loadJobs() {
+            try {
+                const response = await fetch('/api/jobs');
+                const data = await response.json();
+                
+                if (data.ok) {
+                    renderJobs(data.jobs);
+                }
+            } catch (error) {
+                console.error('加载任务列表失败:', error);
+            }
+        }
+        
+        function renderJobs(jobs) {
+            if (jobs.length === 0) {
+                jobList.innerHTML = '<p style="text-align: center; color: #999;">暂无任务</p>';
+                return;
+            }
+            
+            jobList.innerHTML = jobs.map(job => `
+                <div class="job-card">
+                    <div class="job-id">${job.job_id}</div>
+                    <div class="job-name">${job.project_name}</div>
+                    <div class="job-name" style="font-weight: normal; font-size: 14px;">${job.asset_name}</div>
+                    <div class="job-status status-${job.status}">${getStatusText(job.status)}</div>
+                    <div class="job-time">创建于 ${job.created_at}</div>
+                    ${job.completed_at ? `<div class="job-time">完成于 ${job.completed_at}</div>` : ''}
+                    ${job.error ? `<div class="error-message" style="font-size: 12px;">${job.error}</div>` : ''}
+                    <div class="actions">
+                        ${job.status === 'completed' ? `
+                            <button onclick="viewReport('${job.job_id}')">查看报告</button>
+                            <button onclick="roughCut('${job.job_id}')">生成粗剪</button>
+                        ` : ''}
+                        <button onclick="deleteJob('${job.job_id}')">删除</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+        
+        function getStatusText(status) {
+            const map = { created: '已创建', queued: '排队中', running: '处理中', completed: '已完成', failed: '失败' };
+            return map[status] || status;
+        }
+        
+        async function viewReport(jobId) {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/report`);
+                const data = await response.json();
+                
+                if (data.ok) {
+                    renderReport(data.report);
+                    resultModal.style.display = 'flex';
+                } else {
+                    showError(data.error);
+                }
+            } catch (error) {
+                showError('获取报告失败：' + error.message);
+            }
+        }
+        
+        async function roughCut(jobId) {
+            try {
+                const response = await fetch(`/api/jobs/${jobId}/rough-cut`, { method: 'POST' });
+                const data = await response.json();
+                
+                if (data.ok) {
+                    alert('粗剪视频已生成！');
+                } else {
+                    showError(data.error);
+                }
+            } catch (error) {
+                showError('生成粗剪失败：' + error.message);
+            }
+        }
+        
+        async function deleteJob(jobId) {
+            if (!confirm('确定要删除此任务吗？')) return;
+            
+            try {
+                const response = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+                const data = await response.json();
+                
+                if (data.ok) {
+                    loadJobs();
+                } else {
+                    showError(data.error);
+                }
+            } catch (error) {
+                showError('删除失败：' + error.message);
+            }
+        }
+        
+        function renderReport(report) {
+            modalContent.innerHTML = `
+                <div class="analysis-result">
+                    <div class="result-section">
+                        <h4>任务信息</h4>
+                        <p><strong>任务ID:</strong> ${report.job_id}</p>
+                        <p><strong>采样帧数:</strong> ${report.total_frames}</p>
+                        <p><strong>采样间隔:</strong> ${report.sample_interval}秒</p>
+                    </div>
+                    
+                    <div class="result-section">
+                        <h4>评分权重</h4>
+                        <p><strong>目标检测:</strong> ${(report.scoring_weights.object_weight * 100).toFixed(0)}%</p>
+                        <p><strong>画面变化:</strong> ${(report.scoring_weights.scene_change_weight * 100).toFixed(0)}%</p>
+                        <p><strong>运动强度:</strong> ${(report.scoring_weights.motion_weight * 100).toFixed(0)}%</p>
+                    </div>
+                    
+                    <div class="result-section">
+                        <h4>推荐片段</h4>
+                        ${report.recommended_segments.map((seg, i) => `
+                            <p>片段${i+1}: ${seg.start.toFixed(2)}s - ${seg.end.toFixed(2)}s (评分: ${(seg.score * 100).toFixed(1)}%)</p>
+                        `).join('')}
+                    </div>
+                    
+                    <div class="result-section">
+                        <h4>Top 关键帧</h4>
+                        <div class="keyframes-grid">
+                            ${report.top_keyframes.map(kf => `
+                                <div class="keyframe-item">
+                                    <div style="width: 150px; height: 84px; background: #ddd; border-radius: 4px; display: flex; align-items: center; justify-content: center;">
+                                        <span style="font-size: 12px; color: #666;">帧 ${kf.frame_index}</span>
+                                    </div>
+                                    <div class="score">时间: ${kf.timestamp.toFixed(2)}s</div>
+                                    <div class="score">评分: ${(kf.highlight_score * 100).toFixed(1)}%</div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function closeModal() {
+            resultModal.style.display = 'none';
+        }
+        
+        function showError(message) {
+            const errorDiv = document.getElementById('uploadError');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => errorDiv.style.display = 'none', 5000);
+        }
+        
+        loadJobs();
+        
+        setInterval(() => {
+            if (resultModal.style.display === 'none') {
+                loadJobs();
+            }
+        }, 3000);
+    </script>
+</body>
+</html>
