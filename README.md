@@ -2,6 +2,20 @@
 
 ReelFire 是一个面向游戏录屏、场景演示和宣传素材的智能视频精彩片段提取工作台。系统使用 OpenCV 采样视频帧，使用 Ultralytics YOLO 检测画面目标，并结合目标密度、场景变化和运动强度生成可解释的精彩分数；用户可以复核关键帧、调整候选片段，再由 FFmpeg 输出粗剪视频。
 
+仓库地址：[Amincher-Apie/ReelFire](https://github.com/Amincher-Apie/ReelFire)
+
+## Quick Initialize（快速初始化）
+
+已安装 Miniconda 或 Anaconda 的成员，可以直接执行：
+
+```powershell
+git clone https://github.com/Amincher-Apie/ReelFire.git
+cd ReelFire
+python setup_environment.py
+```
+
+脚本会复用当前非 `base` Conda 环境；如果当前没有可复用环境，则自动创建并配置名为 `ReelFire` 的环境。完成后按照脚本最后给出的提示激活环境即可。
+
 ## 项目方向
 
 本项目选择课程任务书中的 **方向 B：智能视频精彩片段提取系统**。
@@ -45,7 +59,7 @@ highlight_score =
 每位成员可以把仓库克隆到自己的任意工作目录，不需要使用某个固定的绝对路径：
 
 ```powershell
-git clone <仓库地址>
+git clone https://github.com/Amincher-Apie/ReelFire.git
 cd ReelFire
 ```
 

@@ -40,7 +40,7 @@ highlight_score =
 每名成员将 Git 仓库克隆到自己的任意工作位置，然后进入 `ReelFire` 项目根目录：
 
 ```powershell
-git clone <仓库地址>
+git clone https://github.com/Amincher-Apie/ReelFire.git
 cd ReelFire
 python setup_environment.py
 ```
