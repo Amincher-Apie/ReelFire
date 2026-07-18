@@ -316,7 +316,22 @@
                             <p>片段${i+1}: ${seg.start.toFixed(2)}s - ${seg.end.toFixed(2)}s (评分: ${(seg.score * 100).toFixed(1)}%)</p>
                         `).join('')}
                     </div>
-                    
+
+                    ${report.segment_tags ? `
+                    <div class="result-section">
+                        <h4>片段标签统计</h4>
+                        <p><strong>标签总数:</strong> ${report.segment_tags.total_tags}</p>
+                        <p><strong>标签汇总:</strong> ${report.segment_tags.summary.join('、') || '无'}</p>
+                    </div>
+                    ` : ''}
+
+                    ${report.ai_cover_prompt ? `
+                    <div class="result-section">
+                        <h4>AI 封面 Prompt</h4>
+                        <p>${report.ai_cover_prompt}</p>
+                    </div>
+                    ` : ''}
+
                     <div class="result-section">
                         <h4>Top 关键帧</h4>
                         <div class="keyframes-grid">

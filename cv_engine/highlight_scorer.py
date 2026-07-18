@@ -4,11 +4,10 @@ import numpy as np
 import json
 
 class HighlightScorer:
-    def __init__(self):
-        self.object_weight = 0.15
-        self.scene_change_weight = 0.15
-        self.motion_weight = 0.10
-        self.kill_notification_weight = 0.60
+    def __init__(self, object_weight=0.45, scene_change_weight=0.35, motion_weight=0.20):
+        self.object_weight = object_weight
+        self.scene_change_weight = scene_change_weight
+        self.motion_weight = motion_weight
     
     def calculate_object_score(self, detections, max_objects=5):
         count = len(detections)
@@ -127,9 +126,9 @@ class HighlightScorer:
     
     def calculate_highlight_score(self, object_score, scene_change_score, motion_score, kill_notification_score=0.0):
         return (
-            object_score * 0.45 +
-            scene_change_score * 0.35 +
-            motion_score * 0.20
+            object_score * self.object_weight +
+            scene_change_score * self.scene_change_weight +
+            motion_score * self.motion_weight
         )
     
     def analyze(self, frames, detections_list, timestamps, job_id):
@@ -162,9 +161,15 @@ class HighlightScorer:
             prev_frame = frame
         
         sorted_keyframes = sorted(keyframes, key=lambda x: x['highlight_score'], reverse=True)
-        
+
         selected_segments = self._select_segments(sorted_keyframes, timestamps[-1] if timestamps else 60.0)
-        
+
+        # 片段标签统计：统计推荐片段中检测到的目标类别和数量
+        segment_tags = self._calculate_segment_tags(keyframes, selected_segments)
+
+        # 自动生成 AI 封面 Prompt：根据最高分关键帧的检测结果生成
+        ai_cover_prompt = self._generate_cover_prompt(sorted_keyframes[0] if sorted_keyframes else None)
+
         result = {
             'job_id': job_id,
             'total_frames': len(frames),
@@ -172,15 +177,64 @@ class HighlightScorer:
             'keyframes': keyframes,
             'top_keyframes': sorted_keyframes[:10],
             'recommended_segments': selected_segments,
+            'segment_tags': segment_tags,
+            'ai_cover_prompt': ai_cover_prompt,
             'scoring_weights': {
                 'object_weight': self.object_weight,
                 'scene_change_weight': self.scene_change_weight,
-                'motion_weight': self.motion_weight,
-                'kill_notification_weight': self.kill_notification_weight
+                'motion_weight': self.motion_weight
             }
         }
-        
+
         return result
+
+    def _calculate_segment_tags(self, keyframes, segments):
+        """统计推荐片段中检测到的目标类别和数量"""
+        tag_stats = {}
+
+        for seg in segments:
+            seg_start = seg['start']
+            seg_end = seg['end']
+
+            for kf in keyframes:
+                if seg_start <= kf['timestamp'] <= seg_end:
+                    for obj in kf.get('objects', []):
+                        cls = obj['class']
+                        if cls not in tag_stats:
+                            tag_stats[cls] = {'count': 0, 'segments': []}
+                        tag_stats[cls]['count'] += 1
+                        if seg['center_timestamp'] not in tag_stats[cls]['segments']:
+                            tag_stats[cls]['segments'].append(seg['center_timestamp'])
+
+        return {
+            'total_tags': len(tag_stats),
+            'tags': tag_stats,
+            'summary': [f"{cls}({info['count']})" for cls, info in tag_stats.items()]
+        }
+
+    def _generate_cover_prompt(self, top_keyframe):
+        """根据最高分关键帧的检测结果生成 AI 封面 Prompt"""
+        if not top_keyframe:
+            return "无法生成封面描述：无关键帧数据"
+
+        objects = top_keyframe.get('objects', [])
+        timestamp = top_keyframe.get('timestamp', 0)
+        score = top_keyframe.get('highlight_score', 0)
+
+        if not objects:
+            prompt = f"视频封面：在第{timestamp:.1f}秒处的高分画面，画面变化丰富，适合作为封面"
+        else:
+            # 统计目标类别
+            class_counts = {}
+            for obj in objects:
+                cls = obj['class']
+                class_counts[cls] = class_counts.get(cls, 0) + 1
+
+            # 生成描述
+            obj_desc = "、".join([f"{cls}{count}个" for cls, count in class_counts.items()])
+            prompt = f"视频封面：在第{timestamp:.1f}秒处的高分画面（评分{score*100:.1f}%），检测到{obj_desc}，画面内容丰富，适合作为视频封面"
+
+        return prompt
     
     def _select_segments(self, sorted_keyframes, video_duration, target_duration=60.0, min_segment_length=3.0):
         segments = []
@@ -278,12 +332,23 @@ class HighlightScorer:
                 })
         
         if len(segments) == 1 and segments[0]['end'] - segments[0]['start'] < target_duration and video_duration > target_duration:
+            current_start = segments[0]['start']
             current_end = segments[0]['end']
+            current_length = current_end - current_start
+            remaining_duration = target_duration - current_length
+
+            # 优先向后扩展
             if current_end < video_duration:
-                remaining_duration = target_duration - (current_end - segments[0]['start'])
-                new_end = min(video_duration, current_end + remaining_duration)
-                segments[0]['end'] = round(new_end, 2)
-                segments[0]['center_timestamp'] = (segments[0]['start'] + segments[0]['end']) / 2
+                extend = min(remaining_duration, video_duration - current_end)
+                segments[0]['end'] = round(current_end + extend, 2)
+                remaining_duration -= extend
+
+            # 如果向后扩展不够，再向前扩展
+            if remaining_duration > 0 and segments[0]['start'] > 0:
+                extend = min(remaining_duration, segments[0]['start'])
+                segments[0]['start'] = round(segments[0]['start'] - extend, 2)
+
+            segments[0]['center_timestamp'] = round((segments[0]['start'] + segments[0]['end']) / 2, 2)
         
         segments.sort(key=lambda x: x['start'])
         

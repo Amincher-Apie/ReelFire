@@ -135,13 +135,22 @@ def analyze_job(job_id):
         processor = VideoProcessor()
         video_info = processor.get_video_info(asset_path)
         frames, timestamps = processor.sample_video(asset_path, interval=1)
-        
+
         detector = YoloDetector('models/yolo11n.pt')
         all_results = detector.detect_frames(frames)
-        
-        scorer = HighlightScorer()
+
+        # 支持可调的评分参数
+        object_weight = float(request.form.get('object_weight', 0.45))
+        scene_change_weight = float(request.form.get('scene_change_weight', 0.35))
+        motion_weight = float(request.form.get('motion_weight', 0.20))
+
+        scorer = HighlightScorer(
+            object_weight=object_weight,
+            scene_change_weight=scene_change_weight,
+            motion_weight=motion_weight
+        )
         analysis_result = scorer.analyze(frames, all_results, timestamps, job_id)
-        
+
         analysis_result['video_info'] = video_info
         
         result_file = os.path.join(result_dir, 'analysis_report.json')
@@ -353,4 +362,4 @@ def serve_output(job_id, filename):
 if __name__ == '__main__':
     os.makedirs(ASSETS_DIR, exist_ok=True)
     os.makedirs(OUTPUTS_DIR, exist_ok=True)
-    app.run(host='127.0.0.1', port=7880, debug=True)
+    app.run(host='127.0.0.1', port=7880, debug=False)
