@@ -222,7 +222,7 @@ docs(prd): define acceptance criteria
 
 ## 启动方式
 
-待后端入口 `app.py` 合并后，统一使用：
+后端入口 `app.py` 已在 `backend` 分支完成第一阶段整合，统一使用：
 
 ```powershell
 conda activate ReelFire
@@ -243,12 +243,31 @@ http://127.0.0.1:7880
 http://127.0.0.1:7880/api/health
 ```
 
+### 第一阶段后端能力
+
+当前已实现视频上传、任务目录与 `job.json` 持久化、历史任务查询、安全删除、后台状态流转、报告读取和人工审核写回。公共接口及方向 B 接口为：
+
+```text
+GET    /api/health
+POST   /api/jobs
+GET    /api/jobs
+GET    /api/jobs/<job_id>
+DELETE /api/jobs/<job_id>
+POST   /api/jobs/<job_id>/analyze
+PATCH  /api/jobs/<job_id>/review
+POST   /api/jobs/<job_id>/rough-cut
+GET    /api/jobs/<job_id>/report
+```
+
+真实 OpenCV/YOLO 分析与 FFmpeg 粗剪仍是明确接入口。当前未接入时任务会保存为 `failed` 或接口返回 `501`，不会生成假关键帧、假分数、假报告或假视频。完整请求字段和状态码见 [`docs/API.md`](docs/API.md)。
+
 ## 基础检查
 
 ```powershell
 python -m py_compile app.py
 python -m unittest discover -s tests -v
 node --check static/app.js
+python -c "from app import create_app; app=create_app(); print(app.url_map)"
 ```
 
 上述文件尚未加入时可以跳过对应命令；合并到 `main` 前必须执行与自己模块相关的检查。

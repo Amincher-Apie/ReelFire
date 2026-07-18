@@ -1,0 +1,35 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, "Microsoft YaHei", system-ui, sans-serif;
+  background: #0c111b;
+  color: #eef3ff;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; background: radial-gradient(circle at top right, #213759 0, #0c111b 44%); }
+main { width: min(980px, calc(100% - 32px)); margin: 0 auto; padding: 64px 0; }
+header { margin-bottom: 30px; }
+h1 { margin: 8px 0; font-size: clamp(2rem, 5vw, 4rem); line-height: 1.05; }
+h2 { margin: 0 0 20px; }
+.eyebrow { color: #75a7ff; font-weight: 700; letter-spacing: .14em; }
+.panel { margin: 18px 0; padding: 24px; border: 1px solid #30415f; border-radius: 18px; background: rgba(18, 27, 43, .9); box-shadow: 0 18px 50px rgba(0, 0, 0, .24); }
+form { display: grid; grid-template-columns: 1fr 1fr auto; gap: 14px; align-items: end; }
+label { display: grid; gap: 8px; color: #b9c6da; }
+input { width: 100%; padding: 11px 12px; border: 1px solid #405273; border-radius: 9px; background: #0e1624; color: inherit; }
+button { padding: 12px 18px; border: 0; border-radius: 9px; background: #4f8cff; color: #fff; font-weight: 700; cursor: pointer; }
+button:disabled { opacity: .55; cursor: wait; }
+button.secondary { padding: 8px 13px; background: #283750; }
+.section-heading, .job-heading, .actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.job { padding: 16px 0; border-top: 1px solid #2a3850; }
+.job:first-child { border-top: 0; }
+.job h3 { margin: 0; font-size: 1rem; }
+.meta { color: #9aa9bf; font-size: .9rem; overflow-wrap: anywhere; }
+.status { padding: 4px 9px; border-radius: 999px; background: #283750; font-size: .8rem; }
+.status.failed { background: #6b2931; }
+.status.completed { background: #22613f; }
+.error { color: #ff9ca6; }
+.success { color: #83e3ad; }
+.actions { justify-content: flex-start; }
+.actions button { padding: 7px 11px; font-size: .82rem; }
+.actions .delete { background: #73313b; }
+@media (max-width: 720px) { form { grid-template-columns: 1fr; } main { padding: 32px 0; } }
