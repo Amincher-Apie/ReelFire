@@ -53,6 +53,55 @@ def _select_keyframes(
     return selected
 
 
+def _annotate_frame(frame: np.ndarray, objects: list[dict[str, Any]]) -> np.ndarray:
+    """Draw YOLO boxes on a copy of a frame for human-verifiable evidence."""
+    annotated = frame.copy()
+    for detected in objects:
+        bbox = detected.get("bbox")
+        if not isinstance(bbox, list) or len(bbox) != 4:
+            continue
+        try:
+            x1, y1, x2, y2 = (int(round(float(value))) for value in bbox)
+        except (TypeError, ValueError):
+            continue
+        x1 = max(0, min(x1, annotated.shape[1] - 1))
+        x2 = max(0, min(x2, annotated.shape[1] - 1))
+        y1 = max(0, min(y1, annotated.shape[0] - 1))
+        y2 = max(0, min(y2, annotated.shape[0] - 1))
+        if x2 <= x1 or y2 <= y1:
+            continue
+        label = str(detected.get("class", "object"))
+        confidence = detected.get("confidence")
+        if isinstance(confidence, (int, float)):
+            label = f"{label} {float(confidence):.2f}"
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 80), 2)
+        (text_width, text_height), _ = cv2.getTextSize(
+            label,
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            1,
+        )
+        text_top = max(0, y1 - text_height - 8)
+        cv2.rectangle(
+            annotated,
+            (x1, text_top),
+            (min(annotated.shape[1] - 1, x1 + text_width + 8), y1),
+            (0, 255, 80),
+            -1,
+        )
+        cv2.putText(
+            annotated,
+            label,
+            (x1 + 4, max(text_height + 1, y1 - 5)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (10, 20, 10),
+            1,
+            cv2.LINE_AA,
+        )
+    return annotated
+
+
 def _save_contact_sheet(
     selected: list[dict[str, Any]],
     frames: list[np.ndarray],
@@ -64,7 +113,10 @@ def _save_contact_sheet(
     rows = math.ceil(len(selected) / columns)
     sheet = np.zeros((rows * thumb_height, columns * thumb_width, 3), dtype=np.uint8)
     for index, item in enumerate(selected):
-        frame = frames[int(item["frame_index"])]
+        frame = _annotate_frame(
+            frames[int(item["frame_index"])],
+            item.get("objects", []),
+        )
         thumb = cv2.resize(frame, (thumb_width, thumb_height))
         cv2.putText(
             thumb,
@@ -151,9 +203,11 @@ def analyze_video(
     for order, sample in enumerate(selected, start=1):
         keyframe_id = f"kf_{order:03d}"
         image_name = f"{keyframe_id}.jpg"
-        if not cv2.imwrite(
-            str(keyframe_dir / image_name), frames[int(sample["frame_index"])]
-        ):
+        annotated = _annotate_frame(
+            frames[int(sample["frame_index"])],
+            sample.get("objects", []),
+        )
+        if not cv2.imwrite(str(keyframe_dir / image_name), annotated):
             raise RuntimeError(f"无法保存关键帧 {image_name}")
         keyframes.append(
             {

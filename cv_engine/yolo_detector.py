@@ -12,9 +12,8 @@ class YoloDetector:
         if not self.model_path.is_file():
             raise FileNotFoundError(
                 f"Model file not found at {self.model_path}\n"
-                "Please manually download yolo11n.pt from:\n"
-                "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11n.pt\n"
-                "and place it in the models/ directory."
+                "Run `python setup_environment.py` to download and verify "
+                "the official yolo11n.pt model."
             )
 
         self.model = YOLO(str(self.model_path))

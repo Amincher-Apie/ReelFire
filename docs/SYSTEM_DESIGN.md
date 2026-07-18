@@ -29,7 +29,7 @@ outputs/<job_id>/
 └─ job.json
 ```
 
-真实算法完成后才增加 `analysis_report.json`；真实粗剪完成后才在 `result/` 增加视频。写 JSON 时在同目录创建唯一临时文件，完成 `flush + fsync` 后使用 `os.replace` 原子替换。进程内还使用可重入锁，避免多个后台/请求线程交错写入。
+真实算法成功后增加 `analysis_report.json`；真实粗剪成功后在 `result/` 增加视频。写 JSON 时在同目录创建唯一临时文件，完成 `flush + fsync` 后使用 `os.replace` 原子替换。进程内还使用可重入锁，避免多个后台/请求线程交错写入。
 
 ## 状态与后台线程
 
@@ -58,6 +58,6 @@ failed  -> queued  （允许人工重试）
 
 ## 后续接入口
 
-- CV：实现 `services.analysis_service.analyze_video`，返回可 JSON 序列化的真实报告字典；
-- FFmpeg：实现 `services.ffmpeg_service.create_rough_cut`，生成真实文件后返回 `Path`；
+- CV：`services.analysis_service.analyze_video` 已返回可 JSON 序列化的真实报告字典，并输出带 YOLO 框关键帧；
+- FFmpeg：`services.ffmpeg_service.create_rough_cut` 已生成真实文件并返回 `Path`；
 - 前端：轮询任务详情，完成后读取 `/report`，通过 `/review` 写回人工选择，再调用 `/rough-cut`。

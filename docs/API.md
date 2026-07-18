@@ -52,17 +52,17 @@
 {"ok": true, "job_id": "...", "status": "queued"}
 ```
 
-不存在返回 `404`；已在队列/运行中或已完成返回 `409`。当前 CV 占位会在后台明确进入 `failed`。
+不存在返回 `404`；已在队列/运行中或已完成返回 `409`。后台执行真实 OpenCV 采样、YOLO11n 推理、评分和关键帧生成；解码、模型或推理异常会进入 `failed` 并写入可读 `error`。
 
 ### `PATCH /api/jobs/<job_id>/review`
 
-请求为 JSON 对象，可包含 `keyframes` 和/或 `recommended_clip`。推荐片段至少包含 `start_time/end_time`，并满足 `0 <= start < end <= duration`（报告存在 duration 时）。关键帧支持校验 `timestamp/keep/order/label/note`。
+请求为 JSON 对象，可包含 `keyframes`、`segments` 和/或 `recommended_clip`。推荐片段至少包含 `start_time/end_time`，并满足 `0 <= start < end <= duration`（报告存在 duration 时）。片段使用 `start/end/order`；关键帧支持校验 `timestamp/keep/decision/order/label/note`。
 
 成功返回 `200` 与更新后的 `report`。任务不存在返回 `404`；报告尚未生成返回 `409`；字段或边界错误返回 `400`。
 
 ### `POST /api/jobs/<job_id>/rough-cut`
 
-只接受 `completed` 且已有报告的任务。请求体可省略，也可用 JSON 覆盖报告中的 `start_time/end_time/output_ratio`。当前真实粗剪未实现，返回 `501`，且不会创建假文件。任务状态/报告冲突返回 `409`，参数错误返回 `400`。
+只接受 `completed` 且已有报告的任务。请求体可省略，也可用 JSON 覆盖报告中的 `start_time/end_time/output_ratio`。成功调用 FFmpeg 生成 MP4，返回 `200` 与 `rough_cut_file`，并同步写回任务和报告；FFmpeg 不可用时返回 `501`。任务状态/报告冲突返回 `409`，参数错误返回 `400`。
 
 ### `GET /api/jobs/<job_id>/report`
 

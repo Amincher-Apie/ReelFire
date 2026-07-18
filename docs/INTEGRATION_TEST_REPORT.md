@@ -9,11 +9,11 @@
 | Python 依赖 | `pip check` 通过，无损坏依赖 |
 | Python 语法 | `py_compile` 通过 |
 | JavaScript 语法 | `node --check static/app.js` 通过 |
-| 自动化测试 | 30/30 通过 |
+| 自动化测试 | 35/35 通过 |
 | 实际 HTTP 首页 | 200，包含 ReelFire 上传表单 |
 | 实际健康接口 | 200，模型与 FFmpeg 均 ready |
 | OpenCV 真实采样 | 通过 |
-| YOLO 真实推理 | 通过（临时 `yolo11n.pt`，不提交仓库） |
+| YOLO 真实推理 | 通过（最终模型 `yolo11n.pt`，由初始化脚本下载） |
 | 关键帧与边界 | 通过 |
 | 联系表生成 | 通过 |
 | 有音频 16:9 粗剪 | 通过 |
@@ -48,7 +48,7 @@ python -m pip check
 结果：
 
 ```text
-Ran 30 tests
+Ran 35 tests
 OK
 No broken requirements found.
 ```
@@ -83,7 +83,7 @@ No broken requirements found.
 
 真实联调调用的是 `services.analysis_service.analyze_video()` 和 `services.ffmpeg_service.create_rough_cut()`，没有使用模拟报告或伪造输出。
 
-本地服务启动后还通过真实 HTTP 请求验证：`GET /` 返回 200 且包含上传表单，`GET /api/health` 返回 `model_ready: true` 与 `ffmpeg_ready: true`。可视化浏览器人工回归仍保留为前端 `REVIEW` 项。
+本地服务启动后还通过真实 HTTP 请求验证：`GET /` 返回 200 且包含上传表单，`GET /api/health` 返回 `model_ready: true` 与 `ffmpeg_ready: true`。完整浏览器回归已覆盖加载、运行、完成、失败、审核写回、输出视频和历史任务，浏览器控制台错误与失败请求均为 0，证据见 `Acceptance_screenshot/`。
 
 ## 5. 无音频兼容测试
 
@@ -109,16 +109,16 @@ FFmpeg 使用可选音轨映射 `0:a?`，源视频没有音频时不会导致任
 6. 人工审核会丢失关键帧分数字段；
 7. 粗剪完成后输出路径没有写回分析报告；
 8. 关键帧和视频缺少安全的 `/outputs/` 访问路由；
-9. FFmpeg 和 CV 服务仍是 `NotImplementedError` 占位；
+9. 原 FFmpeg 和 CV `NotImplementedError` 占位已替换为真实实现；
 10. 上传层只看扩展名，伪装文件可以进入任务系统。
 
 ## 7. 当前限制
 
-- 当前烟雾测试使用通用 `yolo11n.pt`，最终应替换为 FPS 自定义模型；
+- 项目最终使用通用 `yolo11n.pt`，不自训练；其 FPS 专用事件识别能力有限，报告只展示真实 COCO 类别；
 - 其他成员尚未上传的代码没有进入本分支；
 - 多片段合并、1:1、ZIP 和封面 Prompt 仍属于 P1；
 - 当前真实联调结果保存在本机 `outputs/integration_smoke/`，该目录被 `.gitignore` 排除；
-- 模型文件被 `.gitignore` 排除，不会推送到 GitHub；
+- 模型文件被 `.gitignore` 排除，不会推送到 GitHub；`setup_environment.py` 会自动下载并校验；
 - 第一轮 QA 报告中的占位结论保留为历史记录，以本报告作为当前状态依据。
 
 ## 8. 后续接入规则
@@ -129,5 +129,5 @@ FFmpeg 使用可选音轨映射 `0:a?`，源视频没有音频时不会导致任
 2. 确认分支是否基于当前 `main/Test-Glob`；
 3. 有共同祖先时正常 merge；
 4. 无共同祖先时只提取有效提交或文件；
-5. 每次接入后重新执行 30 项测试和真实视频烟雾测试；
+5. 每次接入后重新执行 35 项测试和真实视频烟雾测试；
 6. 在所有成员代码到齐并通过最终验收前，不将 `Test-Glob` 合并到 `main`。

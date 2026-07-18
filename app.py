@@ -56,6 +56,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def index():
         return render_template("index.html")
 
+    @app.get("/favicon.ico")
+    def favicon():
+        return send_file(Path(app.static_folder) / "favicon.svg", mimetype="image/svg+xml")
+
     @app.get("/outputs/<job_id>/<path:filename>")
     def serve_job_output(job_id: str, filename: str):
         root = jobs.job_dir(job_id).resolve()

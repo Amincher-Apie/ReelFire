@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import unittest
 
-from services.analysis_service import _bounded_clip, _select_keyframes
+import numpy as np
+
+from services.analysis_service import _annotate_frame, _bounded_clip, _select_keyframes
 
 
 class ClipBoundaryTestCase(unittest.TestCase):
@@ -32,6 +34,23 @@ class KeyframeSelectionTestCase(unittest.TestCase):
         ]
         selected = _select_keyframes(samples, maximum=10, minimum_gap=5.0)
         self.assertEqual([item["timestamp"] for item in selected], [10.0, 20.0])
+
+
+class DetectionAnnotationTestCase(unittest.TestCase):
+    def test_draws_detection_without_mutating_source(self) -> None:
+        source = np.zeros((80, 120, 3), dtype=np.uint8)
+        annotated = _annotate_frame(
+            source,
+            [
+                {
+                    "bbox": [10, 20, 90, 70],
+                    "class": "person",
+                    "confidence": 0.91,
+                }
+            ],
+        )
+        self.assertFalse(np.any(source))
+        self.assertTrue(np.any(annotated))
 
 
 if __name__ == "__main__":

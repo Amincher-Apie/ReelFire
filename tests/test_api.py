@@ -54,6 +54,15 @@ class ApiTestCase(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertFalse(payload["model_ready"])
 
+    def test_frontend_and_favicon_are_available(self) -> None:
+        page = self.client.get("/")
+        favicon = self.client.get("/favicon.ico")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("ReelFire", page.get_data(as_text=True))
+        self.assertEqual(favicon.status_code, 200)
+        self.assertEqual(favicon.mimetype, "image/svg+xml")
+        favicon.close()
+
     def test_create_job_persists_workspace_and_metadata(self) -> None:
         job_id = self.create_job()
         job_dir = self.outputs_dir / job_id
