@@ -1,5 +1,54 @@
 # 系统设计（第一阶段）
 
+## 项目架构图
+
+```mermaid
+graph TB
+    subgraph 前端层
+        UI[浏览器页面<br/>templates/ + static/]
+    end
+
+    subgraph API层
+        APP[app.py<br/>Flask 应用入口]
+        ROUTES[routes/api_routes.py<br/>HTTP 校验与响应]
+    end
+
+    subgraph 服务层
+        FILE[file_service.py<br/>文件名校验/保存]
+        JOB[job_service.py<br/>任务状态/持久化/删除]
+        ANALYSIS[analysis_service.py<br/>后台线程调度]
+        FFMPEG[ffmpeg_service.py<br/>FFmpeg 就绪检查]
+    end
+
+    subgraph CV引擎
+        VP[video_processor.py<br/>OpenCV 采样]
+        YOLO[yolo_detector.py<br/>YOLO 推理]
+        HS[highlight_scorer.py<br/>三项评分]
+    end
+
+    subgraph 持久化
+        OUTPUTS[outputs/ job_id /<br/>input/ keyframes/ result/<br/>job.json analysis_report.json]
+    end
+
+    subgraph 测试与文档
+        TESTS[tests/test_api.py<br/>16 单元测试]
+        DOCS[docs/<br/>PRD / API / 验收 / 演示]
+    end
+
+    UI -->|HTTP| APP
+    APP --> ROUTES
+    ROUTES --> FILE
+    ROUTES --> JOB
+    ROUTES --> ANALYSIS
+    ROUTES --> FFMPEG
+    ANALYSIS --> VP
+    VP --> YOLO
+    YOLO --> HS
+    HS --> OUTPUTS
+    FILE --> OUTPUTS
+    JOB --> OUTPUTS
+```
+
 ## 分层
 
 ```text
@@ -9,8 +58,13 @@ routes/api_routes.py       HTTP 校验与响应
         |
         +-- file_service.py       文件名、扩展名、空文件和保存
         +-- job_service.py        job.json、报告、目录、状态与删除
-        +-- analysis_service.py   受控后台线程与 CV 接入口
+        +-- analysis_service.py   受控后台线程 → cv_engine 桥接
         +-- ffmpeg_service.py     FFmpeg 就绪检查与粗剪接入口
+        |
+cv_engine/
+        +-- video_processor.py    OpenCV 帧采样
+        +-- yolo_detector.py      YOLO11n 推理
+        +-- highlight_scorer.py   三项评分与片段推荐
         |
 outputs/<job_id>/          本地文件系统持久化
 ```
@@ -41,7 +95,7 @@ failed  -> queued  （允许人工重试）
 
 路由线程先原子地把任务更新为 `queued`，再提交给最大 1～2 个工作线程的 `ThreadPoolExecutor`。后台只接收 job_id、`Path` 和普通字典，不接收 Flask `request`。开始执行时写 `running/started_at`；算法返回真实报告后写 `completed/completed_at/result_file`；任何算法异常均写 `failed/completed_at/error`。
 
-当前 `analyze_video(video_path, job_dir, settings)` 明确抛出 `NotImplementedError`，所以不会产生伪造结果。
+`analysis_service.py` 已通过桥接模式接入 `cv_engine`（`video_processor.py` → `yolo_detector.py` → `highlight_scorer.py`），YOLO11n 模型（`models/yolo11n.pt`，5.4MB）完成真实推理，输出包含目标检测、三项评分、关键帧和候选片段的完整 `analysis_report.json`。
 
 ## 重启恢复策略
 
@@ -56,8 +110,8 @@ failed  -> queued  （允许人工重试）
 - 损坏的任务 JSON 在列表中被跳过，详情/报告返回可读 JSON 错误；
 - 模型就绪和 FFmpeg 就绪均实时检查，不写死为 `true`。
 
-## 后续接入口
+## 当前状态与后续接入口
 
-- CV：实现 `services.analysis_service.analyze_video`，返回可 JSON 序列化的真实报告字典；
-- FFmpeg：实现 `services.ffmpeg_service.create_rough_cut`，生成真实文件后返回 `Path`；
-- 前端：轮询任务详情，完成后读取 `/report`，通过 `/review` 写回人工选择，再调用 `/rough-cut`。
+- CV：✅ 已接入 — `analysis_service.analyze_video` 桥接 `cv_engine`，返回完整 JSON 报告；
+- FFmpeg：⚠️ 未安装 — `ffmpeg_service.create_rough_cut` 仅做就绪检查，粗剪返回 501；
+- 前端：✅ 基本可用 — 轮询任务详情、关键帧展示、审核写回，粗剪触发待 FFmpeg 就绪后联调。
