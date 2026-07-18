@@ -22,9 +22,9 @@ class HighlightScorer:
         gray2 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
         diff = cv2.absdiff(gray1, gray2)
-        mean_diff = np.mean(diff)
+        mean_diff = float(np.mean(diff))
         
-        score = min(mean_diff / 50.0, 1.0)
+        score = float(min(mean_diff / 50.0, 1.0))
         return score
     
     def calculate_motion_score(self, frame, prev_frame):
@@ -39,8 +39,8 @@ class HighlightScorer:
                 gray1, gray2, None, 0.5, 3, 15, 3, 5, 1.2, 0
             )
             magnitude = np.sqrt(flow[..., 0]**2 + flow[..., 1]**2)
-            mean_magnitude = np.mean(magnitude)
-            score = min(mean_magnitude / 10.0, 1.0)
+            mean_magnitude = float(np.mean(magnitude))
+            score = float(min(mean_magnitude / 10.0, 1.0))
         except:
             score = 0.0
         

@@ -9,7 +9,12 @@ class YoloDetector:
     
     def _load_model(self):
         if not os.path.exists(self.model_path):
-            print(f"Model not found at {self.model_path}, downloading...")
+            raise FileNotFoundError(
+                f"Model file not found at {self.model_path}\n"
+                "Please manually download yolo11n.pt from:\n"
+                "https://github.com/ultralytics/assets/releases/download/v8.4.0/yolo11n.pt\n"
+                "and place it in the models/ directory."
+            )
         
         self.model = YOLO(self.model_path)
     
@@ -20,7 +25,7 @@ class YoloDetector:
         for result in results:
             if result.boxes is not None:
                 for box in result.boxes:
-                    x1, y1, x2, y2 = box.xyxy[0].tolist()
+                    x1, y1, x2, y2 = [float(v) for v in box.xyxy[0].tolist()]
                     confidence = float(box.conf[0])
                     class_id = int(box.cls[0])
                     class_name = self.model.names[class_id]

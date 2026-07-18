@@ -16,7 +16,9 @@ def index():
 
 @app.route('/api/health')
 def health():
-    return jsonify({'status': 'ok', 'model_ready': False})
+    model_path = os.path.join(BASE_DIR, 'models', 'yolo11n.pt')
+    model_ready = os.path.exists(model_path)
+    return jsonify({'status': 'ok', 'model_ready': model_ready})
 
 @app.route('/api/jobs', methods=['POST'])
 def create_job():
