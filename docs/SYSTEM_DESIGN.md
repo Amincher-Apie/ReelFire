@@ -59,5 +59,6 @@ failed  -> queued  （允许人工重试）
 ## 后续接入口
 
 - CV：`services.analysis_service.analyze_video` 已返回可 JSON 序列化的真实报告字典，并输出带 YOLO 框关键帧；
+- 算法增强：报告根据候选片段内的真实检测生成 `segment_tags`，并根据最高分关键帧生成不虚构事件的 `ai_cover_prompt`；
 - FFmpeg：`services.ffmpeg_service.create_rough_cut` 已生成真实文件并返回 `Path`；
 - 前端：轮询任务详情，完成后读取 `/report`，通过 `/review` 写回人工选择，再调用 `/rough-cut`。

@@ -130,6 +130,77 @@ class HighlightScorer:
             motion_score * 0.20
         )
 
+    def calculate_segment_tags(self, samples, segments):
+        """Summarize real YOLO classes observed inside each candidate segment."""
+        tag_stats = {}
+        for segment in segments:
+            segment_id = str(segment.get('id', 'segment'))
+            start = float(segment.get('start', 0.0))
+            end = float(segment.get('end', 0.0))
+            for sample in samples:
+                timestamp = float(sample.get('timestamp', -1.0))
+                if not start <= timestamp <= end:
+                    continue
+                for detected in sample.get('objects', []):
+                    class_name = str(detected.get('class', '')).strip()
+                    if not class_name:
+                        continue
+                    entry = tag_stats.setdefault(
+                        class_name,
+                        {'count': 0, 'max_confidence': 0.0, 'segments': []},
+                    )
+                    entry['count'] += 1
+                    confidence = float(detected.get('confidence', 0.0))
+                    entry['max_confidence'] = max(entry['max_confidence'], confidence)
+                    if segment_id not in entry['segments']:
+                        entry['segments'].append(segment_id)
+
+        ordered = sorted(tag_stats.items(), key=lambda item: (-item[1]['count'], item[0]))
+        normalized = {
+            class_name: {
+                **details,
+                'max_confidence': round(float(details['max_confidence']), 4),
+            }
+            for class_name, details in ordered
+        }
+        return {
+            'total_tags': len(normalized),
+            'tags': normalized,
+            'summary': [f"{name}({details['count']})" for name, details in ordered],
+        }
+
+    def generate_cover_prompt(self, keyframe):
+        """Generate an honest cover description from the selected real detections."""
+        if not keyframe:
+            return 'FPS 游戏精彩片段封面，突出高速对战画面与 ReelFire 标识'
+
+        timestamp = float(keyframe.get('timestamp', 0.0))
+        score = float(keyframe.get('highlight_score', 0.0))
+        class_counts = {}
+        for detected in keyframe.get('objects', []):
+            class_name = str(detected.get('class', '')).strip()
+            if class_name:
+                class_counts[class_name] = class_counts.get(class_name, 0) + 1
+
+        if not class_counts:
+            return (
+                f'FPS 游戏精彩片段封面，取自 {timestamp:.1f} 秒的高变化画面，'
+                f'综合分数 {score:.3f}，不添加未检测到的目标'
+            )
+
+        objects = '、'.join(
+            f'{class_name}×{count}'
+            for class_name, count in sorted(
+                class_counts.items(),
+                key=lambda item: (-item[1], item[0]),
+            )[:3]
+        )
+        return (
+            f'FPS 游戏精彩片段封面，取自 {timestamp:.1f} 秒，'
+            f'突出真实检测目标 {objects}，综合分数 {score:.3f}，'
+            '深色电竞风格，不虚构击杀或残局事件'
+        )
+
     def analyze(self, frames, detections_list, timestamps, job_id):
         keyframes = []
         prev_frame = None

@@ -111,9 +111,11 @@ def main() -> int:
         assert normal_job["status"] == "completed", normal_job.get("error")
         normal_report = client.get(f"/api/jobs/{normal_job_id}/report").get_json()["report"]
         assert normal_report["keyframes"] and normal_report["segments"]
+        assert "segment_tags" in normal_report and "ai_cover_prompt" in normal_report
         return (
             f"job={normal_job_id}, sampled={normal_report['total_sampled_frames']}, "
-            f"keyframes={len(normal_report['keyframes'])}"
+            f"keyframes={len(normal_report['keyframes'])}, "
+            f"tags={normal_report['segment_tags']['total_tags']}"
         )
 
     def n04() -> str:

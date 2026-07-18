@@ -96,6 +96,15 @@ async function main() {
       path: path.join(screenshotDir, '05_detection_keyframe.png'),
     });
 
+    await page.locator('button', { hasText: '查看 JSON 报告' }).click();
+    await page.waitForSelector('#report-modal', { state: 'visible' });
+    const browserReport = JSON.parse(await page.textContent('#report-content'));
+    if (!browserReport.segment_tags || !browserReport.ai_cover_prompt) {
+      throw new Error('analysis report is missing segment_tags or ai_cover_prompt');
+    }
+    await page.locator('#report-modal button', { hasText: '×' }).click();
+    await page.waitForSelector('#report-modal', { state: 'hidden' });
+
     await page.locator('.keyframe-card').first().locator('.kf-decision button').nth(1).click();
     await page.locator('.keyframe-card').nth(1).locator('.kf-label-select').selectOption('clutch');
     await page.locator('.keyframe-card').nth(1).locator('.kf-note').fill('浏览器验收：保留残局候选');

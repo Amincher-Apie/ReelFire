@@ -78,5 +78,41 @@ class TestHighlightScorer(unittest.TestCase):
             self.assertGreaterEqual(seg['start'], 0)
             self.assertLessEqual(seg['end'], 60.0)
 
+    def test_calculate_segment_tags_uses_real_detections(self):
+        scorer = HighlightScorer()
+        samples = [
+            {
+                'timestamp': 5.0,
+                'objects': [
+                    {'class': 'person', 'confidence': 0.91},
+                    {'class': 'person', 'confidence': 0.76},
+                ],
+            },
+            {
+                'timestamp': 20.0,
+                'objects': [{'class': 'car', 'confidence': 0.88}],
+            },
+        ]
+        tags = scorer.calculate_segment_tags(
+            samples,
+            [{'id': 'seg_001', 'start': 0.0, 'end': 10.0}],
+        )
+        self.assertEqual(tags['total_tags'], 1)
+        self.assertEqual(tags['tags']['person']['count'], 2)
+        self.assertEqual(tags['tags']['person']['segments'], ['seg_001'])
+        self.assertEqual(tags['summary'], ['person(2)'])
+
+    def test_generate_cover_prompt_does_not_invent_fps_events(self):
+        scorer = HighlightScorer()
+        prompt = scorer.generate_cover_prompt(
+            {
+                'timestamp': 12.5,
+                'highlight_score': 0.82,
+                'objects': [{'class': 'person'}, {'class': 'person'}],
+            }
+        )
+        self.assertIn('person×2', prompt)
+        self.assertIn('不虚构击杀或残局事件', prompt)
+
 if __name__ == '__main__':
     unittest.main()

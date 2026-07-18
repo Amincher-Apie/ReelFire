@@ -236,6 +236,8 @@ def analyze_video(
         "source_keyframes": [best["id"]],
         "order": 1,
     }
+    segment_tags = scorer.calculate_segment_tags(samples, [segment])
+    ai_cover_prompt = scorer.generate_cover_prompt(best)
 
     contact_sheet = job_dir / "result" / "contact_sheet.jpg"
     contact_sheet_ready = _save_contact_sheet(selected, frames, contact_sheet)
@@ -254,6 +256,8 @@ def analyze_video(
         "samples": samples,
         "keyframes": keyframes,
         "segments": [segment],
+        "segment_tags": segment_tags,
+        "ai_cover_prompt": ai_cover_prompt,
         "recommended_clip": {
             "start_time": start,
             "end_time": end,

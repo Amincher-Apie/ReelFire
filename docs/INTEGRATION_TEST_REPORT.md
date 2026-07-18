@@ -9,7 +9,7 @@
 | Python 依赖 | `pip check` 通过，无损坏依赖 |
 | Python 语法 | `py_compile` 通过 |
 | JavaScript 语法 | `node --check static/app.js` 通过 |
-| 自动化测试 | 35/35 通过 |
+| 自动化测试 | 37/37 通过 |
 | 实际 HTTP 首页 | 200，包含 ReelFire 上传表单 |
 | 实际健康接口 | 200，模型与 FFmpeg 均 ready |
 | OpenCV 真实采样 | 通过 |
@@ -48,7 +48,7 @@ python -m pip check
 结果：
 
 ```text
-Ran 35 tests
+Ran 37 tests
 OK
 No broken requirements found.
 ```
@@ -116,7 +116,7 @@ FFmpeg 使用可选音轨映射 `0:a?`，源视频没有音频时不会导致任
 
 - 项目最终使用通用 `yolo11n.pt`，不自训练；其 FPS 专用事件识别能力有限，报告只展示真实 COCO 类别；
 - 其他成员尚未上传的代码没有进入本分支；
-- 多片段合并、1:1、ZIP 和封面 Prompt 仍属于 P1；
+- 多片段合并、1:1 和交付 ZIP 仍属于 P1；片段标签与封面描述已写入报告；
 - 当前真实联调结果保存在本机 `outputs/integration_smoke/`，该目录被 `.gitignore` 排除；
 - 模型文件被 `.gitignore` 排除，不会推送到 GitHub；`setup_environment.py` 会自动下载并校验；
 - 第一轮 QA 报告中的占位结论保留为历史记录，以本报告作为当前状态依据。
@@ -129,5 +129,5 @@ FFmpeg 使用可选音轨映射 `0:a?`，源视频没有音频时不会导致任
 2. 确认分支是否基于当前 `main/Test-Glob`；
 3. 有共同祖先时正常 merge；
 4. 无共同祖先时只提取有效提交或文件；
-5. 每次接入后重新执行 35 项测试和真实视频烟雾测试；
+5. 每次接入后重新执行 37 项测试和真实视频烟雾测试；
 6. 在所有成员代码到齐并通过最终验收前，不将 `Test-Glob` 合并到 `main`。
