@@ -224,7 +224,7 @@ created -> queued -> running -> completed
   "started_at": "2026-07-18T10:15:31+08:00",
   "completed_at": "2026-07-18T10:16:08+08:00",
   "settings": {
-    "sample_interval": 1.0,
+    "sample_interval": 0.5,
     "target_duration": 30.0,
     "output_aspect": "16:9"
   },
@@ -376,7 +376,7 @@ created -> queued -> running -> completed
 
 ### 8.1 视频采样
 
-- 默认按时间采样，例如每 `1.0s` 一帧，不依赖固定帧号间隔；
+- 默认按时间采样，每 `0.5s` 一帧，不依赖固定帧号间隔；
 - 必须处理 FPS 为 0、无法解码、空视频和时长异常；
 - 保存原始时间戳，所有片段边界均以秒为单位；
 - 长视频可以限制最大分析帧数，并在报告中记录真实参数。

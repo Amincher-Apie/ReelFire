@@ -54,7 +54,13 @@ highlight_score =
 | 测试工程师 | 正常与异常测试、FFmpeg 边界协测、Bug 记录、交付检查和测试报告 |
 
 
-更完整的模块契约、单日时间表、联调顺序、测试要求和演示流程见 [`docs/TEAM_GUIDE.md`](docs/TEAM_GUIDE.md)。
+## 项目文档
+
+- [`docs/PRD.md`](docs/PRD.md)：FPS 用户场景、MVP 范围、评分规则和功能需求；
+- [`docs/REQUIREMENTS_BOARD.md`](docs/REQUIREMENTS_BOARD.md)：按角色划分的 P0/P1 需求看板；
+- [`docs/ACCEPTANCE_CHECKLIST.md`](docs/ACCEPTANCE_CHECKLIST.md)：硬性条件、正常/异常和边界验收；
+- [`docs/DEMO_FLOW.md`](docs/DEMO_FLOW.md)：8 分钟演示流程和现场兜底方案；
+- [`docs/TEAM_GUIDE.md`](docs/TEAM_GUIDE.md)：模块契约、单日时间表和协作规范。
 
 ## 获取项目
 
