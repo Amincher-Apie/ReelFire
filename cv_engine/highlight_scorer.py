@@ -5,18 +5,21 @@ import json
 
 class HighlightScorer:
     def __init__(self):
-        self.object_weight = 0.45
-        self.scene_change_weight = 0.35
-        self.motion_weight = 0.20
+        self.object_weight = 0.15
+        self.scene_change_weight = 0.15
+        self.motion_weight = 0.10
+        self.kill_notification_weight = 0.60
     
-    def calculate_object_score(self, detections, max_objects=20):
+    def calculate_object_score(self, detections, max_objects=5):
         count = len(detections)
+        if count == 0:
+            return 0.1
         score = min(count / max_objects, 1.0)
         return score
     
     def calculate_scene_change_score(self, frame, prev_frame):
         if prev_frame is None:
-            return 0.0
+            return 0.3
         
         gray1 = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
         gray2 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -24,12 +27,12 @@ class HighlightScorer:
         diff = cv2.absdiff(gray1, gray2)
         mean_diff = float(np.mean(diff))
         
-        score = float(min(mean_diff / 50.0, 1.0))
+        score = float(min(mean_diff / 20.0, 1.0))
         return score
     
     def calculate_motion_score(self, frame, prev_frame):
         if prev_frame is None:
-            return 0.0
+            return 0.2
         
         gray1 = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
         gray2 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -40,17 +43,93 @@ class HighlightScorer:
             )
             magnitude = np.sqrt(flow[..., 0]**2 + flow[..., 1]**2)
             mean_magnitude = float(np.mean(magnitude))
-            score = float(min(mean_magnitude / 10.0, 1.0))
+            score = float(min(mean_magnitude / 5.0, 1.0))
         except:
-            score = 0.0
+            score = 0.2
         
         return score
     
-    def calculate_highlight_score(self, object_score, scene_change_score, motion_score):
+    def calculate_kill_notification_score(self, frame):
+        h, w = frame.shape[:2]
+        
+        roi_y_start = int(h * 0.55)
+        roi_y_end = int(h * 0.75)
+        roi_x_start = int(w * 0.25)
+        roi_x_end = int(w * 0.75)
+        
+        roi = frame[roi_y_start:roi_y_end, roi_x_start:roi_x_end]
+        roi_h, roi_w = roi.shape[:2]
+        
+        hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+        
+        lower_red1 = np.array([0, 40, 60])
+        upper_red1 = np.array([15, 255, 255])
+        lower_red2 = np.array([160, 40, 60])
+        upper_red2 = np.array([180, 255, 255])
+        
+        mask1 = cv2.inRange(hsv, lower_red1, upper_red1)
+        mask2 = cv2.inRange(hsv, lower_red2, upper_red2)
+        red_mask = mask1 | mask2
+        
+        red_pixels = np.sum(red_mask > 0)
+        total_pixels = roi_h * roi_w
+        red_ratio = red_pixels / total_pixels
+        
+        bgr_mean = np.mean(roi, axis=(0, 1))
+        hsv_mean = np.mean(hsv, axis=(0, 1))
+        
+        if red_ratio < 0.005:
+            print(f"[KILL SKIP] red_ratio={red_ratio:.4f} < 0.005, BGR mean={bgr_mean}, HSV mean={hsv_mean}")
+            return 0.0
+        
+        contours, _ = cv2.findContours(red_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        has_valid_rect = False
+        best_contour_info = None
+        for contour in contours:
+            area = cv2.contourArea(contour)
+            if area < 50:
+                continue
+            
+            x, y, w_c, h_c = cv2.boundingRect(contour)
+            aspect_ratio = w_c / float(h_c)
+            
+            if 1.0 < aspect_ratio < 8.0:
+                has_valid_rect = True
+                best_contour_info = f"area={area:.1f}, aspect={aspect_ratio:.2f}"
+                break
+        
+        if not has_valid_rect:
+            print(f"[KILL SKIP] No valid rectangle found, red_pixels={red_pixels}, contours={len(contours)}")
+            return 0.0
+        
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        masked_gray = cv2.bitwise_and(gray, gray, mask=red_mask)
+        
+        _, white_mask = cv2.threshold(masked_gray, 160, 255, cv2.THRESH_BINARY)
+        white_pixels = np.sum(white_mask > 0)
+        
+        if white_pixels < 15:
+            print(f"[KILL SKIP] white_pixels={white_pixels} < 15")
+            return 0.0
+        
+        text_ratio = white_pixels / red_pixels
+        
+        if text_ratio < 0.02:
+            print(f"[KILL SKIP] text_ratio={text_ratio:.4f} < 0.02")
+            return 0.0
+        
+        score = min(red_ratio * text_ratio * 100, 1.0)
+        
+        print(f"[KILL DETECTED] ROI: {roi_w}x{roi_h}, red_ratio={red_ratio:.4f}, white_pixels={white_pixels}, text_ratio={text_ratio:.4f}, score={score:.4f}, contour={best_contour_info}")
+        
+        return score
+    
+    def calculate_highlight_score(self, object_score, scene_change_score, motion_score, kill_notification_score=0.0):
         return (
-            object_score * self.object_weight +
-            scene_change_score * self.scene_change_weight +
-            motion_score * self.motion_weight
+            object_score * 0.45 +
+            scene_change_score * 0.35 +
+            motion_score * 0.20
         )
     
     def analyze(self, frames, detections_list, timestamps, job_id):
@@ -61,7 +140,8 @@ class HighlightScorer:
             object_score = self.calculate_object_score(detections)
             scene_change_score = self.calculate_scene_change_score(frame, prev_frame)
             motion_score = self.calculate_motion_score(frame, prev_frame)
-            highlight_score = self.calculate_highlight_score(object_score, scene_change_score, motion_score)
+            kill_notification_score = self.calculate_kill_notification_score(frame)
+            highlight_score = self.calculate_highlight_score(object_score, scene_change_score, motion_score, kill_notification_score)
             
             keyframe_entry = {
                 'frame_index': i,
@@ -69,6 +149,7 @@ class HighlightScorer:
                 'object_score': round(object_score, 4),
                 'scene_change_score': round(scene_change_score, 4),
                 'motion_score': round(motion_score, 4),
+                'kill_notification_score': round(kill_notification_score, 4),
                 'highlight_score': round(highlight_score, 4),
                 'objects': [{
                     'class': d['class'],
@@ -94,20 +175,59 @@ class HighlightScorer:
             'scoring_weights': {
                 'object_weight': self.object_weight,
                 'scene_change_weight': self.scene_change_weight,
-                'motion_weight': self.motion_weight
+                'motion_weight': self.motion_weight,
+                'kill_notification_weight': self.kill_notification_weight
             }
         }
         
         return result
     
-    def _select_segments(self, sorted_keyframes, video_duration, target_duration=30.0, min_segment_length=5.0):
+    def _select_segments(self, sorted_keyframes, video_duration, target_duration=60.0, min_segment_length=3.0):
         segments = []
         used_time_ranges = []
+        shot_interval = 8.0
+        
+        if target_duration > video_duration:
+            target_duration = video_duration
+        
+        if not sorted_keyframes:
+            if video_duration >= min_segment_length:
+                mid = video_duration / 2
+                return [{
+                    'start': round(max(0, mid - min_segment_length / 2), 2),
+                    'end': round(min(video_duration, mid + min_segment_length / 2), 2),
+                    'score': 0.5,
+                    'center_timestamp': round(mid, 2)
+                }]
+            else:
+                return [{
+                    'start': 0.0,
+                    'end': round(video_duration, 2),
+                    'score': 0.5,
+                    'center_timestamp': round(video_duration / 2, 2)
+                }]
+        
+        selected_centers = []
         
         for keyframe in sorted_keyframes:
             timestamp = keyframe['timestamp']
-            segment_start = max(0, timestamp - min_segment_length / 2)
-            segment_end = min(video_duration, timestamp + min_segment_length / 2)
+            half_length = min_segment_length / 2
+            
+            if timestamp <= half_length:
+                segment_start = 0.0
+                segment_end = min(video_duration, half_length * 2)
+            elif timestamp >= video_duration - half_length:
+                segment_end = video_duration
+                segment_start = max(0, video_duration - half_length * 2)
+            else:
+                segment_start = timestamp - half_length
+                segment_end = timestamp + half_length
+            
+            segment_start = max(0.0, segment_start)
+            segment_end = min(video_duration, segment_end)
+            
+            if segment_end <= segment_start:
+                continue
             
             overlap = False
             for (used_start, used_end) in used_time_ranges:
@@ -115,19 +235,70 @@ class HighlightScorer:
                     overlap = True
                     break
             
-            if not overlap:
+            same_shot = False
+            for center in selected_centers:
+                if abs(timestamp - center) < shot_interval:
+                    same_shot = True
+                    break
+            
+            if not overlap and not same_shot:
                 segments.append({
                     'start': round(segment_start, 2),
                     'end': round(segment_end, 2),
-                    'score': keyframe['highlight_score'],
+                    'score': float(keyframe['highlight_score']),
                     'center_timestamp': round(timestamp, 2)
                 })
                 used_time_ranges.append((segment_start, segment_end))
+                selected_centers.append(timestamp)
             
             total_selected = sum(s['end'] - s['start'] for s in segments)
             if total_selected >= target_duration:
                 break
         
+        if not segments:
+            high_score_keyframes = [k for k in sorted_keyframes if k['highlight_score'] > 0.1]
+            if high_score_keyframes:
+                timestamp = high_score_keyframes[0]['timestamp']
+                half_length = min_segment_length / 2
+                segment_start = max(0.0, timestamp - half_length)
+                segment_end = min(video_duration, timestamp + half_length)
+                segments.append({
+                    'start': round(segment_start, 2),
+                    'end': round(segment_end, 2),
+                    'score': float(high_score_keyframes[0]['highlight_score']),
+                    'center_timestamp': round(timestamp, 2)
+                })
+            else:
+                mid = video_duration / 2
+                segments.append({
+                    'start': round(max(0, mid - min_segment_length / 2), 2),
+                    'end': round(min(video_duration, mid + min_segment_length / 2), 2),
+                    'score': float(sorted_keyframes[0]['highlight_score']),
+                    'center_timestamp': round(mid, 2)
+                })
+        
+        if len(segments) == 1 and segments[0]['end'] - segments[0]['start'] < target_duration and video_duration > target_duration:
+            current_end = segments[0]['end']
+            if current_end < video_duration:
+                remaining_duration = target_duration - (current_end - segments[0]['start'])
+                new_end = min(video_duration, current_end + remaining_duration)
+                segments[0]['end'] = round(new_end, 2)
+                segments[0]['center_timestamp'] = (segments[0]['start'] + segments[0]['end']) / 2
+        
         segments.sort(key=lambda x: x['start'])
         
-        return segments
+        merged_segments = []
+        for seg in segments:
+            if not merged_segments:
+                merged_segments.append(seg.copy())
+            else:
+                last = merged_segments[-1]
+                if seg['start'] < last['end']:
+                    last['end'] = max(last['end'], seg['end'])
+                    if seg['score'] > last['score']:
+                        last['score'] = seg['score']
+                    last['center_timestamp'] = (last['start'] + last['end']) / 2
+                else:
+                    merged_segments.append(seg.copy())
+        
+        return merged_segments

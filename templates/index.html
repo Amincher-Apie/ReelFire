@@ -217,6 +217,11 @@
                     <div class="actions">
                         ${job.status === 'completed' ? `
                             <button onclick="viewReport('${job.job_id}')">查看报告</button>
+                            <select id="aspect_${job.job_id}" style="margin-right: 5px; padding: 5px; font-size: 12px; border-radius: 4px; border: 1px solid #ddd;">
+                                <option value="16:9">横屏 16:9</option>
+                                <option value="9:16">竖屏 9:16</option>
+                                <option value="1:1">方形 1:1</option>
+                            </select>
                             <button onclick="roughCut('${job.job_id}')">生成粗剪</button>
                         ` : ''}
                         <button onclick="deleteJob('${job.job_id}')">删除</button>
@@ -248,11 +253,15 @@
         
         async function roughCut(jobId) {
             try {
-                const response = await fetch(`/api/jobs/${jobId}/rough-cut`, { method: 'POST' });
+                const aspectRatio = document.getElementById(`aspect_${jobId}`).value;
+                const formData = new FormData();
+                formData.append('aspect_ratio', aspectRatio);
+                
+                const response = await fetch(`/api/jobs/${jobId}/rough-cut`, { method: 'POST', body: formData });
                 const data = await response.json();
                 
                 if (data.ok) {
-                    alert('粗剪视频已生成！');
+                    alert(`粗剪视频已生成！输出规格: ${data.aspect_ratio}`);
                 } else {
                     showError(data.error);
                 }
@@ -286,6 +295,12 @@
                         <p><strong>任务ID:</strong> ${report.job_id}</p>
                         <p><strong>采样帧数:</strong> ${report.total_frames}</p>
                         <p><strong>采样间隔:</strong> ${report.sample_interval}秒</p>
+                        ${report.video_info ? `
+                            <p><strong>视频时长:</strong> ${report.video_info.duration.toFixed(1)}秒</p>
+                            <p><strong>分辨率:</strong> ${report.video_info.width}×${report.video_info.height}</p>
+                            <p><strong>帧率:</strong> ${report.video_info.fps.toFixed(1)} FPS</p>
+                            <p><strong>原音频:</strong> ${report.video_info.has_audio ? '✓ 有音频' : '✗ 无音频'}</p>
+                        ` : ''}
                     </div>
                     
                     <div class="result-section">
