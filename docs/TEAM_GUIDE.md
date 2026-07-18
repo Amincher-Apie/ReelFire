@@ -89,17 +89,17 @@ ffprobe -version
 
 ### 3.1 ReelFire 五人分工
 
-| 成员 | 角色 | 主要负责模块 | 当天必须产出 |
-|---|---|---|---|
-| 王利翔 | 组长、产品负责人 | 需求、验收、进度、接口变更、集成和演示 | `PRD.md`、任务看板、验收清单、演示稿 |
-| 韩玖原 | CV 算法工程师 | 采样、YOLO、评分、片段边界和 FFmpeg | CV/视频代码、模型说明、算法验证记录 |
-| 邓一道 | 后端工程师 | Flask API、任务状态、历史任务、文件安全 | API 代码、`API.md`、至少 2 个接口测试 |
-| 唐鹏 | 前端工程师 | 上传、轮询、关键帧审核、片段调整 | 页面、交互说明、页面截图 |
-| 姚博 | 测试工程师 | 测试、FFmpeg 边界协测、Bug 和交付检查 | 测试报告、Bug 记录、交付检查 |
+| 角色 | 主要负责模块 | 当天必须产出 |
+|---|---|---|
+| 组长、产品负责人 | 需求、验收、进度、接口变更、集成和演示 | `PRD.md`、任务看板、验收清单、演示稿 |
+| CV 算法工程师 | 采样、YOLO、评分、片段边界和 FFmpeg | CV/视频代码、模型说明、算法验证记录 |
+| 后端工程师 | Flask API、任务状态、历史任务、文件安全 | API 代码、`API.md`、至少 2 个接口测试 |
+| 前端工程师 | 上传、轮询、关键帧审核、片段调整 | 页面、交互说明、页面截图 |
+| 测试工程师 | 测试、FFmpeg 边界协测、Bug 和交付检查 | 测试报告、Bug 记录、交付检查 |
 
 ### 3.2 视频模块协作
 
-本组不单设视频工程师。韩玖原负责视频片段和 FFmpeg 核心实现，姚博负责片段边界、有音频/无音频和输出规格测试，邓一道负责将视频能力封装为后端接口。
+本组不单设视频工程师。CV 算法工程师负责视频片段和 FFmpeg 核心实现，测试工程师负责片段边界、有音频/无音频和输出规格测试，后端工程师负责将视频能力封装为后端接口。
 
 ### 3.3 公共责任
 
@@ -165,7 +165,7 @@ ReelFire/
 
 - `routes/`、`services/job_service.py`：后端工程师主责；
 - `cv_core/`、`services/analysis_service.py`：CV 工程师主责；
-- `services/ffmpeg_service.py`：韩玖原主责，姚博协助边界和音轨验证；
+- `services/ffmpeg_service.py`：CV 算法工程师主责，测试工程师协助边界和音轨验证；
 - `templates/`、`static/`：前端工程师主责；
 - `tests/` 和测试类文档：测试工程师主责；
 - 接口和 JSON 契约属于全组公共约定，不能单方改变。
@@ -423,11 +423,11 @@ created -> queued -> running -> completed
 
 ```text
 main
-├─ feature/cv-analysis       # 韩玖原
-├─ feature/backend-api       # 邓一道
-├─ feature/frontend          # 唐鹏
-├─ test/qa-delivery          # 姚博
-└─ docs/project-management   # 王利翔
+├─ feature/cv-analysis       # CV 算法工程师
+├─ feature/backend-api       # 后端工程师
+├─ feature/frontend          # 前端工程师
+├─ test/qa-delivery          # 测试工程师
+└─ docs/project-management   # 组长、产品负责人
 ```
 
 如果没有远程仓库，也应在本地使用分支和清晰提交记录。禁止在共享主分支上同时直接修改同一文件。

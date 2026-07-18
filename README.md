@@ -27,15 +27,15 @@ highlight_score =
   + motion_score * 0.20
 ```
 
-## 团队成员
+## 团队职责
 
-| 成员 | 角色 | 主要职责 |
-|---|---|---|
-| Amincher | 组长、产品负责人 | 需求与验收、进度协调、接口变更确认、项目集成、演示组织 |
-|  | CV 算法工程师 | OpenCV 采样、YOLO 推理与训练、三项评分、关键帧去重、片段边界及 FFmpeg 算法 |
-|  | 后端工程师 | Flask API、异步任务、任务状态、JSON 持久化、历史任务和错误处理 |
-|  | 前端工程师 | 上传与状态轮询、结果展示、关键帧审核、片段调整和页面状态 |
-|  | 测试工程师 | 正常与异常测试、FFmpeg 边界协测、Bug 记录、交付检查和测试报告 |
+| 角色 | 主要职责 |
+|---|---|
+| 组长、产品负责人 | 需求与验收、进度协调、接口变更确认、项目集成、演示组织 |
+| CV 算法工程师 | OpenCV 采样、YOLO 推理与训练、三项评分、关键帧去重、片段边界及 FFmpeg 算法 |
+| 后端工程师 | Flask API、异步任务、任务状态、JSON 持久化、历史任务和错误处理 |
+| 前端工程师 | 上传与状态轮询、结果展示、关键帧审核、片段调整和页面状态 |
+| 测试工程师 | 正常与异常测试、FFmpeg 边界协测、Bug 记录、交付检查和测试报告 |
 
 
 更完整的模块契约、单日时间表、联调顺序、测试要求和演示流程见 [`docs/TEAM_GUIDE.md`](docs/TEAM_GUIDE.md)。
@@ -167,10 +167,10 @@ ReelFire/
 
 模块归属：
 
-- `routes/`、`services/job_service.py`：；
-- `cv_core/`、`services/analysis_service.py`、`services/ffmpeg_service.py`：；
-- `templates/`、`static/`：；
-- `tests/`、`docs/TEST_REPORT.md`、`docs/BUG_RECORD.md`：；
+- `routes/`、`services/job_service.py`：后端工程师；
+- `cv_core/`、`services/analysis_service.py`、`services/ffmpeg_service.py`：CV 算法工程师；
+- `templates/`、`static/`：前端工程师；
+- `tests/`、`docs/TEST_REPORT.md`、`docs/BUG_RECORD.md`：测试工程师；
 - `README.md`、PRD、验收清单、整体集成：组长组织，全员共同维护。
 
 ## Git 协作
@@ -179,11 +179,11 @@ ReelFire/
 
 ```text
 main
-├─ feature/cv-analysis       
-├─ feature/backend-api       
-├─ feature/frontend          
-├─ test/qa-delivery          
-└─ docs/project-management   
+├─ feature/cv-analysis       # CV 算法工程师
+├─ feature/backend-api       # 后端工程师
+├─ feature/frontend          # 前端工程师
+├─ test/qa-delivery          # 测试工程师
+└─ docs/project-management   # 组长、产品负责人
 ```
 
 提交信息建议采用：
