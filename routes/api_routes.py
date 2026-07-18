@@ -263,7 +263,7 @@ def health():
         ok=True,
         status="ok",
         service="reelfire",
-        version="0.2.0-test-glob",
+        version="1.0.0",
         model_ready=model_path.is_file(),
         ffmpeg_ready=is_ffmpeg_available(),
     )

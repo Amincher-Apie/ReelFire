@@ -4,7 +4,7 @@
 
 ## 1. 环境与启动
 
-- [x] README 使用 `git clone --branch Test-Glob --single-branch`，不依赖固定绝对路径；
+- [x] README 默认克隆最终 `main`，不依赖固定绝对路径；
 - [x] `setup_environment.py` 可复用非 base Conda 环境或创建 Python 3.11 环境；
 - [x] PyTorch 按 NVIDIA CUDA、macOS/MPS 或 CPU 自适应安装；
 - [x] 官方 `yolo11n.pt` 自动下载并执行 SHA-256 校验；

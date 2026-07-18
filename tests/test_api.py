@@ -52,6 +52,7 @@ class ApiTestCase(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(payload["ok"])
+        self.assertEqual(payload["version"], "1.0.0")
         self.assertFalse(payload["model_ready"])
 
     def test_frontend_and_favicon_are_available(self) -> None:

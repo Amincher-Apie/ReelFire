@@ -9,7 +9,7 @@ ReelFire 是一个面向 CS:GO、CS2、Valorant 等 FPS 对战录像的智能精
 已安装 Miniconda 或 Anaconda 的成员，可以直接执行：
 
 ```powershell
-git clone --branch Test-Glob --single-branch https://github.com/Amincher-Apie/ReelFire.git
+git clone https://github.com/Amincher-Apie/ReelFire.git
 cd ReelFire
 python setup_environment.py
 ```
@@ -67,7 +67,7 @@ highlight_score =
 每位成员可以把仓库克隆到自己的任意工作目录，不需要使用某个固定的绝对路径：
 
 ```powershell
-git clone --branch Test-Glob --single-branch https://github.com/Amincher-Apie/ReelFire.git
+git clone https://github.com/Amincher-Apie/ReelFire.git
 cd ReelFire
 ```
 
