@@ -167,11 +167,11 @@ ReelFire/
 
 模块归属：
 
-- `routes/`、`services/job_service.py`：邓一道；
-- `cv_core/`、`services/analysis_service.py`、`services/ffmpeg_service.py`：韩玖原；
-- `templates/`、`static/`：唐鹏；
-- `tests/`、`docs/TEST_REPORT.md`、`docs/BUG_RECORD.md`：姚博；
-- `README.md`、PRD、验收清单、整体集成：王利翔组织，全员共同维护。
+- `routes/`、`services/job_service.py`：；
+- `cv_core/`、`services/analysis_service.py`、`services/ffmpeg_service.py`：；
+- `templates/`、`static/`：；
+- `tests/`、`docs/TEST_REPORT.md`、`docs/BUG_RECORD.md`：；
+- `README.md`、PRD、验收清单、整体集成：组长组织，全员共同维护。
 
 ## Git 协作
 
@@ -179,11 +179,11 @@ ReelFire/
 
 ```text
 main
-├─ feature/cv-analysis       # 韩玖原
-├─ feature/backend-api       # 邓一道
-├─ feature/frontend          # 唐鹏
-├─ test/qa-delivery          # 姚博
-└─ docs/project-management   # 王利翔
+├─ feature/cv-analysis       
+├─ feature/backend-api       
+├─ feature/frontend          
+├─ test/qa-delivery          
+└─ docs/project-management   
 ```
 
 提交信息建议采用：
@@ -196,7 +196,7 @@ test(video): cover clip boundary cases
 docs(prd): define acceptance criteria
 ```
 
-接口或 JSON 字段需要调整时，应先通知王利翔，并同步更新 `docs/API.md`，避免前后端和算法各自使用不同格式。
+接口或 JSON 字段需要调整时，应先通知组长，并同步更新 `docs/API.md`，避免前后端和算法各自使用不同格式。
 
 ## 启动方式
 
