@@ -1,0 +1,15 @@
+# ReelFire application dependencies
+# Python: >=3.10,<3.13 (3.11 recommended)
+#
+# torch and torchvision are intentionally not pinned here. Run
+# `python setup_environment.py`; it installs a build suited to the current
+# NVIDIA GPU, Apple Silicon/MPS, or CPU before installing this file.
+# FFmpeg/ffprobe are external executables and are also handled by the script.
+
+Flask==3.1.3
+numpy==2.4.6
+opencv-python==4.13.0.92
+Pillow==12.3.0
+ultralytics==8.4.95
+PyYAML==6.0.3
+requests==2.34.2
