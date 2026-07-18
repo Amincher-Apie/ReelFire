@@ -21,6 +21,24 @@ async function fillJobForm(page, { name, video, interval = '2', ratio = '16:9' }
   await page.selectOption('#output-aspect', ratio);
 }
 
+async function createSecurityProbeJob(page, projectName) {
+  return page.evaluate(async (name) => {
+    const bytes = new Uint8Array(48);
+    bytes.set([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]);
+    const form = new FormData();
+    form.append('file', new File([bytes], 'security-probe.mp4', { type: 'video/mp4' }));
+    form.append('project_name', name);
+    form.append('game_type', 'csgo');
+    form.append('sample_interval', '2');
+    form.append('target_duration', '15');
+    form.append('output_ratio', '16:9');
+    const response = await fetch('/api/jobs', { method: 'POST', body: form });
+    const payload = await response.json();
+    if (!response.ok || !payload.ok) throw new Error(payload.error || 'security probe job creation failed');
+    return payload.job_id;
+  }, projectName);
+}
+
 async function main() {
   fs.mkdirSync(screenshotDir, { recursive: true });
   const browser = await chromium.launch({
@@ -65,6 +83,21 @@ async function main() {
     await page.waitForSelector('#task-list-loading', { state: 'hidden' });
     await page.unroute('**/api/jobs');
 
+    const projectNameProbe = '<img src=x onerror="window.__reelfireProjectXss=1">';
+    const securityJobId = await createSecurityProbeJob(page, projectNameProbe);
+    await page.click('#nav-task-list');
+    await page.waitForSelector('#task-list-table', { state: 'visible' });
+    const securityRow = page.locator('#task-list-body tr').filter({ hasText: projectNameProbe });
+    await securityRow.waitFor({ state: 'visible' });
+    const projectNameIsSafe = await page.evaluate(() => (
+      !window.__reelfireProjectXss && !document.querySelector('#task-list-body img[src="x"]')
+    ));
+    if (!projectNameIsSafe) throw new Error('stored XSS executed from project_name');
+    await page.evaluate(async (jobId) => {
+      const response = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+      if (!response.ok) throw new Error('security probe cleanup failed');
+    }, securityJobId);
+
     await page.click('#nav-new-task');
     await fillJobForm(page, {
       name: 'CS2 浏览器验收-正常流程',
@@ -107,12 +140,26 @@ async function main() {
 
     await page.locator('.keyframe-card').first().locator('.kf-decision button').nth(1).click();
     await page.locator('.keyframe-card').nth(1).locator('.kf-label-select').selectOption('clutch');
+    const noteProbe = '"><img src=x onerror="window.__reelfireNoteXss=1">';
+    await page.locator('.keyframe-card').nth(1).locator('.kf-note').fill(noteProbe);
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes('/review') && response.request().method() === 'PATCH' && response.status() === 200),
+      page.click('#btn-save-review'),
+    ]);
+    await page.evaluate(() => loadAnalysisReport());
+    await page.waitForSelector('.keyframe-card', { state: 'visible' });
+    const restoredNote = await page.locator('.keyframe-card').nth(1).locator('.kf-note').inputValue();
+    const noteIsSafe = await page.evaluate(() => (
+      !window.__reelfireNoteXss && !document.querySelector('.keyframe-card img[src="x"]')
+    ));
+    if (restoredNote !== noteProbe || !noteIsSafe) {
+      throw new Error('stored XSS executed or note value was corrupted during rendering');
+    }
     await page.locator('.keyframe-card').nth(1).locator('.kf-note').fill('浏览器验收：保留残局候选');
-    await page.click('#btn-save-review');
-    await page.waitForFunction(() => {
-      const toast = document.querySelector('.toast');
-      return toast && toast.textContent.includes('审核结果已保存');
-    });
+    await Promise.all([
+      page.waitForResponse((response) => response.url().includes('/review') && response.request().method() === 'PATCH' && response.status() === 200),
+      page.click('#btn-save-review'),
+    ]);
 
     await page.click('#btn-rough-cut');
     await page.waitForSelector('#detail-output video', {
@@ -162,6 +209,7 @@ async function main() {
         completed_job_id: completedJobId,
         failed_job_id: failedJobId,
         screenshots: fs.readdirSync(screenshotDir).sort(),
+        security_checks: ['project_name stored XSS blocked', 'keyframe note stored XSS blocked'],
         browser_errors: browserErrors,
         failed_responses: failedResponses,
       };

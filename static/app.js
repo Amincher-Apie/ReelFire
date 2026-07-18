@@ -19,6 +19,22 @@ const API = {
   },
   async del(url) { const r = await fetch(url, { method: 'DELETE' }); return r.json(); }
 };
+function escapeHtml(value) {
+  return String(value == null ? '' : value).replace(/[&<>'"]/g, function(character) {
+    return {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      "'": '&#39;',
+      '"': '&quot;'
+    }[character];
+  });
+}
+function findByDataId(container, selector, key, value) {
+  return Array.from(container.querySelectorAll(selector)).find(function(element) {
+    return element.dataset[key] === String(value);
+  }) || null;
+}
 function switchView(view) {
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.querySelectorAll('.header-nav button').forEach(b => b.classList.remove('active'));
@@ -53,7 +69,7 @@ function showFileInfo(f) {
   var info = document.getElementById('file-info');
   var sz = f.size > 1048576 ? (f.size / 1048576).toFixed(1) + ' MB' : (f.size / 1024).toFixed(1) + ' KB';
   info.style.display = 'inline-flex';
-  info.innerHTML = '<span class="file-name">' + f.name + '</span> ' + sz;
+  info.innerHTML = '<span class="file-name">' + escapeHtml(f.name) + '</span> ' + escapeHtml(sz);
 }
 function resetUpload() { document.getElementById('upload-form').reset(); document.getElementById('file-info').style.display = 'none'; }
 async function createJob(e) {
@@ -101,15 +117,20 @@ async function loadTaskList() {
     var gn = { csgo: 'CS:GO/CS2', valorant: '无畏契约', other: '其他 FPS' };
     jobs.forEach(function(j) {
       var tr = document.createElement('tr');
-      var disabled = (j.status === 'running' || j.status === 'queued') ? 'disabled title="运行中不可删除"' : '';
-      tr.innerHTML = '<td><span class="job-id">' + (j.job_id || '-') + '</span></td>' +
-        '<td>' + (j.project_name || '-') + '</td>' +
-        '<td class="truncate" style="max-width:150px">' + (j.asset_name || '-') + '</td>' +
-        '<td>' + (gn[j.game_type] || j.game_type || '-') + '</td>' +
-        '<td><span class="status-badge ' + (j.status || 'created') + '"><span class="dot"></span>' + (st[j.status] || j.status) + '</span></td>' +
-        '<td class="text-sm">' + formatTime(j.created_at) + '</td>' +
-        '<td class="actions"><button class="btn btn-ghost btn-sm" onclick="openTask(\'' + j.job_id + '\')">查看</button>' +
-        '<button class="btn btn-ghost btn-sm" onclick="deleteTask(\'' + j.job_id + '\')" ' + disabled + '>删除</button></td>';
+      var jobId = String(j.job_id || '');
+      var status = Object.prototype.hasOwnProperty.call(st, j.status) ? j.status : 'created';
+      var gameName = gn[j.game_type] || j.game_type || '-';
+      var isBusy = status === 'running' || status === 'queued';
+      tr.innerHTML = '<td><span class="job-id">' + escapeHtml(jobId || '-') + '</span></td>' +
+        '<td>' + escapeHtml(j.project_name || '-') + '</td>' +
+        '<td class="truncate" style="max-width:150px">' + escapeHtml(j.asset_name || '-') + '</td>' +
+        '<td>' + escapeHtml(gameName) + '</td>' +
+        '<td><span class="status-badge ' + status + '"><span class="dot"></span>' + escapeHtml(st[status]) + '</span></td>' +
+        '<td class="text-sm">' + escapeHtml(formatTime(j.created_at)) + '</td>' +
+        '<td class="actions"><button class="btn btn-ghost btn-sm" data-action="open">查看</button>' +
+        '<button class="btn btn-ghost btn-sm" data-action="delete"' + (isBusy ? ' disabled title="运行中不可删除"' : '') + '>删除</button></td>';
+      tr.querySelector('[data-action="open"]').addEventListener('click', function() { openTask(jobId); });
+      tr.querySelector('[data-action="delete"]').addEventListener('click', function() { deleteTask(jobId); });
       tb.appendChild(tr);
     });
   } catch (err) {
@@ -172,10 +193,11 @@ function renderVideoInfo(data) {
   var bar = document.getElementById('detail-video-info');
   var gn = { csgo: 'CS:GO/CS2', valorant: '无畏契约', other: '其他 FPS' };
   var st = { created: '已创建', queued: '排队中', running: '分析中', completed: '已完成', failed: '失败' };
-  bar.innerHTML = '<div class="info-item"><span class="info-label">素材</span><span class="info-value">' + (data.asset_name || '-') + '</span></div>' +
-    '<div class="info-item"><span class="info-label">游戏</span><span class="info-value">' + (gn[data.game_type] || data.game_type || '-') + '</span></div>' +
-    '<div class="info-item"><span class="info-label">状态</span><span class="status-badge ' + (data.status || 'created') + '"><span class="dot"></span>' + (st[data.status] || data.status) + '</span></div>' +
-    '<div class="info-item"><span class="info-label">创建时间</span><span class="info-value">' + formatTime(data.created_at) + '</span></div>';
+  var status = Object.prototype.hasOwnProperty.call(st, data.status) ? data.status : 'created';
+  bar.innerHTML = '<div class="info-item"><span class="info-label">素材</span><span class="info-value">' + escapeHtml(data.asset_name || '-') + '</span></div>' +
+    '<div class="info-item"><span class="info-label">游戏</span><span class="info-value">' + escapeHtml(gn[data.game_type] || data.game_type || '-') + '</span></div>' +
+    '<div class="info-item"><span class="info-label">状态</span><span class="status-badge ' + status + '"><span class="dot"></span>' + escapeHtml(st[status]) + '</span></div>' +
+    '<div class="info-item"><span class="info-label">创建时间</span><span class="info-value">' + escapeHtml(formatTime(data.created_at)) + '</span></div>';
 }
 async function loadAnalysisReport() {
   try {
@@ -183,7 +205,7 @@ async function loadAnalysisReport() {
     if (!data.ok) throw new Error(data.error || '无法加载报告');
     renderAnalysisResults(data.report || data);
   } catch (err) {
-    document.getElementById('detail-keyframes').innerHTML = '<div class="state-container" style="padding:32px"><div class="state-title">' + err.message + '</div></div>';
+    document.getElementById('detail-keyframes').innerHTML = '<div class="state-container" style="padding:32px"><div class="state-title">' + escapeHtml(err.message) + '</div></div>';
   }
 }
 function renderAnalysisResults(r) {
@@ -212,18 +234,21 @@ function renderSegments(r) {
   document.getElementById('detail-seg-info').textContent = segs.length ? segs.length + ' 个片段' : '暂无候选片段';
   if (!segs.length) { ed.innerHTML = '<div class="text-sm text-muted">暂无候选片段</div>'; return; }
   ed.innerHTML = segs.map(function(seg, i) {
-    return '<div class="segment-editor" data-seg-id="' + seg.id + '"><div class="seg-header"><h4>片段 #' + (i + 1) + '</h4><span class="text-sm text-muted">时长 ' + ((seg.end || 0) - (seg.start || 0)).toFixed(1) + 's</span></div>' +
-      '<div class="seg-row"><div class="input-group"><label>开始 (秒)</label><input type="number" class="seg-start" value="' + (seg.start || 0) + '" min="0" step="0.5" data-seg-id="' + seg.id + '"></div>' +
-      '<div class="input-group"><label>结束 (秒)</label><input type="number" class="seg-end" value="' + (seg.end || 0) + '" min="0" step="0.5" data-seg-id="' + seg.id + '"></div>' +
-      '<div class="input-group" style="flex:0 0 auto"><label>排序</label><input type="number" class="seg-order" value="' + (seg.order || i + 1) + '" min="1" style="width:60px" data-seg-id="' + seg.id + '"></div></div></div>';
+    var segmentId = escapeHtml(seg.id || ('seg_' + (i + 1)));
+    return '<div class="segment-editor" data-seg-id="' + segmentId + '"><div class="seg-header"><h4>片段 #' + (i + 1) + '</h4><span class="text-sm text-muted">时长 ' + ((seg.end || 0) - (seg.start || 0)).toFixed(1) + 's</span></div>' +
+      '<div class="seg-row"><div class="input-group"><label>开始 (秒)</label><input type="number" class="seg-start" value="' + escapeHtml(seg.start || 0) + '" min="0" step="0.5" data-seg-id="' + segmentId + '"></div>' +
+      '<div class="input-group"><label>结束 (秒)</label><input type="number" class="seg-end" value="' + escapeHtml(seg.end || 0) + '" min="0" step="0.5" data-seg-id="' + segmentId + '"></div>' +
+      '<div class="input-group" style="flex:0 0 auto"><label>排序</label><input type="number" class="seg-order" value="' + escapeHtml(seg.order || i + 1) + '" min="1" style="width:60px" data-seg-id="' + segmentId + '"></div></div></div>';
   }).join('');
   ed.querySelectorAll('.seg-start, .seg-end').forEach(function(inp) {
     inp.addEventListener('change', function() {
       var id = this.dataset.segId;
       var seg = STATE.currentSegments.find(function(s) { return s.id === id; });
       if (!seg) return;
-      var st = parseFloat(ed.querySelector('.seg-start[data-seg-id="' + id + '"]').value) || 0;
-      var en = parseFloat(ed.querySelector('.seg-end[data-seg-id="' + id + '"]').value) || 0;
+      var startInput = findByDataId(ed, '.seg-start', 'segId', id);
+      var endInput = findByDataId(ed, '.seg-end', 'segId', id);
+      var st = parseFloat(startInput ? startInput.value : '0') || 0;
+      var en = parseFloat(endInput ? endInput.value : '0') || 0;
       var p = this.closest('.segment-editor');
       if (st >= en) { p.style.borderColor = 'var(--danger)'; }
       else { p.style.borderColor = ''; p.querySelector('.seg-header .text-sm').textContent = '时长 ' + (en - st).toFixed(1) + 's'; }
@@ -240,9 +265,11 @@ function renderKeyframes(kfs) {
     var sc = kf.highlight_score || 0;
     var scClass = sc >= 0.7 ? 'high' : sc >= 0.4 ? 'medium' : 'low';
     var dec = kf.decision || 'keep';
+    var keyframeId = String(kf.id || '');
+    var safeKeyframeId = escapeHtml(keyframeId);
     var imgSrc = kf.image ? '/outputs/' + STATE.currentJobId + '/' + kf.image : '';
-    var imgTag = imgSrc ? '<img src="' + imgSrc + '" alt="关键帧" onerror="this.style.display=\'none\'">' : '<div style="width:100%;height:100%;background:var(--border-color);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12px">关键帧 ' + kf.id + '</div>';
-    return '<div class="keyframe-card" data-kf-id="' + kf.id + '"><div class="kf-thumb">' + imgTag +
+    var imgTag = imgSrc ? '<img src="' + escapeHtml(imgSrc) + '" alt="关键帧">' : '<div style="width:100%;height:100%;background:var(--border-color);display:flex;align-items:center;justify-content:center;color:var(--text-muted);font-size:12px">关键帧 ' + safeKeyframeId + '</div>';
+    return '<div class="keyframe-card" data-kf-id="' + safeKeyframeId + '"><div class="kf-thumb">' + imgTag +
       '<span class="kf-timestamp">' + fmtTime(kf.timestamp) + '</span>' +
       '<span class="kf-score-badge ' + scClass + '">' + (sc * 100).toFixed(0) + '</span></div>' +
       '<div class="kf-body"><div class="kf-scores">' +
@@ -252,13 +279,24 @@ function renderKeyframes(kfs) {
       '<span class="score-item"><span class="score-label">综合</span> <span class="score-val">' + fmtScore(sc) + '</span></span>' +
       (kf.object_count ? '<span class="score-item"><span class="score-label">目标数</span> <span class="score-val">' + kf.object_count + '</span></span>' : '') + '</div>' +
       '<div class="kf-controls"><div class="kf-decision">' +
-      '<button class="' + (dec === 'keep' ? 'active-keep' : '') + '" onclick="setDecision(\'' + kf.id + '\',\'keep\')">保留</button>' +
-      '<button class="' + (dec === 'skip' ? 'active-skip' : '') + '" onclick="setDecision(\'' + kf.id + '\',\'skip\')">忽略</button></div>' +
-      '<select class="kf-label-select" onchange="setLabel(\'' + kf.id + '\',this.value)">' +
+      '<button class="' + (dec === 'keep' ? 'active-keep' : '') + '" data-decision="keep">保留</button>' +
+      '<button class="' + (dec === 'skip' ? 'active-skip' : '') + '" data-decision="skip">忽略</button></div>' +
+      '<select class="kf-label-select">' +
       labels.map(function(l) { return '<option value="' + l + '" ' + ((kf.label || '') === l ? 'selected' : '') + '>' + ln[l] + '</option>'; }).join('') + '</select>' +
-      '<input type="number" class="kf-order" value="' + (kf.order || sorted.indexOf(kf) + 1) + '" min="1" onchange="setOrder(\'' + kf.id + '\',this.value)" style="width:52px">' +
-      '<input type="text" class="kf-note" placeholder="备注..." value="' + (kf.note || '') + '" onchange="setNote(\'' + kf.id + '\',this.value)"></div></div></div>';
+      '<input type="number" class="kf-order" value="' + escapeHtml(kf.order || sorted.indexOf(kf) + 1) + '" min="1" style="width:52px">' +
+      '<input type="text" class="kf-note" placeholder="备注..." value="' + escapeHtml(kf.note || '') + '"></div></div></div>';
   }).join('');
+  c.querySelectorAll('.keyframe-card').forEach(function(card) {
+    var keyframeId = card.dataset.kfId;
+    card.querySelectorAll('[data-decision]').forEach(function(button) {
+      button.addEventListener('click', function() { setDecision(keyframeId, button.dataset.decision); });
+    });
+    card.querySelector('.kf-label-select').addEventListener('change', function() { setLabel(keyframeId, this.value); });
+    card.querySelector('.kf-order').addEventListener('change', function() { setOrder(keyframeId, this.value); });
+    card.querySelector('.kf-note').addEventListener('change', function() { setNote(keyframeId, this.value); });
+    var image = card.querySelector('img');
+    if (image) image.addEventListener('error', function() { image.style.display = 'none'; });
+  });
   updateKfCounts(kfs);
 }
 function updateKfCounts(kfs) {
@@ -271,7 +309,7 @@ function setDecision(id, d) {
   var kf = STATE.currentKeyframes.find(function(k) { return k.id === id; });
   if (!kf) return;
   kf.decision = d;
-  var card = document.querySelector('.keyframe-card[data-kf-id="' + id + '"]');
+  var card = findByDataId(document, '.keyframe-card', 'kfId', id);
   if (card) {
     card.querySelectorAll('.kf-decision button').forEach(function(b) { b.className = ''; });
     var btns = card.querySelectorAll('.kf-decision button');
@@ -296,9 +334,10 @@ async function saveReview() {
       });
     });
     var segments = STATE.currentSegments.map(function(seg) {
-      var si = document.querySelector('.seg-start[data-seg-id="' + seg.id + '"]');
-      var ei = document.querySelector('.seg-end[data-seg-id="' + seg.id + '"]');
-      var oi = document.querySelector('.seg-order[data-seg-id="' + seg.id + '"]');
+      var editor = document.getElementById('detail-segment-editor');
+      var si = findByDataId(editor, '.seg-start', 'segId', seg.id);
+      var ei = findByDataId(editor, '.seg-end', 'segId', seg.id);
+      var oi = findByDataId(editor, '.seg-order', 'segId', seg.id);
       return { id: seg.id, start: si ? parseFloat(si.value) : seg.start, end: ei ? parseFloat(ei.value) : seg.end, order: oi ? parseInt(oi.value) : (seg.order || 1) };
     });
     var data = await API.patch('/api/jobs/' + STATE.currentJobId + '/review', { keyframes: keyframes, segments: segments });
@@ -322,9 +361,9 @@ function renderOutput(r) {
   var o = r.output || {};
   if (!o.video) { c.style.display = 'none'; return; }
   c.style.display = 'grid';
-  c.innerHTML = '<div class="output-card"><div class="output-label">输出视频 ' + (o.ratio || '') + '</div><video controls preload="metadata"><source src="/outputs/' + STATE.currentJobId + '/' + o.video + '" type="video/mp4"></video></div>';
+  c.innerHTML = '<div class="output-card"><div class="output-label">输出视频 ' + escapeHtml(o.ratio || '') + '</div><video controls preload="metadata"><source src="' + escapeHtml('/outputs/' + STATE.currentJobId + '/' + o.video) + '" type="video/mp4"></video></div>';
   if (o.contact_sheet) {
-    c.innerHTML += '<div class="output-card"><div class="output-label">关键帧联系表</div><a href="/outputs/' + STATE.currentJobId + '/' + o.contact_sheet + '" target="_blank" class="btn btn-ghost btn-sm mt-8">查看联系表</a></div>';
+    c.innerHTML += '<div class="output-card"><div class="output-label">关键帧联系表</div><a href="' + escapeHtml('/outputs/' + STATE.currentJobId + '/' + o.contact_sheet) + '" target="_blank" rel="noopener" class="btn btn-ghost btn-sm mt-8">查看联系表</a></div>';
   }
 }
 async function viewReport() {

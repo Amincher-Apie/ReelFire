@@ -177,7 +177,7 @@ NVIDIA 机器的 `torch.cuda.is_available()` 应为 `True`。CPU 机器返回 `F
 
 - 浏览器完整流程与状态截图：[`docs/Acceptance_screenshot/`](docs/Acceptance_screenshot/)
 - 最终 5 条正常、5 条异常记录：[`docs/TEST_REPORT.md`](docs/TEST_REPORT.md)
-- 两个真实 Bug 及回归：[`docs/BUG_RECORD.md`](docs/BUG_RECORD.md)
+- 三个真实 Bug 及回归：[`docs/BUG_RECORD.md`](docs/BUG_RECORD.md)
 - 8 分钟演示与本机彩排记录：[`docs/DEMO_FLOW.md`](docs/DEMO_FLOW.md)
 
 ## 计划目录结构

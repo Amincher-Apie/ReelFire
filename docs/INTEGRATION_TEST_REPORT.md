@@ -1,8 +1,8 @@
-# ReelFire Test-Glob 阶段性集成测试报告
+# ReelFire 最终集成测试报告
 
 ## 1. 测试结论
 
-当前 `Test-Glob` 已完成已上传代码的阶段性集成，前端、后端、CV 引擎、任务持久化和 FFmpeg 粗剪可以形成真实闭环。由于其他成员代码尚未全部上传，本报告只证明当前分支可联调，不表示项目最终验收完成，也不作为合并 `main` 的依据。
+`Test-Glob` 已完成最终集成，前端、后端、CV 引擎、任务持久化、FFmpeg 粗剪和浏览器安全回归形成真实闭环。本报告作为合并 `main` 的验证依据；组员末次分支仅用于审计，没有带入其中的缓存、占位 FFmpeg、手工模型下载和冲突报告 Schema。
 
 | 项目 | 结果 |
 |---|---|
@@ -18,7 +18,7 @@
 | 联系表生成 | 通过 |
 | 有音频 16:9 粗剪 | 通过 |
 | 无音频 9:16 粗剪 | 通过 |
-| 分支策略 | 仅推送 `Test-Glob`，不合并 `main` |
+| 分支策略 | 验收通过后将 Test-Glob 的最终文件树合入 `main` |
 
 ## 2. 集成内容
 
@@ -83,7 +83,7 @@ No broken requirements found.
 
 真实联调调用的是 `services.analysis_service.analyze_video()` 和 `services.ffmpeg_service.create_rough_cut()`，没有使用模拟报告或伪造输出。
 
-本地服务启动后还通过真实 HTTP 请求验证：`GET /` 返回 200 且包含上传表单，`GET /api/health` 返回 `model_ready: true` 与 `ffmpeg_ready: true`。完整浏览器回归已覆盖加载、运行、完成、失败、审核写回、输出视频和历史任务，浏览器控制台错误与失败请求均为 0，证据见 `Acceptance_screenshot/`。
+本地服务启动后还通过真实 HTTP 请求验证：`GET /` 返回 200 且包含上传表单，`GET /api/health` 返回 `model_ready: true` 与 `ffmpeg_ready: true`。完整浏览器回归已覆盖加载、运行、完成、失败、审核写回、输出视频、历史任务以及项目名/持久化备注两项 XSS 攻击载荷，浏览器控制台错误与失败请求均为 0，证据见 `Acceptance_screenshot/`。
 
 ## 5. 无音频兼容测试
 
@@ -111,11 +111,12 @@ FFmpeg 使用可选音轨映射 `0:a?`，源视频没有音频时不会导致任
 8. 关键帧和视频缺少安全的 `/outputs/` 访问路由；
 9. 原 FFmpeg 和 CV `NotImplementedError` 占位已替换为真实实现；
 10. 上传层只看扩展名，伪装文件可以进入任务系统。
+11. 项目名和关键帧备注直接拼接 HTML，存在存储型 XSS 风险。
 
 ## 7. 当前限制
 
 - 项目最终使用通用 `yolo11n.pt`，不自训练；其 FPS 专用事件识别能力有限，报告只展示真实 COCO 类别；
-- 其他成员尚未上传的代码没有进入本分支；
+- 组员最新代码已完成差异审计，不兼容部分没有进入最终交付树；
 - 多片段合并、1:1 和交付 ZIP 仍属于 P1；片段标签与封面描述已写入报告；
 - 当前真实联调结果保存在本机 `outputs/integration_smoke/`，该目录被 `.gitignore` 排除；
 - 模型文件被 `.gitignore` 排除，不会推送到 GitHub；`setup_environment.py` 会自动下载并校验；
