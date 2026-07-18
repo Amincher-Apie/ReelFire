@@ -1,14 +1,28 @@
-"""Controlled background execution and the future CV integration point."""
+"""Background execution integrated with the CV engine."""
 
 from __future__ import annotations
 
+import json
 import logging
+import os
+import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
+import cv2
+
 from services.job_service import JobService, JobStateConflictError, iso_now
+
+# Ensure the project root is importable for cv_engine
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from cv_engine.video_processor import VideoProcessor
+from cv_engine.yolo_detector import YoloDetector
+from cv_engine.highlight_scorer import HighlightScorer
 
 
 LOGGER = logging.getLogger(__name__)
@@ -19,16 +33,111 @@ def analyze_video(
     job_dir: Path,
     settings: dict[str, Any],
 ) -> dict[str, Any]:
-    """Analyze one video and return a JSON-serializable report.
+    """Analyze one video using the CV engine and return a JSON-serializable report."""
 
-    The CV engineer should replace this body with real OpenCV sampling, YOLO
-    inference and explainable highlight scoring. No synthetic report is emitted.
-    """
+    video_path_str = str(video_path)
+    job_dir_str = str(job_dir)
 
-    del video_path, job_dir, settings
-    raise NotImplementedError(
-        "CV 分析模块尚未接入，请由算法工程师实现 analyze_video"
+    # ── 1. Sample video frames ────────────────────────────────
+    processor = VideoProcessor()
+    video_info = processor.get_video_info(video_path_str)
+    sample_interval = float(settings.get("sample_interval", 1.0))
+    frames, timestamps = processor.sample_video(video_path_str, interval=sample_interval)
+
+    if not frames:
+        raise RuntimeError(f"视频采样失败：未能从 {video_path_str} 读取任何帧")
+
+    # ── 2. YOLO detection ─────────────────────────────────────
+    detector = YoloDetector(
+        model_path=os.path.join(str(_PROJECT_ROOT), "models", "yolo11n.pt")
     )
+    detections_list = detector.detect_frames(frames)
+
+    # ── 3. Highlight scoring ──────────────────────────────────
+    scorer = HighlightScorer(
+        object_weight=float(settings.get("object_weight", 0.45)),
+        scene_change_weight=float(settings.get("scene_change_weight", 0.35)),
+        motion_weight=float(settings.get("motion_weight", 0.20)),
+    )
+    raw = scorer.analyze(frames, detections_list, timestamps, job_id=str(job_dir.name))
+
+    # ── 4. Save keyframe images ──────────────────────────────
+    keyframes_dir = os.path.join(job_dir_str, "keyframes")
+    os.makedirs(keyframes_dir, exist_ok=True)
+    top_kfs = raw.get("top_keyframes", raw.get("keyframes", []))[:8]
+    saved_keyframes = []
+    for idx, kf in enumerate(top_kfs):
+        frame_index = kf["frame_index"]
+        img_path = os.path.join(keyframes_dir, f"kf_{idx+1:03d}_{kf['timestamp']:.1f}s.jpg")
+        try:
+            processor.save_frame(frames[frame_index], img_path)
+        except Exception:
+            img_path = ""
+        saved_keyframes.append({
+            "id": f"kf_{idx+1:03d}",
+            "timestamp": kf["timestamp"],
+            "frame_index": frame_index,
+            "image": img_path,
+            "scores": {
+                "object_score": kf.get("object_score", 0),
+                "scene_change_score": kf.get("scene_change_score", 0),
+                "motion_score": kf.get("motion_score", 0),
+                "final_score": kf.get("highlight_score", 0),
+            },
+            "labels": [],
+            "notes": "",
+            "ignored": False,
+            "order": idx + 1,
+            "detections": kf.get("objects", []),
+        })
+
+    # ── 5. Calculate aggregate scores ─────────────────────────
+    all_keyframes = raw.get("keyframes", [])
+    if all_keyframes:
+        avg_obj = sum(k.get("object_score", 0) for k in all_keyframes) / len(all_keyframes)
+        avg_sc = sum(k.get("scene_change_score", 0) for k in all_keyframes) / len(all_keyframes)
+        avg_mo = sum(k.get("motion_score", 0) for k in all_keyframes) / len(all_keyframes)
+        avg_final = sum(k.get("highlight_score", 0) for k in all_keyframes) / len(all_keyframes)
+    else:
+        avg_obj = avg_sc = avg_mo = avg_final = 0.0
+
+    # ── 6. Format segments ────────────────────────────────────
+    raw_segments = raw.get("recommended_segments", [])
+    segments = []
+    for idx, seg in enumerate(raw_segments):
+        segments.append({
+            "id": f"seg_{idx+1:03d}",
+            "start": seg.get("start", 0),
+            "end": seg.get("end", 0),
+            "duration": round(seg.get("end", 0) - seg.get("start", 0), 2),
+            "keyframes_used": [],
+            "avg_score": seg.get("score", 0),
+            "title": f"精彩片段 {idx+1}",
+        })
+
+    # ── 7. Build final report ─────────────────────────────────
+    return {
+        "video_info": {
+            "file_name": os.path.basename(video_path_str),
+            "duration": video_info.get("duration", 0),
+            "resolution": [video_info.get("width", 0), video_info.get("height", 0)],
+            "fps": video_info.get("fps", 0),
+            "has_audio": video_info.get("has_audio", False),
+        },
+        "scores": {
+            "object_score": round(avg_obj, 4),
+            "scene_change_score": round(avg_sc, 4),
+            "motion_score": round(avg_mo, 4),
+            "final_score": round(avg_final, 4),
+        },
+        "weights": {
+            "object_weight": float(settings.get("object_weight", 0.45)),
+            "scene_change_weight": float(settings.get("scene_change_weight", 0.35)),
+            "motion_weight": float(settings.get("motion_weight", 0.20)),
+        },
+        "keyframes": saved_keyframes,
+        "segments": segments,
+    }
 
 
 class AnalysisService:
