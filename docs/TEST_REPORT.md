@@ -1,12 +1,14 @@
 # 测试报告 | TEST_REPORT
 
+> 本文件保留后端第一轮测试的原始记录。CV、FFmpeg 与前端完成阶段性接线后的最新结果见 [`INTEGRATION_TEST_REPORT.md`](INTEGRATION_TEST_REPORT.md)。第一轮中的“占位实现/阻塞”描述不代表当前 `Test-Glob` 状态。
+
 ## 基本信息
 
 | 项目 | 内容 |
 |------|------|
 | 项目名称 | ReelFire - 智能视频精彩片段提取系统 |
 | 方向 | B |
-| 测试工程师 | ybbzzz |
+| 记录角色 | 测试工程师 |
 | 测试日期 | 2026-07-18 |
 | 测试环境 | Windows 11, Python 3.x, conda yolo 环境 |
 

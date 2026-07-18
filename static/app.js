@@ -5,7 +5,12 @@ let STATE = { currentJobId: null, currentJobData: null, currentSegments: [], cur
 const API = {
   async get(url) { const r = await fetch(url); return r.json(); },
   async post(url, body) {
-    const r = await fetch(url, { method: 'POST', headers: body instanceof FormData ? {} : { 'Content-Type': 'application/json' }, body });
+    const isForm = body instanceof FormData;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: isForm ? {} : { 'Content-Type': 'application/json' },
+      body: isForm ? body : JSON.stringify(body || {})
+    });
     return r.json();
   },
   async patch(url, body) {
@@ -64,9 +69,15 @@ async function createJob(e) {
     fd.append('game_type', document.getElementById('game-type').value);
     fd.append('sample_interval', document.getElementById('sample-interval').value);
     fd.append('target_duration', document.getElementById('target-duration').value);
-    fd.append('output_aspect', document.getElementById('output-aspect').value);
+    fd.append('output_ratio', document.getElementById('output-aspect').value);
     var data = await API.post('/api/jobs', fd);
-    if (data.ok) { showToast('任务创建成功！', 'success'); STATE.currentJobId = data.job_id; switchView('task-list'); }
+    if (data.ok) {
+      STATE.currentJobId = data.job_id;
+      var queued = await API.post('/api/jobs/' + data.job_id + '/analyze', {});
+      if (!queued.ok) throw new Error(queued.error || '任务已创建，但提交分析失败');
+      showToast('任务创建成功，已进入分析队列！', 'success');
+      switchView('task-list');
+    }
     else { showToast(data.error || '创建任务失败', 'error'); }
   } catch (_) { showToast('网络错误，请重试', 'error'); }
   finally { btn.disabled = false; btn.textContent = '创建任务并上传'; }
@@ -121,17 +132,18 @@ async function refreshTaskDetail() {
   try {
     var data = await API.get('/api/jobs/' + STATE.currentJobId);
     if (!data.ok) throw new Error(data.error || '请求失败');
-    STATE.currentJobData = data;
+    var job = data.job || data;
+    STATE.currentJobData = job;
     document.getElementById('detail-loading').style.display = 'none';
     document.getElementById('detail-content').style.display = 'block';
     document.getElementById('detail-actions').style.display = 'flex';
-    document.getElementById('detail-title').textContent = data.project_name || '任务详情';
-    renderVideoInfo(data);
-    var st = data.status || 'created';
+    document.getElementById('detail-title').textContent = job.project_name || '任务详情';
+    renderVideoInfo(job);
+    var st = job.status || 'created';
     ['detail-running','detail-queued','detail-failed','detail-completed'].forEach(function(id) { document.getElementById(id).style.display = 'none'; });
     if (st === 'queued') { document.getElementById('detail-queued').style.display = 'block'; startPolling(); }
     else if (st === 'running') { document.getElementById('detail-running').style.display = 'block'; startPolling(); }
-    else if (st === 'failed') { document.getElementById('detail-failed').style.display = 'block'; document.getElementById('detail-error-msg').textContent = data.error || '未知错误'; }
+    else if (st === 'failed') { document.getElementById('detail-failed').style.display = 'block'; document.getElementById('detail-error-msg').textContent = job.error || '未知错误'; }
     else if (st === 'completed') { document.getElementById('detail-completed').style.display = 'block'; await loadAnalysisReport(); }
   } catch (err) {
     document.getElementById('detail-loading').style.display = 'none';
@@ -145,7 +157,8 @@ function startPolling() {
     try {
       var data = await API.get('/api/jobs/' + STATE.currentJobId);
       if (data.ok) {
-        if (data.status === 'completed' || data.status === 'failed') { stopPolling(); await refreshTaskDetail(); }
+        var job = data.job || data;
+        if (job.status === 'completed' || job.status === 'failed') { stopPolling(); await refreshTaskDetail(); }
         else {
           var pf = document.getElementById('detail-progress');
           if (pf) pf.style.width = '60%';
@@ -184,7 +197,7 @@ function renderAnalysisResults(r) {
 }
 function renderScoreBars(r) {
   var kfs = r.keyframes || [];
-  var best = kfs.sort(function(a, b) { return (b.highlight_score || 0) - (a.highlight_score || 0); })[0] || {};
+  var best = kfs.concat().sort(function(a, b) { return (b.highlight_score || 0) - (a.highlight_score || 0); })[0] || {};
   var c = document.getElementById('detail-score-bars');
   c.innerHTML = '<div class="score-bar-item object"><div class="sb-label">目标分数</div><div class="sb-value">' + fmtScore(best.object_score) + '</div><div class="sb-track"><div class="sb-fill" style="width:' + ((best.object_score || 0) * 100) + '%"></div></div></div>' +
     '<div class="score-bar-item scene"><div class="sb-label">场景变化</div><div class="sb-value">' + fmtScore(best.scene_change_score) + '</div><div class="sb-track"><div class="sb-fill" style="width:' + ((best.scene_change_score || 0) * 100) + '%"></div></div></div>' +
@@ -274,7 +287,14 @@ async function saveReview() {
   var btn = document.getElementById('btn-save-review');
   btn.disabled = true; btn.textContent = '保存中...';
   try {
-    var keyframes = STATE.currentKeyframes.map(function(kf) { return { id: kf.id, decision: kf.decision || 'keep', label: kf.label || '', note: kf.note || '', order: kf.order || 1 }; });
+    var keyframes = STATE.currentKeyframes.map(function(kf) {
+      return Object.assign({}, kf, {
+        decision: kf.decision || 'keep',
+        label: kf.label || '',
+        note: kf.note || '',
+        order: kf.order || 1
+      });
+    });
     var segments = STATE.currentSegments.map(function(seg) {
       var si = document.querySelector('.seg-start[data-seg-id="' + seg.id + '"]');
       var ei = document.querySelector('.seg-end[data-seg-id="' + seg.id + '"]');
@@ -302,7 +322,7 @@ function renderOutput(r) {
   var o = r.output || {};
   if (!o.video) { c.style.display = 'none'; return; }
   c.style.display = 'grid';
-  c.innerHTML = '<div class="output-card"><div class="output-label">横屏 16:9</div><video controls muted preload="metadata"><source src="/outputs/' + STATE.currentJobId + '/' + o.video + '" type="video/mp4"></video></div>';
+  c.innerHTML = '<div class="output-card"><div class="output-label">输出视频 ' + (o.ratio || '') + '</div><video controls preload="metadata"><source src="/outputs/' + STATE.currentJobId + '/' + o.video + '" type="video/mp4"></video></div>';
   if (o.contact_sheet) {
     c.innerHTML += '<div class="output-card"><div class="output-label">关键帧联系表</div><a href="/outputs/' + STATE.currentJobId + '/' + o.contact_sheet + '" target="_blank" class="btn btn-ghost btn-sm mt-8">查看联系表</a></div>';
   }

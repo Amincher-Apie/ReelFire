@@ -13,6 +13,8 @@ from app import create_app
 
 
 class ApiTestCase(unittest.TestCase):
+    MINIMAL_MP4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 32
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
@@ -33,7 +35,7 @@ class ApiTestCase(unittest.TestCase):
         self.app.extensions["analysis_service"].shutdown(wait=True)
         self.temporary.cleanup()
 
-    def create_job(self, content: bytes = b"small test video") -> str:
+    def create_job(self, content: bytes = MINIMAL_MP4) -> str:
         response = self.client.post(
             "/api/jobs",
             data={
@@ -91,6 +93,16 @@ class ApiTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_create_job_rejects_spoofed_video_extension(self) -> None:
+        response = self.client.post(
+            "/api/jobs",
+            data={"file": (io.BytesIO(b"\x89PNG\r\n\x1a\n"), "fake.mp4")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("文件内容", response.get_json()["error"])
+        self.assertEqual(list(self.outputs_dir.iterdir()), [])
+
     def test_invalid_settings_return_400_without_crashing(self) -> None:
         response = self.client.post(
             "/api/jobs",
@@ -126,7 +138,7 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertTrue((self.outputs_dir / job_id).is_dir())
 
-    def test_analyze_returns_202_then_persists_clear_failure(self) -> None:
+    def test_analyze_corrupt_video_returns_202_then_persists_clear_failure(self) -> None:
         job_id = self.create_job()
         response = self.client.post(f"/api/jobs/{job_id}/analyze")
         self.assertEqual(response.status_code, 202)
@@ -140,7 +152,7 @@ class ApiTestCase(unittest.TestCase):
                 break
             time.sleep(0.02)
         self.assertEqual(job["status"], "failed")
-        self.assertIn("CV 分析模块尚未接入", job["error"])
+        self.assertIn("无法读取视频信息", job["error"])
         self.assertFalse((self.outputs_dir / job_id / "analysis_report.json").exists())
 
     def test_duplicate_analyze_returns_409(self) -> None:
@@ -194,7 +206,31 @@ class ApiTestCase(unittest.TestCase):
             "9:16",
         )
 
-    def test_rough_cut_placeholder_returns_501_without_fake_file(self) -> None:
+        segments = self.client.patch(
+            f"/api/jobs/{job_id}/review",
+            json={
+                "segments": [
+                    {"id": "seg_001", "start": 1, "end": 7, "order": 1}
+                ],
+                "keyframes": [
+                    {
+                        "id": "kf_001",
+                        "timestamp": 2,
+                        "decision": "keep",
+                        "label": "clutch",
+                        "note": "test",
+                        "order": 1,
+                    }
+                ],
+            },
+        )
+        self.assertEqual(segments.status_code, 200, segments.get_json())
+        report = segments.get_json()["report"]
+        self.assertEqual(report["segments"][0]["start"], 1.0)
+        self.assertEqual(report["recommended_clip"]["end_time"], 7.0)
+        self.assertEqual(report["keyframes"][0]["decision"], "keep")
+
+    def test_rough_cut_persists_output_in_job_and_report(self) -> None:
         job_id = self.create_job()
         jobs = self.app.extensions["job_service"]
         jobs.write_report(
@@ -209,10 +245,22 @@ class ApiTestCase(unittest.TestCase):
             },
         )
         jobs.update_job(job_id, status="completed", completed_at="2026-07-18T10:00:00")
-        with patch("routes.api_routes.is_ffmpeg_available", return_value=True):
+        def fake_cut(_input, output, _start, _end, _ratio):
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"mock mp4")
+            return output
+
+        with (
+            patch("routes.api_routes.is_ffmpeg_available", return_value=True),
+            patch("routes.api_routes.create_rough_cut", side_effect=fake_cut),
+        ):
             response = self.client.post(f"/api/jobs/{job_id}/rough-cut")
-        self.assertEqual(response.status_code, 501)
-        self.assertFalse((self.outputs_dir / job_id / "result" / "rough_cut.mp4").exists())
+        self.assertEqual(response.status_code, 200, response.get_json())
+        relative = response.get_json()["rough_cut_file"]
+        self.assertTrue((self.outputs_dir / job_id / relative).is_file())
+        report = jobs.read_report(job_id)
+        self.assertEqual(report["output"]["video"], relative)
+        self.assertEqual(report["output"]["ratio"], "16:9")
 
     def test_startup_marks_interrupted_job_failed(self) -> None:
         job_id = self.create_job()
