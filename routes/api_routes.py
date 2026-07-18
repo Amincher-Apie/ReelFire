@@ -192,6 +192,10 @@ def _validate_keyframes(value: Any, duration: float | None) -> list[dict[str, An
             frame["timestamp"] = timestamp
         if "keep" in frame and not isinstance(frame["keep"], bool):
             raise FileValidationError(f"keyframes[{index}].keep 必须是布尔值")
+        if "decision" in frame and frame["decision"] not in {"keep", "skip"}:
+            raise FileValidationError(
+                f"keyframes[{index}].decision 仅支持 keep 或 skip"
+            )
         if "order" in frame:
             frame["order"] = _integer(
                 frame, "order", index, minimum=0, maximum=100_000
@@ -210,6 +214,39 @@ def _validate_keyframes(value: Any, duration: float | None) -> list[dict[str, An
     return keyframes
 
 
+def _validate_segments(value: Any, duration: float | None) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        raise FileValidationError("segments 必须是非空数组")
+    segments: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise FileValidationError(f"segments[{index}] 必须是 JSON 对象")
+        segment = dict(item)
+        start = _number(
+            segment, "start", 0.0, minimum=0.0, maximum=86_400_000.0
+        )
+        end = _number(
+            segment, "end", 0.0, minimum=0.0, maximum=86_400_000.0
+        )
+        if start >= end:
+            raise FileValidationError(
+                f"segments[{index}] 必须满足 0 <= start < end"
+            )
+        if duration is not None and end > duration:
+            raise FileValidationError(f"segments[{index}].end 超过视频时长")
+        order = _integer(
+            segment, "order", index + 1, minimum=1, maximum=100_000
+        )
+        segment.update(
+            id=str(segment.get("id") or f"seg_{index + 1:03d}"),
+            start=start,
+            end=end,
+            order=order,
+        )
+        segments.append(segment)
+    return sorted(segments, key=lambda item: item["order"])
+
+
 def _json_object(*, optional: bool = False) -> dict[str, Any]:
     if optional and not request.data:
         return {}
@@ -225,8 +262,8 @@ def health():
     return jsonify(
         ok=True,
         status="ok",
-        service="day08-video-highlight",
-        version="0.1.0",
+        service="reelfire",
+        version="0.2.0-test-glob",
         model_ready=model_path.is_file(),
         ffmpeg_ready=is_ffmpeg_available(),
     )
@@ -248,6 +285,9 @@ def create_job():
         project_name = current_app.config["DEFAULT_PROJECT_NAME"]
     if len(project_name) > 100:
         raise FileValidationError("project_name 长度不能超过 100")
+    game_type = str(request.form.get("game_type", "other")).strip().lower()
+    if game_type not in {"csgo", "valorant", "other"}:
+        raise FileValidationError("game_type 仅支持 csgo、valorant 或 other")
 
     job_id, job_dir = jobs.reserve_workspace()
     try:
@@ -260,6 +300,7 @@ def create_job():
         )
         if original_name != saved_path.name:
             job = jobs.update_job(job_id, original_asset_name=original_name)
+        job = jobs.update_job(job_id, game_type=game_type)
     except Exception:
         jobs.discard_workspace(job_id)
         raise
@@ -301,11 +342,11 @@ def review_job(job_id: str):
         raise JobStateConflictError("分析报告尚未生成，不能进行人工审核")
     report = jobs.read_report(job_id)
     payload = _json_object()
-    unexpected = set(payload) - {"keyframes", "recommended_clip"}
+    unexpected = set(payload) - {"keyframes", "recommended_clip", "segments"}
     if unexpected:
         raise FileValidationError(f"不支持的审核字段：{', '.join(sorted(unexpected))}")
     if not payload:
-        raise FileValidationError("至少提交 keyframes 或 recommended_clip")
+        raise FileValidationError("至少提交 keyframes、segments 或 recommended_clip")
     duration = _duration(job, report)
     changes: dict[str, Any] = {}
     if "keyframes" in payload:
@@ -313,6 +354,24 @@ def review_job(job_id: str):
     if "recommended_clip" in payload:
         changes["recommended_clip"] = _validate_clip(
             payload["recommended_clip"], duration
+        )
+    if "segments" in payload:
+        segments = _validate_segments(payload["segments"], duration)
+        changes["segments"] = segments
+        first = segments[0]
+        existing_clip = report.get("recommended_clip", {})
+        ratio = (
+            existing_clip.get("output_ratio", "16:9")
+            if isinstance(existing_clip, dict)
+            else "16:9"
+        )
+        changes["recommended_clip"] = _validate_clip(
+            {
+                "start_time": first["start"],
+                "end_time": first["end"],
+                "output_ratio": ratio,
+            },
+            duration,
         )
 
     updated = jobs.update_report(job_id, lambda current: {**current, **changes})
@@ -342,7 +401,8 @@ def rough_cut(job_id: str):
         return jsonify(ok=False, error="FFmpeg 不可用，无法生成粗剪视频"), 501
 
     job_dir = jobs.job_dir(job_id)
-    output_path = job_dir / "result" / "rough_cut.mp4"
+    ratio_label = clip["output_ratio"].replace(":", "x")
+    output_path = job_dir / "result" / f"rough_cut_{ratio_label}.mp4"
     try:
         result_path = create_rough_cut(
             jobs.get_input_video(job_id),
@@ -359,6 +419,18 @@ def rough_cut(job_id: str):
         raise RuntimeError("粗剪服务未生成有效输出文件")
     relative = result_path.relative_to(job_dir).as_posix()
     jobs.update_job(job_id, rough_cut_file=relative)
+    def update_output(current: dict[str, Any]) -> dict[str, Any]:
+        output = current.get("output")
+        if not isinstance(output, dict):
+            output = {}
+        output = {**output, "video": relative, "ratio": clip["output_ratio"]}
+        return {
+            **current,
+            "recommended_clip": clip,
+            "output": output,
+        }
+
+    jobs.update_report(job_id, update_output)
     return jsonify(ok=True, job_id=job_id, rough_cut_file=relative)
 
 

@@ -77,8 +77,8 @@ ffprobe -version
 
 ### 2.3 模型约定
 
-- 联调早期可以使用 `models/yolo11n.pt` 验证流程；
-- 最终验收应切换为小组训练或微调的自定义模型，如 `models/best.pt`；
+- 联调和最终验收统一使用 `models/yolo11n.pt`；
+- 权重由 `setup_environment.py` 从 Ultralytics 官方 Release 自动下载并校验，不提交到 Git；
 - 模型路径必须来自配置，不允许散落在多个源文件中；
 - 模型缺失时，任务进入 `failed`，并把可读错误写入 `job.json`；
 - 大型模型文件不反复提交；由组长统一确认仓库管理方式和交付位置。
@@ -123,17 +123,15 @@ ReelFire/
 ├─ config.py                      # 路径、模型、阈值、输出规格
 ├─ requirements.txt
 ├─ models/
-│  ├─ yolo11n.pt                  # 早期联调模型
-│  └─ best.pt                     # 最终自定义模型
+│  └─ yolo11n.pt                  # 初始化脚本自动下载的最终模型
 ├─ services/
 │  ├─ job_service.py              # 任务创建、查询、状态变更
 │  ├─ analysis_service.py         # 分析流程编排
 │  └─ ffmpeg_service.py           # 探测、剪辑、转码和合成
-├─ cv_core/
-│  ├─ sampler.py                  # OpenCV 视频采样
-│  ├─ detector.py                 # YOLO 推理封装
-│  ├─ scorer.py                   # 三项指标及综合评分
-│  └─ selector.py                 # 去重、关键帧和片段选择
+├─ cv_engine/
+│  ├─ video_processor.py          # OpenCV 视频采样与画面指标
+│  ├─ yolo_detector.py            # YOLO 推理封装
+│  └─ highlight_scorer.py         # 三项指标、综合评分和片段选择
 ├─ routes/
 │  ├─ health.py
 │  └─ jobs.py
@@ -586,7 +584,7 @@ node --check static/app.js
 - [ ] 全员已在各自克隆目录运行 `setup_environment.py`；
 - [ ] 全员业务依赖版本一致，PyTorch 后端已按各自机器正确适配；
 - [ ] GPU、FFmpeg 和 ffprobe 自检通过；
-- [ ] 自定义训练数据和模型负责人已明确；
+- [x] 最终模型已固定为官方 `yolo11n.pt`，无需训练数据；
 - [ ] 测试视频包含有音频和无音频样本；
 - [ ] 分支、文件归属和接口字段已经确认；
 - [ ] 每人知道自己的上午产出和下午验收项；

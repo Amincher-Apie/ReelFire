@@ -46,4 +46,24 @@ class FileService:
         if size <= 0:
             destination.unlink(missing_ok=True)
             raise FileValidationError("上传文件不能为空")
+        if not self._has_valid_signature(destination):
+            destination.unlink(missing_ok=True)
+            raise FileValidationError("文件内容与视频格式不匹配或文件已损坏")
         return destination
+
+    @staticmethod
+    def _has_valid_signature(path: Path) -> bool:
+        """Perform a small container signature check before expensive decoding."""
+        try:
+            with path.open("rb") as handle:
+                header = handle.read(64)
+        except OSError as exc:
+            raise FileValidationError("无法读取已上传文件") from exc
+        suffix = path.suffix.lower()
+        if suffix in {".mp4", ".mov"}:
+            return b"ftyp" in header[:32]
+        if suffix == ".avi":
+            return len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"AVI "
+        if suffix == ".mkv":
+            return header.startswith(b"\x1a\x45\xdf\xa3")
+        return False

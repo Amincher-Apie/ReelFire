@@ -7,7 +7,7 @@ import atexit
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, send_file
 from werkzeug.exceptions import MethodNotAllowed, NotFound, RequestEntityTooLarge
 
 from config import Config
@@ -38,7 +38,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     jobs = JobService(outputs_dir)
     files = FileService(app.config["ALLOWED_VIDEO_EXTENSIONS"])
-    analysis = AnalysisService(jobs, app.config["BACKGROUND_WORKERS"])
+    analysis = AnalysisService(
+        jobs,
+        app.config["BACKGROUND_WORKERS"],
+        Path(app.config["MODEL_PATH"]),
+    )
     app.extensions["job_service"] = jobs
     app.extensions["file_service"] = files
     app.extensions["analysis_service"] = analysis
@@ -51,6 +55,18 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @app.get("/")
     def index():
         return render_template("index.html")
+
+    @app.get("/favicon.ico")
+    def favicon():
+        return send_file(Path(app.static_folder) / "favicon.svg", mimetype="image/svg+xml")
+
+    @app.get("/outputs/<job_id>/<path:filename>")
+    def serve_job_output(job_id: str, filename: str):
+        root = jobs.job_dir(job_id).resolve()
+        candidate = (root / filename).resolve()
+        if root not in candidate.parents or not candidate.is_file():
+            raise JobNotFoundError("任务输出文件不存在")
+        return send_file(candidate)
 
     @app.errorhandler(FileValidationError)
     @app.errorhandler(InvalidJobIdError)

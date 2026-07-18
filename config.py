@@ -20,16 +20,16 @@ class Config:
     )
     ALLOWED_VIDEO_EXTENSIONS = frozenset({".mp4", ".avi", ".mov", ".mkv"})
     ALLOWED_OUTPUT_RATIOS = frozenset({"16:9", "9:16", "1:1"})
-    MAX_CONTENT_LENGTH = 512 * 1024 * 1024
+    MAX_CONTENT_LENGTH = 2 * 1024 * 1024 * 1024
     HOST = "127.0.0.1"
     PORT = 7880
     BACKGROUND_WORKERS = 2
     DEFAULT_PROJECT_NAME = "智能视频精彩片段提取"
     DEFAULT_JOB_SETTINGS = {
-        "sample_interval": 1.0,
-        "target_duration": 15.0,
-        "max_keyframes": 5,
-        "min_keyframe_gap": 3.0,
+        "sample_interval": 0.5,
+        "target_duration": 30.0,
+        "max_keyframes": 10,
+        "min_keyframe_gap": 5.0,
         "object_weight": 0.45,
         "scene_change_weight": 0.35,
         "motion_weight": 0.20,
