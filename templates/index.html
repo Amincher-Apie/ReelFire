@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ReelFire – 击杀集锦提取工具</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+<div id="app">
+  <!-- ====== Header ====== -->
+  <header class="app-header">
+    <div class="logo">
+      <div class="logo-icon">RF</div>
+      Reel<span>Fire</span>
+    </div>
+    <nav class="header-nav">
+      <button id="nav-new-task" class="active" onclick="switchView('new-task')">上传素材</button>
+      <button id="nav-task-list" onclick="switchView('task-list')">任务记录</button>
+    </nav>
+  </header>
+
+  <!-- ====== Main Content ====== -->
+  <main class="main-content">
+
+    <!-- === View 1: New Task === -->
+    <div id="view-new-task" class="view active">
+      <div class="page-header">
+        <div>
+          <h1>新建分析任务</h1>
+          <p class="subtitle">上传 FPS 对战录像，自动提取精彩片段</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><h3>任务配置</h3></div>
+        <div class="card-body">
+          <form id="upload-form" onsubmit="return createJob(event)">
+            <div class="form-row">
+              <div class="input-group">
+                <label>项目名称 <span class="required">*</span></label>
+                <input type="text" id="project-name" placeholder="例如：CS2 排位赛" required>
+              </div>
+              <div class="input-group">
+                <label>游戏类型 <span class="required">*</span></label>
+                <select id="game-type" required>
+                  <option value="">请选择</option>
+                  <option value="csgo">CS:GO / CS2</option>
+                  <option value="valorant">Valorant / 无畏契约</option>
+                  <option value="other">其他 FPS</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="input-group">
+              <label>视频文件 <span class="required">*</span></label>
+              <div class="upload-zone" id="upload-zone">
+                <div class="upload-icon">&#9654;</div>
+                <div class="upload-text">点击或拖拽视频文件到此区域</div>
+                <div class="upload-hint">支持 MP4、MOV、AVI、MKV，最大 2GB</div>
+                <div id="file-info" class="file-info" style="display:none"></div>
+                <input type="file" id="video-file" accept=".mp4,.mov,.avi,.mkv" required>
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="input-group">
+                <label>采样间隔 (秒)</label>
+                <input type="number" id="sample-interval" value="0.5" min="0.25" max="2.0" step="0.25">
+              </div>
+              <div class="input-group">
+                <label>目标时长 (秒)</label>
+                <input type="number" id="target-duration" value="30" min="5" max="300" step="5">
+              </div>
+            </div>
+
+            <div class="form-row">
+              <div class="input-group">
+                <label>输出规格</label>
+                <select id="output-aspect">
+                  <option value="16:9">横屏 16:9</option>
+                  <option value="9:16">竖屏 9:16</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary" id="btn-create">创建任务并上传</button>
+              <button type="reset" class="btn btn-ghost" onclick="resetUpload()">重置</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- === View 2: Task List === -->
+    <div id="view-task-list" class="view">
+      <div class="page-header">
+        <div>
+          <h1>任务记录</h1>
+          <p class="subtitle">查看和管理所有分析任务</p>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="switchView('new-task')">+ 新建任务</button>
+      </div>
+
+      <!-- Loading state -->
+      <div id="task-list-loading" class="state-container" style="display:none">
+        <div class="spinner spinner-lg"></div>
+        <div class="state-title">加载中...</div>
+      </div>
+
+      <!-- Empty state -->
+      <div id="task-list-empty" class="state-container" style="display:none">
+        <div class="state-icon">&#9654;</div>
+        <div class="state-title">暂无任务记录</div>
+        <div class="state-desc">创建一个新任务后，它会显示在这里</div>
+        <div class="state-action">
+          <button class="btn btn-primary" onclick="switchView('new-task')">+ 新建任务</button>
+        </div>
+      </div>
+
+      <!-- Error state -->
+      <div id="task-list-error" class="state-container" style="display:none">
+        <div class="state-icon">&#9888;</div>
+        <div class="state-title">加载失败</div>
+        <div id="task-list-error-msg" class="state-desc">无法获取任务列表</div>
+        <div class="state-action">
+          <button class="btn btn-secondary" onclick="loadTaskList()">重试</button>
+        </div>
+      </div>
+
+      <!-- Table -->
+      <div id="task-list-table" class="card" style="display:none">
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th>任务编号</th>
+                <th>项目名称</th>
+                <th>素材名称</th>
+                <th>游戏</th>
+                <th>状态</th>
+                <th>创建时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="task-list-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- === View 3: Task Detail === -->
+    <div id="view-task-detail" class="view">
+      <div class="page-header">
+        <div>
+          <button class="btn btn-ghost btn-sm" onclick="switchView('task-list')">&larr; 返回任务列表</button>
+          <h1 id="detail-title" style="margin-top:8px">任务详情</h1>
+        </div>
+        <div id="detail-actions" style="display:none">
+          <button class="btn btn-danger btn-sm" onclick="deleteCurrentJob()">删除任务</button>
+        </div>
+      </div>
+
+      <!-- Loading state -->
+      <div id="detail-loading" class="detail-loading">
+        <div class="spinner spinner-lg"></div>
+        <div class="loading-text">加载任务信息...</div>
+      </div>
+
+      <!-- Content -->
+      <div id="detail-content" style="display:none">
+
+        <!-- Video Info Bar -->
+        <div id="detail-video-info" class="video-info-bar"></div>
+
+        <!-- Running state -->
+        <div id="detail-running" style="display:none">
+          <div class="card">
+            <div class="card-body">
+              <div class="flex items-center gap-12">
+                <div class="pulse"></div>
+                <div>
+                  <div style="font-weight:600">任务正在分析中</div>
+                  <div id="detail-status-text" class="text-sm text-muted mt-8">当前状态：running</div>
+                </div>
+              </div>
+              <div class="progress-bar mt-16">
+                <div class="progress-fill" id="detail-progress" style="width:30%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Queued state -->
+        <div id="detail-queued" style="display:none">
+          <div class="card">
+            <div class="card-body">
+              <div class="flex items-center gap-12">
+                <div class="spinner"></div>
+                <div>
+                  <div style="font-weight:600">任务已提交，等待处理...</div>
+                  <div class="text-sm text-muted mt-8">系统将在后台开始分析</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Failed state -->
+        <div id="detail-failed" style="display:none">
+          <div class="card" style="border-color:var(--danger)">
+            <div class="card-header"><h3>&#9888; 任务失败</h3></div>
+            <div class="card-body">
+              <p id="detail-error-msg" class="text-sm"></p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Completed: Analysis Results -->
+        <div id="detail-completed" style="display:none">
+          <!-- Score bars -->
+          <div class="card">
+            <div class="card-header"><h3>精彩评分</h3></div>
+            <div class="card-body">
+              <div class="score-bars" id="detail-score-bars"></div>
+              <div class="text-xs text-muted mt-8" id="detail-weights-info"></div>
+            </div>
+          </div>
+
+          <!-- Segment Editor -->
+          <div class="card mt-16">
+            <div class="card-header">
+              <h3>候选片段</h3>
+              <span class="text-sm text-muted" id="detail-seg-info"></span>
+            </div>
+            <div class="card-body" id="detail-segment-editor"></div>
+          </div>
+
+          <!-- Keyframes -->
+          <div class="card mt-16">
+            <div class="card-header">
+              <h3>关键帧审核</h3>
+              <div class="flex gap-8">
+                <span id="kf-keep-count" class="text-sm" style="color:var(--success)"></span>
+                <span id="kf-skip-count" class="text-sm" style="color:var(--text-muted)"></span>
+              </div>
+            </div>
+            <div class="card-body">
+              <div class="keyframe-grid" id="detail-keyframes"></div>
+            </div>
+          </div>
+
+          <!-- Save & Generate -->
+          <div class="card mt-16">
+            <div class="card-body">
+              <div class="flex gap-12">
+                <button class="btn btn-primary" onclick="saveReview()" id="btn-save-review">保存审核结果</button>
+                <button class="btn btn-secondary" onclick="generateRoughCut()" id="btn-rough-cut">生成粗剪视频</button>
+              </div>
+              <div id="review-status" class="text-sm mt-8" style="display:none"></div>
+            </div>
+          </div>
+
+          <!-- Output -->
+          <div id="detail-output" class="output-section" style="display:none"></div>
+
+          <!-- Report link -->
+          <div class="mt-16 flex gap-12">
+            <button class="btn btn-ghost btn-sm" onclick="viewReport()">查看 JSON 报告</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+<!-- Toast container -->
+<div class="toast-container" id="toast-container"></div>
+
+<!-- Report Modal -->
+<div class="modal-overlay" id="report-modal" style="display:none" onclick="if(event.target===this)closeReport()">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>分析报告</h3>
+      <button class="btn btn-ghost btn-sm" onclick="closeReport()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <pre id="report-content"></pre>
+    </div>
+  </div>
+</div>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>

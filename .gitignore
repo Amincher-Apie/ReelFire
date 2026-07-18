@@ -17,8 +17,13 @@ venv/
 Thumbs.db
 
 # Runtime data and generated media
-outputs/
+outputs/*
+!outputs/.gitkeep
 *.log
+*.mp4
+*.avi
+*.mov
+*.mkv
 
 # Large model artifacts are delivered separately unless Git LFS is configured
 models/*.pt
