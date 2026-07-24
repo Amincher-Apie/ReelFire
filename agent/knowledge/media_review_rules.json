@@ -12,10 +12,18 @@
     "retrieval": {
       "strategy": "hybrid",
       "embedding": {
+        "acceptance_provider": "ollama",
         "default_provider": "ollama",
+        "dataset_name": "ReelFire 媒体审核知识库 v1",
+        "source_document": "dify_media_review_rules.md",
+        "indexing_technique": "high_quality",
+        "chunk_separator": "---",
+        "expected_chunks": 12,
+        "local_provider": "ollama",
         "base_url_env": "OLLAMA_BASE_URL",
         "model_env": "OLLAMA_EMBED_MODEL",
         "managed_provider_options": [
+          "ollama",
           "dify",
           "coze"
         ],
