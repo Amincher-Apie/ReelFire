@@ -27,9 +27,24 @@ outputs/*
 *.mkv
 
 # Large model artifacts are delivered separately unless Git LFS is configured
-models/*.pt
+# 课设要求提交模型权重或下载说明，因此保留 models/*.pt 可提交
+# 如需排除特定大文件，使用 .gitattributes 或 Git LFS
 models/*.onnx
 models/*.engine
+
+# 安装包和误下载的文件
+*.whl
+yolo26n.pt
+
+# 训练中间产物：只保留 v3 最终成果，排除 v1/v2 和中间 epoch 权重
+runs/detect/custom_fps/
+runs/detect/custom_fps_v2/
+runs/detect/val/
+runs/detect/val-2/
+runs/detect/val-3/
+runs/detect/val-4/
+runs/detect/custom_fps_v3/weights/epoch*.pt
+runs/detect/custom_fps_v3/weights/last.pt
 
 # Private
 RealName.md

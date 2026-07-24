@@ -1,0 +1,4 @@
+character_ct
+character_t
+weapon_rifle
+weapon_pistol
