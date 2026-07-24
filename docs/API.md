@@ -42,7 +42,7 @@
 
 成功返回 `200` 和 `deleted_job_id`。不存在返回 `404`；`queued/running` 返回 `409`；非法编号返回 `400`。
 
-## 方向 B 接口
+## 题目 1 现有内容理解接口
 
 ### `POST /api/jobs/<job_id>/analyze`
 

@@ -1,4 +1,4 @@
-# 系统设计（第一阶段）
+# ReelFire 系统设计（现有基线与四天扩展）
 
 ## 分层
 
@@ -10,6 +10,7 @@ routes/api_routes.py       HTTP 校验与响应
         +-- file_service.py       文件名、扩展名、空文件和保存
         +-- job_service.py        job.json、报告、目录、状态与删除
         +-- analysis_service.py   受控后台线程与 CV 接入口
+        +-- agent_service.py      计划新增：三工具 Agent、知识库与日志
         +-- ffmpeg_service.py     FFmpeg 就绪检查与粗剪接入口
         |
 outputs/<job_id>/          本地文件系统持久化
@@ -41,7 +42,7 @@ failed  -> queued  （允许人工重试）
 
 路由线程先原子地把任务更新为 `queued`，再提交给最大 1～2 个工作线程的 `ThreadPoolExecutor`。后台只接收 job_id、`Path` 和普通字典，不接收 Flask `request`。开始执行时写 `running/started_at`；算法返回真实报告后写 `completed/completed_at/result_file`；任何算法异常均写 `failed/completed_at/error`。
 
-当前 `analyze_video(video_path, job_dir, settings)` 明确抛出 `NotImplementedError`，所以不会产生伪造结果。
+当前 `analyze_video(video_path, job_dir, settings)` 已执行真实 OpenCV 采样、YOLO 推理、三项评分、关键帧去重、候选片段、检测框证据和联系表生成。任何异常都会写入 `failed`，不会产生伪造结果。
 
 ## 重启恢复策略
 
@@ -60,5 +61,7 @@ failed  -> queued  （允许人工重试）
 
 - CV：`services.analysis_service.analyze_video` 已返回可 JSON 序列化的真实报告字典，并输出带 YOLO 框关键帧；
 - 算法增强：报告根据候选片段内的真实检测生成 `segment_tags`，并根据最高分关键帧生成不虚构事件的 `ai_cover_prompt`；
+- Agent：四天计划新增 `AgentService`。其工具链至少包括视觉报告解析、知识库检索、内容建议/规则校验，并保存 `job_id`、工具轨迹、耗时、状态和错误；`segment_tags` 与 `ai_cover_prompt` 仅作为规则回退；
+- 数据层：继续保留便于交付的任务 JSON，同时用 SQLite 保存用户、项目、素材元数据、三态审核和 Agent 调用日志；
 - FFmpeg：`services.ffmpeg_service.create_rough_cut` 已生成真实文件并返回 `Path`；
 - 前端：轮询任务详情，完成后读取 `/report`，通过 `/review` 写回人工选择，再调用 `/rough-cut`。
