@@ -1,0 +1,478 @@
+{
+  "knowledge_base": {
+    "name": "ReelFire 媒体分类与审核规则库",
+    "version": "1.0.0",
+    "language": "zh-CN",
+    "description": "基于真实 YOLO 检测、时间戳和精彩度指标生成可追溯审核建议。",
+    "allowed_review_states": [
+      "pass",
+      "needs_review",
+      "reject"
+    ],
+    "retrieval": {
+      "strategy": "hybrid",
+      "embedding": {
+        "default_provider": "ollama",
+        "base_url_env": "OLLAMA_BASE_URL",
+        "model_env": "OLLAMA_EMBED_MODEL",
+        "managed_provider_options": [
+          "dify",
+          "coze"
+        ],
+        "index_text_fields": [
+          "title",
+          "category",
+          "keywords",
+          "summary_guidance",
+          "suggestions",
+          "limitations"
+        ]
+      },
+      "vector_search": {
+        "metric": "cosine",
+        "top_k": 5,
+        "min_similarity": 0.45
+      },
+      "rule_rerank": {
+        "class_match_bonus": 0.25,
+        "metric_match_bonus": 0.2,
+        "keyword_match_bonus": 0.15,
+        "always_apply": true
+      },
+      "fallback": {
+        "mode": "lexical_class_metric",
+        "mark_status": "degraded",
+        "trigger_on": [
+          "embedding_model_missing",
+          "embedding_timeout",
+          "managed_provider_unavailable"
+        ]
+      },
+      "result_fields": [
+        "knowledge_id",
+        "similarity",
+        "match_reasons"
+      ]
+    },
+    "entries": [
+      {
+        "knowledge_id": "KB-CORE-001",
+        "category": "evidence_boundary",
+        "title": "检测事实引用边界",
+        "keywords": [
+          "事实",
+          "证据",
+          "引用",
+          "hallucination",
+          "grounding"
+        ],
+        "match": {
+          "always_apply": true,
+          "detected_classes": [],
+          "metrics": []
+        },
+        "review_recommendation": "needs_review",
+        "summary_guidance": "只描述报告中真实存在的类别、置信度、时间戳和分数。",
+        "suggestions": [
+          "每个关键结论至少附带一个 evidence_ref",
+          "不得把击杀、爆头、残局、胜负或武器名称写成检测事实",
+          "证据不足时明确标记待复核"
+        ],
+        "required_evidence_fields": [
+          "timestamp",
+          "source_id"
+        ],
+        "limitations": [
+          "当前通用 YOLO 类别不能直接证明 FPS 专用事件"
+        ]
+      },
+      {
+        "knowledge_id": "KB-QUALITY-001",
+        "category": "evidence_quality",
+        "title": "空检测结果处理",
+        "keywords": [
+          "空检测",
+          "无目标",
+          "no detection",
+          "empty"
+        ],
+        "match": {
+          "always_apply": false,
+          "detected_classes": [],
+          "metrics": [
+            {
+              "field": "total_detections",
+              "operator": "eq",
+              "value": 0
+            }
+          ]
+        },
+        "review_recommendation": "needs_review",
+        "summary_guidance": "可以描述运动或画面变化，但必须明确没有可靠目标类别证据。",
+        "suggestions": [
+          "人工检查关键帧是否过暗、模糊或与模型类别不匹配",
+          "不要生成目标类别标签",
+          "可依据真实分数建议重新采样或调整阈值"
+        ],
+        "required_evidence_fields": [
+          "highlight_score",
+          "timestamp"
+        ],
+        "limitations": [
+          "空检测不等同于画面没有内容"
+        ]
+      },
+      {
+        "knowledge_id": "KB-QUALITY-002",
+        "category": "evidence_quality",
+        "title": "低置信度检测处理",
+        "keywords": [
+          "低置信度",
+          "模糊",
+          "low confidence",
+          "uncertain"
+        ],
+        "match": {
+          "always_apply": false,
+          "detected_classes": [],
+          "metrics": [
+            {
+              "field": "max_confidence",
+              "operator": "lt",
+              "value": 0.5
+            }
+          ]
+        },
+        "review_recommendation": "needs_review",
+        "summary_guidance": "使用“可能检测到”或“低置信度候选”表述，不作确定性结论。",
+        "suggestions": [
+          "展示置信度并安排人工复核",
+          "检查检测框是否覆盖目标主体",
+          "必要时调整阈值或使用自定义模型复测"
+        ],
+        "required_evidence_fields": [
+          "class_name",
+          "confidence",
+          "timestamp"
+        ],
+        "limitations": [
+          "低置信度类别不能单独支持通过结论"
+        ]
+      },
+      {
+        "knowledge_id": "KB-QUALITY-003",
+        "category": "evidence_quality",
+        "title": "高置信度检测表述",
+        "keywords": [
+          "高置信度",
+          "可靠检测",
+          "high confidence"
+        ],
+        "match": {
+          "always_apply": false,
+          "detected_classes": [],
+          "metrics": [
+            {
+              "field": "max_confidence",
+              "operator": "gte",
+              "value": 0.75
+            }
+          ]
+        },
+        "review_recommendation": "pass",
+        "summary_guidance": "可以确认报告中的目标类别，但仍不能扩展为未检测事件。",
+        "suggestions": [
+          "优先选用高置信度且精彩度较高的关键帧",
+          "在标签中保留真实类别名称"
+        ],
+        "required_evidence_fields": [
+          "class_name",
+          "confidence",
+          "timestamp"
+        ],
+        "limitations": [
+          "高置信度只证明类别检测，不证明剧情或比赛事件"
+        ]
+      },
+      {
+        "knowledge_id": "KB-SCORE-001",
+        "category": "highlight_score",
+        "title": "高运动强度片段",
+        "keywords": [
+          "运动",
+          "动作",
+          "motion",
+          "dynamic"
+        ],
+        "match": {
+          "always_apply": false,
+          "detected_classes": [],
+          "metrics": [
+            {
+              "field": "max_motion_score",
+              "operator": "gte",
+              "value": 0.65
+            }
+          ]
+        },
+        "review_recommendation": "pass",
+        "summary_guidance": "可描述为高运动强度或动态变化明显的候选片段。",
+        "suggestions": [
+          "优先保留动作连续且边界完整的片段",
+          "剪辑时避免在运动峰值中间硬切"
+        ],
+        "required_evidence_fields": [
+          "motion_score",
+          "timestamp"
+        ],
+        "limitations": [
+          "运动强度高不等于发生击杀或胜负事件"
+        ]
+      },
+      {
+        "knowledge_id": "KB-SCORE-002",
+        "category": "highlight_score",
+        "title": "高画面变化片段",
+        "keywords": [
+          "转场",
+          "画面变化",
+          "scene change",
+          "transition"
+        ],
+        "match": {
+          "always_apply": false,
+          "detected_classes": [],
+          "metrics": [
+            {
+              "field": "max_scene_change_score",
+              "operator": "gte",
+              "value": 0.65
+            }
+          ]
+        },
+        "review_recommendation": "needs_review",
+        "summary_guidance": "可描述为画面变化明显，应检查它是有效转场还是抖动、闪屏。",
+        "suggestions": [
+          "人工确认转场前后语义是否连续",
+          "避免仅因闪屏或菜单切换判定为精彩内容"
+        ],
+        "required_evidence_fields": [
+          "scene_change_score",
+          "timestamp"
+        ],
+        "limitations": [
+          "高画面变化可能来自 UI 切换、抖动或黑场"
+        ]
+      },
+      {
+        "knowledge_id": "KB-SCORE-003",
+        "category": "highlight_score",
+        "title": "目标密集片段",
+        "keywords": [
+          "目标密集",
+          "多人",
+          "object density",
+          "crowded"
+        ],
+        "match": {
+          "always_apply": false,
+          "detected_classes": [],
+          "metrics": [
+            {
+              "field": "max_object_count",
+              "operator": "gte",
+              "value": 4
+            }
+          ]
+        },
+        "review_recommendation": "pass",
+        "summary_guidance": "可描述为目标较密集的画面，并列出真实类别和数量。",
+        "suggestions": [
+          "选择目标清晰且遮挡较少的关键帧",
+          "标签数量必须来自对应时间戳的检测结果"
+        ],
+        "required_evidence_fields": [
+          "object_count",
+          "timestamp"
+        ],
+        "limitations": [
+          "目标密集不代表多人对战或团战"
+        ]
+      },
+      {
+        "knowledge_id": "KB-CLASS-001",
+        "category": "detected_class",
+        "title": "人物类目标审核",
+        "keywords": [
+          "人物",
+          "角色",
+          "person",
+          "human"
+        ],
+        "match": {
+          "always_apply": false,
+          "detected_classes": [
+            "person"
+          ],
+          "metrics": []
+        },
+        "review_recommendation": "pass",
+        "summary_guidance": "可以描述人物目标的数量、置信度和出现时间。",
+        "suggestions": [
+          "人物标签只使用 person，不推断玩家身份或阵营",
+          "多人画面优先检查遮挡和重复框"
+        ],
+        "required_evidence_fields": [
+          "class_name",
+          "confidence",
+          "timestamp"
+        ],
+        "limitations": [
+          "person 类别不能证明真人、游戏角色、敌我关系或击杀事件"
+        ]
+      },
+      {
+        "knowledge_id": "KB-CLASS-002",
+        "category": "detected_class",
+        "title": "交通工具类目标审核",
+        "keywords": [
+          "车辆",
+          "交通",
+          "vehicle",
+          "car",
+          "truck"
+        ],
+        "match": {
+          "always_apply": false,
+          "detected_classes": [
+            "bicycle",
+            "car",
+            "motorcycle",
+            "bus",
+            "train",
+            "truck",
+            "boat"
+          ],
+          "metrics": []
+        },
+        "review_recommendation": "pass",
+        "summary_guidance": "列出报告中的真实交通工具类别，不推断追逐、碰撞或驾驶行为。",
+        "suggestions": [
+          "优先选择主体完整、检测框稳定的画面",
+          "多个车辆类别同时出现时按置信度和数量排序"
+        ],
+        "required_evidence_fields": [
+          "class_name",
+          "confidence",
+          "timestamp"
+        ],
+        "limitations": [
+          "类别检测不证明具体行为或事件"
+        ]
+      },
+      {
+        "knowledge_id": "KB-CLASS-003",
+        "category": "detected_class",
+        "title": "运动器材类目标审核",
+        "keywords": [
+          "运动",
+          "球类",
+          "sports",
+          "sports ball",
+          "skateboard"
+        ],
+        "match": {
+          "always_apply": false,
+          "detected_classes": [
+            "frisbee",
+            "skis",
+            "snowboard",
+            "sports ball",
+            "kite",
+            "baseball bat",
+            "baseball glove",
+            "skateboard",
+            "surfboard",
+            "tennis racket"
+          ],
+          "metrics": []
+        },
+        "review_recommendation": "needs_review",
+        "summary_guidance": "只描述检测到的器材类别，体育项目和动作需要人工确认。",
+        "suggestions": [
+          "结合人物和器材的真实检测证据进行复核",
+          "不要仅凭器材类别确定比赛项目"
+        ],
+        "required_evidence_fields": [
+          "class_name",
+          "confidence",
+          "timestamp"
+        ],
+        "limitations": [
+          "器材类别不能单独证明体育项目或动作"
+        ]
+      },
+      {
+        "knowledge_id": "KB-SEGMENT-001",
+        "category": "segment_quality",
+        "title": "候选片段边界检查",
+        "keywords": [
+          "片段",
+          "边界",
+          "segment",
+          "clip"
+        ],
+        "match": {
+          "always_apply": true,
+          "detected_classes": [],
+          "metrics": []
+        },
+        "review_recommendation": "needs_review",
+        "summary_guidance": "片段建议必须引用合法的 start、end 和 source_keyframes。",
+        "suggestions": [
+          "确认 start 小于 end 且不超出视频时长",
+          "确认 source_keyframes 在报告中真实存在",
+          "边界异常时拒绝自动通过"
+        ],
+        "required_evidence_fields": [
+          "segment_id",
+          "start",
+          "end"
+        ],
+        "limitations": [
+          "Agent 不直接修改视频，只提供边界建议"
+        ]
+      },
+      {
+        "knowledge_id": "KB-REVIEW-001",
+        "category": "review_policy",
+        "title": "证据冲突与知识库未命中",
+        "keywords": [
+          "冲突",
+          "未命中",
+          "unknown",
+          "conflict",
+          "knowledge miss"
+        ],
+        "match": {
+          "always_apply": true,
+          "detected_classes": [],
+          "metrics": []
+        },
+        "review_recommendation": "needs_review",
+        "summary_guidance": "当证据之间冲突或没有适用知识条目时，保留事实摘要并转人工复核。",
+        "suggestions": [
+          "记录 knowledge_miss 或 evidence_conflict",
+          "不要临时编造知识规则",
+          "输出可复核的原始证据引用"
+        ],
+        "required_evidence_fields": [
+          "source_id"
+        ],
+        "limitations": [
+          "待复核不是失败，不能丢弃原 CV 报告"
+        ]
+      }
+    ]
+  }
+}
