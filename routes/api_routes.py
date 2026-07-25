@@ -366,3 +366,49 @@ def rough_cut(job_id: str):
 def get_report(job_id: str):
     jobs, _, _ = _services()
     return jsonify(ok=True, report=jobs.read_report(job_id))
+
+
+@api_bp.get("/jobs/<job_id>/editor")
+def get_editor(job_id: str):
+    """返回剪辑预览工作台所需的聚合数据。
+
+    聚合 CV 报告和 Agent 评论，统一为编辑页提供数据。
+    Agent 评论不存在时返回空数组，编辑页展示 pending 状态。
+    """
+    jobs, _, _ = _services()
+    job = jobs.read_job(job_id)
+    report = jobs.read_report(job_id) if job.get("status") == "completed" else {}
+
+    video = report.get("video") or {}
+    segments = report.get("segments") or []
+    keyframes = report.get("keyframes") or []
+    output = report.get("output") or {}
+
+    # 尝试读取 Agent 报告（agent_report.json）
+    agent_comments = []
+    try:
+        agent_report = jobs.read_agent_report(job_id)
+        agent_comments = agent_report.get("segment_comments") or []
+    except Exception:
+        agent_comments = []
+
+    return jsonify(
+        ok=True,
+        job_id=job_id,
+        status=job.get("status", "unknown"),
+        video={
+            "duration": video.get("duration"),
+            "width": video.get("width"),
+            "height": video.get("height"),
+            "fps": video.get("fps"),
+            "has_audio": video.get("has_audio", False),
+            "path": (
+                output.get("video")
+                if output.get("video")
+                else None
+            ),
+        },
+        segments=segments,
+        agent_comments=agent_comments,
+        keyframes=keyframes,
+    )
