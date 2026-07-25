@@ -19,10 +19,12 @@ class ApiTestCase(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
         self.outputs_dir = root / "outputs"
-        self.users_file = root / "users.db"
         self.app = create_app(
             {
                 "TESTING": True,
+                "DATABASE": root / "test.db",
+                "SECRET_KEY": "test-secret-key",
+                "LEGACY_USERS_FILE": root / "legacy-users.db",
                 "OUTPUTS_DIR": self.outputs_dir,
                 "MODELS_DIR": root / "models",
                 "MODEL_PATH": root / "models" / "missing.pt",
@@ -171,19 +173,18 @@ class ApiTestCase(unittest.TestCase):
             "username": "frontend-reviewer",
             "password": "test-passphrase",
         }
-        with patch("routes.auth_routes.USERS_FILE", self.users_file):
-            register = self.client.post("/api/auth/register", json=credentials)
-            current = self.client.get("/api/auth/me")
-            logout = self.client.post("/api/auth/logout")
-            anonymous = self.client.get("/api/auth/me")
-            login = self.client.post("/api/auth/login", json=credentials)
+        register = self.client.post("/api/auth/register", json=credentials)
+        current = self.client.get("/api/auth/me")
+        logout = self.client.post("/api/auth/logout")
+        anonymous = self.client.get("/api/auth/me")
+        login = self.client.post("/api/auth/login", json=credentials)
 
         self.assertEqual(register.status_code, 201)
         self.assertEqual(current.status_code, 200)
         self.assertEqual(logout.status_code, 200)
         self.assertEqual(anonymous.status_code, 401)
         self.assertEqual(login.status_code, 200)
-        self.assertTrue(self.users_file.is_file())
+        self.assertEqual(login.get_json()["user"]["username"], credentials["username"])
 
     def test_create_job_persists_workspace_and_metadata(self) -> None:
         job_id = self.create_job()

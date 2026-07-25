@@ -13,10 +13,18 @@ class Config:
     """Default configuration for the first backend release."""
 
     BASE_DIR = BASE_DIR
+    # Production deployments should set REELFIRE_SECRET_KEY explicitly.
+    SECRET_KEY = os.environ.get("REELFIRE_SECRET_KEY")
     DATABASE = Path(
         os.environ.get(
             "REELFIRE_DATABASE",
             str(BASE_DIR / "instance" / "reelfire.db"),
+        )
+    )
+    LEGACY_USERS_FILE = Path(
+        os.environ.get(
+            "REELFIRE_LEGACY_USERS_FILE",
+            str(BASE_DIR / "users.db"),
         )
     )
     OUTPUTS_DIR = BASE_DIR / "outputs"
