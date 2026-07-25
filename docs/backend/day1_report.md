@@ -275,7 +275,7 @@ A  database/migrations/001_initial.sql
 * 已创建并核对 8 张业务及版本表；
 * `schema_version` 初始版本为 `(1, 'initial')`；
 * `git diff --check` 已通过；
-* 当前仓库本地 Git 身份已配置为 `tony1155`。
+* 当前仓库本地 Git 身份已按后端工程师角色配置。
 
 ### Git 提交记录
 
