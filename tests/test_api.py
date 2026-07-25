@@ -402,6 +402,9 @@ class ApiTestCase(unittest.TestCase):
         restarted = create_app(
             {
                 "TESTING": True,
+                "DATABASE": root / "test.db",
+                "SECRET_KEY": "test-secret-key",
+                "LEGACY_USERS_FILE": root / "legacy-users.db",
                 "OUTPUTS_DIR": self.outputs_dir,
                 "MODELS_DIR": root / "models",
                 "MODEL_PATH": root / "models" / "missing.pt",
