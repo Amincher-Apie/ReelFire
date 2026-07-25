@@ -812,9 +812,9 @@ GET    /outputs/<job_id>/<path:filename>
 
 ---
 
-## 11. 规划中：内容级三态审核
+## 11. 已实现：内容级三态审核
 
-目标三态：
+固定三态：
 
 ```text
 approved
@@ -833,21 +833,41 @@ rejected
 说明：
 
 - `keep/skip` 仍表示单个关键帧决策；
-- 内容级三态保存到 SQLite `reviews`；
-- 片段、关键帧和备注仍同步写入文件报告；
-- 每次审核应保留历史，不静默覆盖上一条记录。
+- 内容级三态保存到 SQLite `reviews.status`；
+- `reviews.job_row_id` 指向内部 `jobs.id`，API 路径仍使用公开 `job_id`；
+- 每次携带 `status` 的审核都新增历史记录，不覆盖旧记录；
+- 提交的片段和关键帧分别序列化到 `segments_json` 和
+  `keyframes_json`，未提交时数据库保存 `null`；
+- `PATCH /review` 继续更新 `analysis_report.json`，成功响应中的
+  `report` 字段保持不变；
+- Agent 不得更新或覆盖人工 `reviews` 记录。
 
-计划接口：
+查询接口：
 
 ```http
 GET /api/jobs/<job_id>/reviews
+GET /api/jobs/<job_id>/review/latest
 ```
 
-写回可以继续复用：
+历史按最新记录优先返回；没有记录时分别返回空数组或 `review: null`。
+两个接口使用与任务详情相同的归属权限。
+
+写回接口：
 
 ```http
 PATCH /api/jobs/<job_id>/review
 ```
+
+除原有 `keyframes`、`segments` 和 `recommended_clip` 外，可提交
+`status`、`labels` 和 `note`。只有出现 `status` 时才新增 SQLite
+审核历史。
+
+Legacy 文件任务不携带 `status` 时继续更新文件报告；携带 `status`
+时因没有可关联的内部任务行，返回
+`409 REVIEW_PERSISTENCE_UNAVAILABLE`，并且不修改报告。
+
+输入错误返回 `400 REVIEW_INPUT_INVALID`。项目任务仍使用
+`401 AUTH_REQUIRED` 和 `403 JOB_ACCESS_DENIED`。
 
 ---
 
