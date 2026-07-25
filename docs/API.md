@@ -106,10 +106,10 @@ multipart/form-data
 
 当前系统采用混合存储：
 
-- SQLite：用户、后续项目归属、任务索引、审核记录和 Agent 调用日志；
+- SQLite：用户、项目归属，以及携带 `project_id` 创建的素材和任务索引；审核记录和 Agent 调用日志仍属于后续阶段；
 - 文件系统：源视频、`job.json`、`analysis_report.json`、`agent_report.json`、关键帧和导出文件。
 
-当前任务运行链仍以 `JobService` 和任务目录中的 JSON 文件为事实来源；SQLite 任务归属尚在后续阶段接入。
+任务运行链仍以 `JobService` 和任务目录中的 JSON 文件为事实来源；项目型上传同时在 SQLite 建立归属索引。
 
 ---
 
@@ -267,8 +267,7 @@ session_secret
 
 ## 5. 已实现：任务与视频分析接口
 
-> 当前任务接口仍使用文件型任务和 `project_name`。
-> 项目表、`project_id` 和任务归属校验属于后续规划，当前不得突然设为强制字段。
+> 上传接口同时支持项目型和旧文件型流程。API、URL 和 JSON 对外仍使用公开字段名 `job_id`。
 
 ### 5.1 `POST /api/jobs`
 
@@ -283,6 +282,7 @@ session_secret
 当前可选字段：
 
 ```text
+project_id
 project_name
 sample_interval
 target_duration
@@ -300,6 +300,14 @@ output_ratio
 - 三个权重范围为 `0..1`，且总和必须为 `1`；
 - `output_ratio` 支持 `16:9`、`9:16`、`1:1`；
 - 超过 `MAX_CONTENT_LENGTH` 返回 `413`。
+
+兼容流程：
+
+- 表单中没有 `project_id` 时，不要求登录，继续按 `project_name` 创建仅由文件系统管理的任务，不写入 SQLite `assets` 和 `jobs`；
+- 表单中存在 `project_id` 时（包括空值），必须登录且该项目必须属于当前用户；空值或非正整数返回 `400 PROJECT_INPUT_INVALID`；
+- 项目型上传以 SQLite 项目的 `name` 作为 `job.json` 中可信的 `project_name`，请求中的冲突值不能改变项目归属；
+- 项目型上传在同一事务中先写入 `assets`、再写入 `jobs`，数据库失败时回滚并清理本次尚未成功返回的任务目录；
+- `jobs.public_job_id` 与响应中的字符串 `job_id` 完全相同。
 
 成功返回 `201`：
 
@@ -708,20 +716,31 @@ output.rough_cut_url
 
 ---
 
-## 9. 规划中：SQLite 项目与任务归属
+## 9. 已实现：SQLite 项目与上传任务归属
 
-> 本节为目标契约，不是当前已完成事实。
-
-计划新增：
+已实现接口：
 
 ```http
-POST  /api/projects
-GET   /api/projects
-GET   /api/projects/<project_id>
-PATCH /api/projects/<project_id>
+POST /api/projects
+GET  /api/projects
 ```
 
-目标数据关系：
+两个接口均要求登录。`owner_id` 只来自当前 Session，客户端不得指定。
+
+`POST /api/projects` 接收：
+
+```json
+{
+  "name": "CS2 教学素材",
+  "description": "课程演示项目",
+  "game_type": "cs2"
+}
+```
+
+成功返回 `201`，其中 `status` 固定为 `active`。`GET /api/projects`
+仅返回当前登录用户自己的项目。
+
+当前数据关系：
 
 ```text
 当前用户
@@ -730,24 +749,22 @@ PATCH /api/projects/<project_id>
 → jobs.project_id
 ```
 
-目标上传流程：
+项目型上传会校验项目归属、创建文件任务，再在同一事务中创建素材和任务
+索引，同时保留任务目录中的 `job.json`。数据库写入失败时清理本次尚未
+成功返回的任务目录。
 
-```text
-登录
-→ 选择或创建项目
-→ POST /api/jobs 携带 project_id
-→ 校验项目归属
-→ 创建素材和任务索引
-→ 保留任务目录中的 job.json 与分析报告
-```
+稳定错误：
 
-迁移顺序：
+| HTTP | `error_code` | 场景 |
+| ---: | --- | --- |
+| 400 | `PROJECT_INPUT_INVALID` | 项目输入或 `project_id` 非法 |
+| 400 | `PROJECT_OWNER_FORBIDDEN` | 请求体尝试指定 `owner_id` |
+| 401 | `AUTH_REQUIRED` | 项目接口或项目型上传未登录 |
+| 403 | `PROJECT_ACCESS_DENIED` | 项目属于其他用户 |
+| 404 | `PROJECT_NOT_FOUND` | 项目不存在 |
 
-1. 后端先实现项目接口和兼容逻辑；
-2. 前端增加项目创建与选择；
-3. 前端改为提交 `project_id`；
-4. 联调和测试通过后，再将 `project_id` 设为严格必填；
-5. `project_name` 保留明确兼容期。
+旧文件型任务可能没有 SQLite `jobs` 索引。现有 editor、review、
+analyze、delete 等任务接口的归属保护仍属于下一阶段。
 
 ---
 

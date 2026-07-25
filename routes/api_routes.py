@@ -13,7 +13,16 @@ from werkzeug.datastructures import FileStorage
 from services.analysis_service import AnalysisService
 from services.ffmpeg_service import create_rough_cut, is_ffmpeg_available
 from services.file_service import FileService, FileValidationError
+from services.job_index_service import create_asset_and_job_index
 from services.job_service import JobService, JobStateConflictError
+from services.project_service import (
+    ProjectOwnerForbiddenError,
+    ProjectValidationError,
+    create_project,
+    get_owned_project,
+    list_projects_for_owner,
+)
+from services.session_service import require_authenticated_user_id
 
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -325,6 +334,18 @@ def _json_object(*, optional: bool = False) -> dict[str, Any]:
     return payload
 
 
+def _positive_project_id(raw_value: object) -> int:
+    if isinstance(raw_value, bool) or not isinstance(raw_value, str):
+        raise ProjectValidationError("project_id 必须是正整数")
+    value = raw_value.strip()
+    if not value.isascii() or not value.isdecimal():
+        raise ProjectValidationError("project_id 必须是正整数")
+    project_id = int(value)
+    if project_id <= 0:
+        raise ProjectValidationError("project_id 必须是正整数")
+    return project_id
+
+
 @api_bp.get("/health")
 def health():
     model_path = Path(current_app.config["MODEL_PATH"])
@@ -338,22 +359,61 @@ def health():
     )
 
 
+@api_bp.post("/projects")
+def create_project_route():
+    owner_id = require_authenticated_user_id()
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise ProjectValidationError("请求体必须是合法的 JSON 对象")
+    if "owner_id" in payload:
+        raise ProjectOwnerForbiddenError("owner_id 只能来自当前登录 Session")
+    if "status" in payload:
+        raise ProjectValidationError("status 由服务端管理")
+    project = create_project(
+        owner_id,
+        payload.get("name"),
+        payload.get("description"),
+        payload.get("game_type"),
+    )
+    return jsonify(ok=True, project=project), 201
+
+
+@api_bp.get("/projects")
+def list_projects_route():
+    owner_id = require_authenticated_user_id()
+    return jsonify(
+        ok=True,
+        projects=list_projects_for_owner(owner_id),
+    )
+
+
 @api_bp.post("/jobs")
 def create_job():
     jobs, files, _ = _services()
+    uses_project_index = "project_id" in request.form
+    owner_id: int | None = None
+    project: dict[str, Any] | None = None
+    if uses_project_index:
+        owner_id = require_authenticated_user_id()
+        project_id = _positive_project_id(request.form.get("project_id"))
+        project = get_owned_project(project_id, owner_id)
+
     upload = request.files.get("file")
     if not isinstance(upload, FileStorage):
         raise FileValidationError("缺少必填的 file 字段")
 
     original_name, _ = files.validate_filename(upload)
     settings = _parse_job_settings(request.form.to_dict(flat=True))
-    project_name = request.form.get(
-        "project_name", current_app.config["DEFAULT_PROJECT_NAME"]
-    ).strip()
-    if not project_name:
-        project_name = current_app.config["DEFAULT_PROJECT_NAME"]
-    if len(project_name) > 100:
-        raise FileValidationError("project_name 长度不能超过 100")
+    if project is None:
+        project_name = request.form.get(
+            "project_name", current_app.config["DEFAULT_PROJECT_NAME"]
+        ).strip()
+        if not project_name:
+            project_name = current_app.config["DEFAULT_PROJECT_NAME"]
+        if len(project_name) > 100:
+            raise FileValidationError("project_name 长度不能超过 100")
+    else:
+        project_name = project["name"]
     game_type = str(request.form.get("game_type", "other")).strip().lower()
     if game_type not in {"csgo", "valorant", "other"}:
         raise FileValidationError("game_type 仅支持 csgo、valorant 或 other")
@@ -370,6 +430,27 @@ def create_job():
         if original_name != saved_path.name:
             job = jobs.update_job(job_id, original_asset_name=original_name)
         job = jobs.update_job(job_id, game_type=game_type)
+        if project is not None and owner_id is not None:
+            job = jobs.update_job(job_id, project_id=project["id"])
+            relative_base = Path(current_app.config["OUTPUTS_DIR"]).resolve().parent
+            stored_path = saved_path.resolve().relative_to(relative_base).as_posix()
+            job_json_path = (
+                (job_dir / "job.json")
+                .resolve()
+                .relative_to(relative_base)
+                .as_posix()
+            )
+            create_asset_and_job_index(
+                project_id=int(project["id"]),
+                created_by=owner_id,
+                public_job_id=job_id,
+                original_name=original_name,
+                stored_path=stored_path,
+                mime_type=upload.mimetype or None,
+                size_bytes=saved_path.stat().st_size,
+                job_json_path=job_json_path,
+                status=str(job["status"]),
+            )
     except Exception:
         jobs.discard_workspace(job_id)
         raise
