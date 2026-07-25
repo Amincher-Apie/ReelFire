@@ -83,6 +83,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def login_page():
         return render_template("login.html")
 
+    @app.get("/jobs/<job_id>/editor")
+    def editor_page(job_id: str):
+        jobs.get_job(job_id)
+        return render_template("editor.html", job_id=job_id)
+
     @app.get("/favicon.ico")
     def favicon():
         return send_file(Path(app.static_folder) / "favicon.svg", mimetype="image/svg+xml")

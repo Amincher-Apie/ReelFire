@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import math
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, url_for
 from werkzeug.datastructures import FileStorage
 
 from services.analysis_service import AnalysisService
@@ -146,6 +147,74 @@ def _duration(job: dict[str, Any], report: dict[str, Any]) -> float | None:
             if math.isfinite(value) and value >= 0:
                 return value
     return None
+
+
+def _agent_comments(job_dir: Path) -> tuple[dict[str, dict[str, Any]], str]:
+    """Read validated, final Agent comments without deriving prose from scores."""
+    candidates = (
+        job_dir / "agent_report.json",
+        job_dir / "result" / "agent_report.json",
+    )
+    source = next((path for path in candidates if path.is_file()), None)
+    if source is None:
+        return {}, "pending"
+    try:
+        with source.open("r", encoding="utf-8") as handle:
+            report = json.load(handle)
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        return {}, "unavailable"
+    if not isinstance(report, dict):
+        return {}, "unavailable"
+    if report.get("status") == "failed":
+        return {}, "unavailable"
+
+    comments: dict[str, dict[str, Any]] = {}
+    direct = report.get("segment_comments", [])
+    if isinstance(direct, list):
+        for item in direct:
+            if not isinstance(item, dict):
+                continue
+            segment_id = str(item.get("segment_id", "")).strip()
+            comment = str(item.get("comment", "")).strip()
+            if not segment_id or not comment:
+                continue
+            refs = item.get("evidence_refs", [])
+            comments[segment_id] = {
+                "comment": comment[:1000],
+                "evidence_refs": [
+                    str(ref)
+                    for ref in refs
+                    if isinstance(ref, str) and ref.strip()
+                ][:20],
+            }
+
+    suggestions = report.get("suggestions", [])
+    if isinstance(suggestions, list):
+        for item in suggestions:
+            if not isinstance(item, dict):
+                continue
+            action = str(item.get("action", "")).strip()
+            refs = item.get("evidence_refs", [])
+            if not action or not isinstance(refs, list):
+                continue
+            normalized_refs = [
+                str(ref)
+                for ref in refs
+                if isinstance(ref, str) and ref.strip()
+            ]
+            for reference in normalized_refs:
+                prefix = "ev:segment:"
+                if not reference.startswith(prefix):
+                    continue
+                segment_id = reference.removeprefix(prefix)
+                comments.setdefault(
+                    segment_id,
+                    {
+                        "comment": action[:1000],
+                        "evidence_refs": normalized_refs[:20],
+                    },
+                )
+    return comments, "pending"
 
 
 def _validate_clip(value: Any, duration: float | None) -> dict[str, Any]:
@@ -438,3 +507,103 @@ def rough_cut(job_id: str):
 def get_report(job_id: str):
     jobs, _, _ = _services()
     return jsonify(ok=True, report=jobs.read_report(job_id))
+
+
+@api_bp.get("/jobs/<job_id>/editor")
+def get_editor_contract(job_id: str):
+    jobs, _, _ = _services()
+    job = jobs.get_job_detail(job_id)
+    if job.get("status") != "completed" or not job.get("report_available"):
+        raise JobStateConflictError("分析报告尚未生成，不能打开剪辑预览")
+
+    report = jobs.read_report(job_id)
+    duration = _duration(job, report)
+    if duration is None:
+        raise FileValidationError("分析报告缺少有效的视频时长")
+    source_video = jobs.get_input_video(job_id)
+    job_dir = jobs.job_dir(job_id)
+    source_relative = source_video.relative_to(job_dir).as_posix()
+    comments, missing_comment_status = _agent_comments(job_dir)
+
+    raw_segments = report.get("segments", [])
+    if not isinstance(raw_segments, list):
+        raise FileValidationError("分析报告中的 segments 必须是数组")
+    segments = _validate_segments(raw_segments, duration) if raw_segments else []
+    highlights = []
+    for segment in segments:
+        score_value = segment.get("score")
+        score = None
+        if isinstance(score_value, (int, float)) and not isinstance(score_value, bool):
+            normalized_score = float(score_value)
+            if math.isfinite(normalized_score) and 0 <= normalized_score <= 1:
+                score = normalized_score
+        segment_id = str(segment["id"])
+        agent = comments.get(segment_id)
+        highlights.append(
+            {
+                "id": segment_id,
+                "order": int(segment["order"]),
+                "start": float(segment["start"]),
+                "end": float(segment["end"]),
+                "duration": round(
+                    float(segment["end"]) - float(segment["start"]),
+                    6,
+                ),
+                "score": score,
+                "source_keyframes": [
+                    str(frame_id)
+                    for frame_id in segment.get("source_keyframes", [])
+                    if isinstance(frame_id, str)
+                ],
+                "agent_comment": agent["comment"] if agent else None,
+                "agent_comment_status": (
+                    "ready" if agent else missing_comment_status
+                ),
+                "agent_evidence_refs": (
+                    agent["evidence_refs"] if agent else []
+                ),
+            }
+        )
+
+    output = report.get("output")
+    output = output if isinstance(output, dict) else {}
+    recommended = report.get("recommended_clip")
+    recommended = recommended if isinstance(recommended, dict) else {}
+
+    def output_url(relative: Any) -> str | None:
+        if not isinstance(relative, str) or not relative.strip():
+            return None
+        return url_for(
+            "serve_job_output",
+            job_id=job_id,
+            filename=relative,
+        )
+
+    return jsonify(
+        ok=True,
+        contract_version="1.0",
+        job={
+            "job_id": job_id,
+            "project_name": str(job.get("project_name", "")),
+            "status": str(job.get("status", "")),
+            "created_at": job.get("created_at"),
+            "completed_at": job.get("completed_at"),
+        },
+        video={
+            "url": url_for(
+                "serve_job_output",
+                job_id=job_id,
+                filename=source_relative,
+            ),
+            "filename": str(
+                job.get("original_asset_name") or source_video.name
+            ),
+            "duration": duration,
+        },
+        highlights=highlights,
+        output={
+            "rough_cut_url": output_url(output.get("video")),
+            "contact_sheet_url": output_url(output.get("contact_sheet")),
+            "ratio": output.get("ratio") or recommended.get("output_ratio"),
+        },
+    )

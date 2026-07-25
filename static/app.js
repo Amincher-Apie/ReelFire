@@ -530,6 +530,7 @@ function renderReport(report) {
   byId("report-content").textContent = JSON.stringify(report, null, 2);
   byId("generation-panel").hidden = false;
   byId("generation-output").hidden = true;
+  byId("open-editor-button").hidden = false;
   updateAgentFlow(true);
   setResultState("content", "completed");
 }
@@ -792,6 +793,11 @@ function initApp() {
   byId("retry-button").addEventListener("click", submitAnalysis);
   byId("save-review-button").addEventListener("click", saveReview);
   byId("rough-cut-button").addEventListener("click", createRoughCut);
+  byId("open-editor-button").addEventListener("click", () => {
+    if (state.currentJobId) {
+      window.location.assign(`/jobs/${encodeURIComponent(state.currentJobId)}/editor`);
+    }
+  });
   byId("open-report-button").addEventListener("click", showReportDialog);
   byId("close-report-button").addEventListener("click", () => byId("report-dialog").close());
   byId("report-dialog").addEventListener("click", (event) => {

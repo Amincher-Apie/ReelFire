@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <title>ReelFire - 剪辑预览</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='editor.css') }}">
+  <script defer src="{{ url_for('static', filename='editor.js') }}"></script>
+</head>
+<body class="editor-page" data-page="editor" data-theme="dark" data-job-id="{{ job_id }}">
+<a class="skip-link" href="#editor-main">跳到剪辑预览主体</a>
+
+<header id="editor-header" class="editor-header">
+  <a id="editor-back-link" class="editor-back-link" href="/" aria-label="返回分析工作台">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+    返回工作台
+  </a>
+  <a class="brand editor-brand" href="/" aria-label="ReelFire 首页">
+    <span class="brand-mark" aria-hidden="true">RF</span>
+    <span>
+      <span class="brand-name">Reel<span>Fire</span></span>
+      <span class="brand-subtitle">剪辑预览</span>
+    </span>
+  </a>
+  <div class="editor-header-actions">
+    <span id="editor-job-status" class="status-badge running" aria-live="polite">读取任务</span>
+    <button id="editor-export-button" class="button primary small" type="button" disabled>打开粗剪</button>
+  </div>
+</header>
+
+<main id="editor-main" class="editor-main" aria-busy="true">
+  <aside id="highlight-sidebar" class="editor-sidebar" aria-labelledby="highlight-heading">
+    <div class="editor-section-heading">
+      <div>
+        <p class="panel-kicker">HIGHLIGHTS</p>
+        <h1 id="highlight-heading">精彩片段</h1>
+      </div>
+      <output id="highlight-count" aria-live="polite">—</output>
+    </div>
+
+    <div class="highlight-table-wrapper">
+      <table id="highlight-table" class="highlight-table">
+        <thead>
+          <tr>
+            <th scope="col">时间区间</th>
+            <th scope="col">Agent 评论</th>
+          </tr>
+        </thead>
+        <tbody id="highlight-list"></tbody>
+      </table>
+    </div>
+    <p id="highlight-list-state" class="editor-state-copy" aria-live="polite">正在读取剪辑预览数据…</p>
+  </aside>
+
+  <section id="editor-workspace" class="editor-workspace" aria-label="视频预览与时间轴">
+    <div class="workspace-title">
+      <div>
+        <p class="panel-kicker">CURRENT VIDEO</p>
+        <h2 id="editor-project-name">正在加载项目</h2>
+      </div>
+      <span id="editor-video-name" class="muted-label"></span>
+    </div>
+
+    <section id="video-stage" class="video-stage" aria-labelledby="video-heading">
+      <h2 id="video-heading" class="visually-hidden">当前视频</h2>
+      <video id="editor-video" controls preload="metadata" playsinline></video>
+      <div id="video-state" class="video-state" aria-live="polite">
+        <span class="spinner" aria-hidden="true"></span>
+        <p>正在准备视频预览…</p>
+      </div>
+    </section>
+
+    <section id="playback-controls" class="playback-controls" aria-label="播放控制">
+      <button id="skip-back-button" class="editor-control-button" type="button" aria-label="后退 5 秒" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8V4l-3 3 3 3V8a8 8 0 1 1-1 7"/><path d="M10 10v5m4-5v5"/></svg>
+      </button>
+      <button id="play-toggle-button" class="editor-play-button" type="button" aria-label="播放视频" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 9 6-9 6z"/></svg>
+      </button>
+      <button id="skip-forward-button" class="editor-control-button" type="button" aria-label="前进 5 秒" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8V4l3 3-3 3V8a8 8 0 1 0 1 7"/><path d="M10 10v5m4-5v5"/></svg>
+      </button>
+      <output id="playback-time" class="playback-time">00:00 / 00:00</output>
+    </section>
+
+    <section id="timeline-section" class="timeline-section" aria-labelledby="timeline-heading">
+      <div class="timeline-heading">
+        <div>
+          <p class="panel-kicker">TIMELINE</p>
+          <h2 id="timeline-heading">视频时间轴</h2>
+        </div>
+        <output id="timeline-description" class="muted-label">等待视频信息</output>
+      </div>
+
+      <div id="timeline-track" class="timeline-track">
+        <div id="highlight-marker-layer" class="highlight-marker-layer" aria-label="精彩片段标记"></div>
+        <input id="timeline-scrubber" type="range" min="0" max="0" step="0.01" value="0" aria-label="视频播放位置" disabled>
+      </div>
+      <div id="timeline-scale" class="timeline-scale" aria-hidden="true">
+        <output id="timeline-start">00:00</output>
+        <output id="timeline-end">00:00</output>
+      </div>
+    </section>
+
+    <section id="active-highlight-detail" class="active-highlight-detail" aria-labelledby="active-highlight-heading">
+      <div>
+        <p class="panel-kicker">SELECTED SEGMENT</p>
+        <h2 id="active-highlight-heading">当前片段</h2>
+      </div>
+      <dl>
+        <div><dt>时间</dt><dd><output id="active-highlight-time">尚未选择</output></dd></div>
+        <div><dt>精彩度</dt><dd><output id="active-highlight-score">—</output></dd></div>
+      </dl>
+      <p id="active-highlight-comment">从左侧列表或时间轴选择一个精彩片段。</p>
+    </section>
+
+    <section id="editor-error" class="editor-error" role="alert" hidden>
+      <h2>无法打开剪辑预览</h2>
+      <p id="editor-error-message"></p>
+      <a class="button secondary" href="/">返回分析工作台</a>
+    </section>
+  </section>
+</main>
+</body>
+</html>
