@@ -325,6 +325,9 @@ output_ratio
 
 返回 `200` 和按 `created_at` 倒序排列的任务列表。
 
+匿名用户只看到没有 SQLite 索引的旧文件任务。已登录用户看到自己的
+SQLite 项目任务和旧文件任务，不会看到其他用户的项目任务。
+
 损坏的单个 `job.json` 会被跳过，不阻塞其他任务列表。
 
 ### 5.3 `GET /api/jobs/<job_id>`
@@ -763,16 +766,16 @@ GET  /api/projects
 | 403 | `PROJECT_ACCESS_DENIED` | 项目属于其他用户 |
 | 404 | `PROJECT_NOT_FOUND` | 项目不存在 |
 
-旧文件型任务可能没有 SQLite `jobs` 索引。现有 editor、review、
-analyze、delete 等任务接口的归属保护仍属于下一阶段。
+旧文件型任务可能没有 SQLite `jobs` 索引，并继续保留兼容访问。
 
 ---
 
-## 10. 规划中：任务权限
+## 10. 已实现：任务归属权限
 
-> 当前认证已实现，但任务和编辑页归属校验尚未完整接入。
-
-目标规则：
+每个具体 `job_id` 先查询 SQLite `jobs.public_job_id`。存在索引时，
+必须登录并通过对应 `projects.owner_id` 校验；没有索引时视为旧文件
+任务，保持原有兼容行为。不能依据 `job.json` 中的名称或项目字段判断
+所有权。
 
 ```text
 当前用户
@@ -783,21 +786,16 @@ analyze、delete 等任务接口的归属保护仍属于下一阶段。
 
 不能只根据公开 `job_id` 判断权限。
 
-目标错误：
+权限错误：
 
 | 状态 | `error_code` | 场景 |
 | ---: | --- | --- |
-| 401 | `AUTH_REQUIRED` | 未登录 |
-| 403 | `PROJECT_ACCESS_DENIED` | 无权访问项目 |
+| 401 | `AUTH_REQUIRED` | 未登录访问 SQLite 项目任务 |
 | 403 | `JOB_ACCESS_DENIED` | 无权访问任务 |
-| 404 | `PROJECT_NOT_FOUND` | 项目不存在 |
-| 404 | `JOB_NOT_FOUND` | 任务不存在 |
 
-目标受保护接口包括：
+统一受保护入口包括：
 
 ```text
-POST   /api/jobs
-GET    /api/jobs
 GET    /api/jobs/<job_id>
 DELETE /api/jobs/<job_id>
 POST   /api/jobs/<job_id>/analyze
@@ -805,7 +803,12 @@ PATCH  /api/jobs/<job_id>/review
 POST   /api/jobs/<job_id>/rough-cut
 GET    /api/jobs/<job_id>/report
 GET    /api/jobs/<job_id>/editor
+GET    /jobs/<job_id>/editor
+GET    /outputs/<job_id>/<path:filename>
 ```
+
+权限检查发生在排队、删除、审核文件写回、粗剪生成和文件发送之前。
+编辑页聚合接口成功响应继续遵守 `EDITOR_API_CONTRACT` 1.0。
 
 ---
 

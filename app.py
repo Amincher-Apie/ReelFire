@@ -18,6 +18,7 @@ from routes.api_routes import api_bp
 from routes.auth_routes import auth_bp
 from services.auth_service import import_legacy_users
 from services.file_service import FileService, FileValidationError
+from services.job_access_service import JobAccessDeniedError, require_job_access
 from services.job_service import (
     CorruptDataError,
     InvalidJobIdError,
@@ -94,6 +95,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.get("/jobs/<job_id>/editor")
     def editor_page(job_id: str):
+        require_job_access(job_id)
         jobs.get_job(job_id)
         return render_template("editor.html", job_id=job_id)
 
@@ -103,6 +105,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.get("/outputs/<job_id>/<path:filename>")
     def serve_job_output(job_id: str, filename: str):
+        require_job_access(job_id)
         root = jobs.job_dir(job_id).resolve()
         candidate = (root / filename).resolve()
         if root not in candidate.parents or not candidate.is_file():
@@ -152,6 +155,14 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             ok=False,
             error=str(exc),
             error_code="PROJECT_ACCESS_DENIED",
+        ), 403
+
+    @app.errorhandler(JobAccessDeniedError)
+    def handle_job_access_denied(exc: JobAccessDeniedError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="JOB_ACCESS_DENIED",
         ), 403
 
     @app.errorhandler(JobNotFoundError)
