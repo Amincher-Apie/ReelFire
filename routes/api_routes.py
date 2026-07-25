@@ -13,6 +13,10 @@ from werkzeug.datastructures import FileStorage
 from services.analysis_service import AnalysisService
 from services.ffmpeg_service import create_rough_cut, is_ffmpeg_available
 from services.file_service import FileService, FileValidationError
+from services.job_access_service import (
+    get_job_list_visibility,
+    require_job_access,
+)
 from services.job_index_service import create_asset_and_job_index
 from services.job_service import JobService, JobStateConflictError
 from services.project_service import (
@@ -460,18 +464,27 @@ def create_job():
 @api_bp.get("/jobs")
 def list_jobs():
     jobs, _, _ = _services()
-    return jsonify(ok=True, jobs=jobs.list_jobs())
+    indexed_ids, owned_ids = get_job_list_visibility()
+    visible_jobs = [
+        job
+        for job in jobs.list_jobs()
+        if job.get("job_id") not in indexed_ids
+        or job.get("job_id") in owned_ids
+    ]
+    return jsonify(ok=True, jobs=visible_jobs)
 
 
 @api_bp.get("/jobs/<job_id>")
 def get_job(job_id: str):
     jobs, _, _ = _services()
+    require_job_access(job_id)
     return jsonify(ok=True, job=jobs.get_job_detail(job_id))
 
 
 @api_bp.delete("/jobs/<job_id>")
 def delete_job(job_id: str):
     jobs, _, _ = _services()
+    require_job_access(job_id)
     jobs.delete_job(job_id)
     return jsonify(ok=True, deleted_job_id=job_id)
 
@@ -479,6 +492,7 @@ def delete_job(job_id: str):
 @api_bp.post("/jobs/<job_id>/analyze")
 def analyze_job(job_id: str):
     jobs, _, analysis = _services()
+    require_job_access(job_id)
     jobs.get_job(job_id)
     analysis.enqueue(job_id)
     return jsonify(ok=True, job_id=job_id, status="queued"), 202
@@ -487,6 +501,7 @@ def analyze_job(job_id: str):
 @api_bp.patch("/jobs/<job_id>/review")
 def review_job(job_id: str):
     jobs, _, _ = _services()
+    require_job_access(job_id)
     job = jobs.get_job(job_id)
     if not jobs.report_path(job_id).is_file():
         raise JobStateConflictError("分析报告尚未生成，不能进行人工审核")
@@ -532,6 +547,7 @@ def review_job(job_id: str):
 @api_bp.post("/jobs/<job_id>/rough-cut")
 def rough_cut(job_id: str):
     jobs, _, _ = _services()
+    require_job_access(job_id)
     job = jobs.get_job(job_id)
     if job.get("status") != "completed":
         raise JobStateConflictError("只有 completed 任务可以生成粗剪视频")
@@ -587,12 +603,14 @@ def rough_cut(job_id: str):
 @api_bp.get("/jobs/<job_id>/report")
 def get_report(job_id: str):
     jobs, _, _ = _services()
+    require_job_access(job_id)
     return jsonify(ok=True, report=jobs.read_report(job_id))
 
 
 @api_bp.get("/jobs/<job_id>/editor")
 def get_editor_contract(job_id: str):
     jobs, _, _ = _services()
+    require_job_access(job_id)
     job = jobs.get_job_detail(job_id)
     if job.get("status") != "completed" or not job.get("report_available"):
         raise JobStateConflictError("分析报告尚未生成，不能打开剪辑预览")
