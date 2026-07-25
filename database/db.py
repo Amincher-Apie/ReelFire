@@ -17,28 +17,31 @@ class DatabaseMigrationError(RuntimeError):
     """Raised when the application database cannot be migrated safely."""
 
 
-def _database_target() -> tuple[str, bool]:
+class UnsupportedDatabaseConfigurationError(RuntimeError):
+    """Raised when the configured SQLite target is unsupported."""
+
+
+def _database_target() -> str:
     configured = current_app.config["DATABASE"]
     target = str(configured)
-    return target, target == ":memory:"
-
-
-def _prepare_parent_directory(target: str, is_memory: bool) -> None:
-    if not is_memory:
-        Path(target).expanduser().parent.mkdir(parents=True, exist_ok=True)
+    if target == ":memory:":
+        raise UnsupportedDatabaseConfigurationError(
+            "SQLite ':memory:' databases are not supported; "
+            "use a temporary file database instead"
+        )
+    return target
 
 
 def get_db() -> sqlite3.Connection:
     """Return the connection for the current Flask application context."""
     if "db" not in g:
-        target, is_memory = _database_target()
-        _prepare_parent_directory(target, is_memory)
+        target = _database_target()
+        Path(target).expanduser().parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(target)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON")
         connection.execute("PRAGMA busy_timeout = 5000")
-        if not is_memory:
-            connection.execute("PRAGMA journal_mode = WAL")
+        connection.execute("PRAGMA journal_mode = WAL")
         g.db = connection
     return g.db
 

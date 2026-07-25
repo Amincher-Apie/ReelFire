@@ -8,6 +8,7 @@ from pathlib import Path
 
 from app import create_app
 from database import close_db, get_db, init_db
+from database.db import UnsupportedDatabaseConfigurationError
 
 
 EXPECTED_TABLES = {
@@ -146,6 +147,26 @@ class DatabaseTestCase(unittest.TestCase):
             self.app.extensions["analysis_service"],
             FakeAnalysisService,
         )
+
+    def test_memory_database_configuration_is_rejected(self) -> None:
+        root = Path(self.temporary.name)
+        with self.assertRaises(
+            UnsupportedDatabaseConfigurationError
+        ) as raised:
+            create_app(
+                {
+                    "TESTING": True,
+                    "DATABASE": ":memory:",
+                    "OUTPUTS_DIR": root / "memory-outputs",
+                    "MODELS_DIR": root / "memory-models",
+                    "MODEL_PATH": root / "memory-models" / "missing.pt",
+                    "ANALYSIS_SERVICE_FACTORY": fake_analysis_service_factory,
+                }
+            )
+
+        message = str(raised.exception)
+        self.assertIn(":memory:", message)
+        self.assertIn("temporary file", message)
 
 
 if __name__ == "__main__":
