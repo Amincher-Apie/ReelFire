@@ -25,6 +25,13 @@ from services.job_service import (
     JobService,
     JobStateConflictError,
 )
+from services.project_service import (
+    ProjectAccessDeniedError,
+    ProjectNotFoundError,
+    ProjectOwnerForbiddenError,
+    ProjectValidationError,
+)
+from services.session_service import AuthenticationRequiredError
 
 
 def _create_analysis_service(
@@ -106,6 +113,46 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @app.errorhandler(InvalidJobIdError)
     def handle_bad_request(exc: Exception):
         return jsonify(ok=False, error=str(exc)), 400
+
+    @app.errorhandler(AuthenticationRequiredError)
+    def handle_authentication_required(exc: AuthenticationRequiredError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AUTH_REQUIRED",
+        ), 401
+
+    @app.errorhandler(ProjectOwnerForbiddenError)
+    def handle_project_owner_forbidden(exc: ProjectOwnerForbiddenError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="PROJECT_OWNER_FORBIDDEN",
+        ), 400
+
+    @app.errorhandler(ProjectValidationError)
+    def handle_project_input_invalid(exc: ProjectValidationError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="PROJECT_INPUT_INVALID",
+        ), 400
+
+    @app.errorhandler(ProjectNotFoundError)
+    def handle_project_not_found(exc: ProjectNotFoundError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="PROJECT_NOT_FOUND",
+        ), 404
+
+    @app.errorhandler(ProjectAccessDeniedError)
+    def handle_project_access_denied(exc: ProjectAccessDeniedError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="PROJECT_ACCESS_DENIED",
+        ), 403
 
     @app.errorhandler(JobNotFoundError)
     def handle_not_found(exc: JobNotFoundError):

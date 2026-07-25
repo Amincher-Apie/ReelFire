@@ -605,6 +605,16 @@ MIGRATIONS = (
 
 SQLite 是业务索引和权限来源，分析 JSON 是视觉处理结果来源。双方职责必须明确，避免互相覆盖。
 
+当前项目型上传已经接入 `projects`、`assets` 和 `jobs`：`assets` 与
+`jobs` 在同一个 SQLite 事务内依次写入，数据库只保存以
+`OUTPUTS_DIR` 父目录为基准的 POSIX 相对路径。视频内容、`job.json`
+和后续分析 JSON 仍保存在文件系统中。
+
+`jobs.public_job_id` 与 `JobService` 生成、API 返回和任务目录使用的
+公开字符串 `job_id` 完全对应；`jobs.id` 仅是数据库内部整数主键。
+未携带 `project_id` 的兼容上传仍可能只创建文件任务，因此旧任务可能
+没有 SQLite `jobs` 索引。
+
 ## 17. 权限规则
 
 普通用户只能访问：
@@ -613,6 +623,10 @@ SQLite 是业务索引和权限来源，分析 JSON 是视觉处理结果来源�
 - 自己项目中的素材；
 - 自己项目产生的任务；
 - 自己项目的审核与 Agent 调用记录。
+
+本阶段只在项目创建、项目列表和携带 `project_id` 的上传入口执行项目
+归属校验。既有文件任务及 editor、review、analyze、delete 等接口的
+完整权限策略留待下一阶段，不能仅凭本节设计描述视为已经实现。
 
 每次访问任务时，不能只验证公开 `job_id` 是否存在，还必须验证：
 
