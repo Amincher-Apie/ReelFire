@@ -5,125 +5,6 @@
    所有动态文本使用 textContent；不通过评分伪造 Agent 评论。
    =================================================================== */
 
-// ── Mock 数据（符合 editor 聚合接口 + Agent 输出 Schema）──────────────
-const EDITOR_MOCK = {
-  job_id: "mock_20260725_143000_a1b2c3d4",
-  status: "completed",
-  video: {
-    duration: 95.5,
-    width: 1920,
-    height: 1080,
-    fps: 60.0,
-    has_audio: true,
-    path: null,
-  },
-  segments: [
-    {
-      id: "seg_001",
-      start: 18.5,
-      end: 48.5,
-      order: 1,
-      score: 0.82,
-      source_keyframes: ["kf_003", "kf_004"],
-      label: "多人混战",
-    },
-    {
-      id: "seg_002",
-      start: 52.0,
-      end: 82.0,
-      order: 2,
-      score: 0.74,
-      source_keyframes: ["kf_007", "kf_008"],
-      label: "残局反杀",
-    },
-    {
-      id: "seg_003",
-      start: 8.0,
-      end: 38.0,
-      order: 3,
-      score: 0.61,
-      source_keyframes: ["kf_001", "kf_002"],
-      label: "开局交火",
-    },
-  ],
-  agent_comments: [
-    {
-      segment_id: "seg_001",
-      status: "completed",
-      summary:
-        "该片段包含多次击杀事件，画面中出现多个人物目标，运动强度较高。从关键帧 kf_003 可见至少 3 名交战角色，场景变化剧烈。建议保留为开场高潮或集锦核心片段。",
-      tags: [
-        { name: "多人交战", description: "同时出现 3+ 角色目标", evidence_refs: ["ref_det_003"] },
-        { name: "高运动强度", description: "连续帧运动强度 > 0.6", evidence_refs: ["ref_score_001"] },
-      ],
-      suggestions: [
-        {
-          suggestion_id: "sug_001",
-          title: "保留为核心片段",
-          action: "保留并标记为开场高潮，建议置于粗剪最前。",
-          priority: "high",
-          evidence_refs: ["ref_det_003", "ref_score_001"],
-          knowledge_refs: ["KB-FPS-001"],
-        },
-        {
-          suggestion_id: "sug_002",
-          title: "检查边界准确性",
-          action: "片段起始 18.5s 处画面变化大，建议微调至 18.0s 以包含完整的击杀前画面。",
-          priority: "medium",
-          evidence_refs: ["ref_scene_002"],
-          knowledge_refs: ["KB-FPS-002"],
-        },
-      ],
-      review: {
-        recommendation: "pass",
-        confidence: 0.78,
-        reasons: [
-          "目标密度和运动强度双高，置信度较可靠",
-          "关键帧检测到多个交战角色类别",
-        ],
-      },
-      evidence_refs: [
-        { ref_id: "ref_det_003", type: "detection", source_id: "kf_003", class_name: "person", confidence: 0.72 },
-        { ref_id: "ref_score_001", type: "score", source_id: "seg_001", value: { highlight_score: 0.82 } },
-        { ref_id: "ref_scene_002", type: "keyframe", source_id: "kf_004", timestamp: 24.0 },
-      ],
-      knowledge_refs: [
-        { knowledge_id: "KB-FPS-001", category: "精彩判定", title: "多人交战事件定义" },
-        { knowledge_id: "KB-FPS-002", category: "剪辑规范", title: "片段边界最佳实践" },
-      ],
-    },
-    {
-      segment_id: "seg_002",
-      status: "pending",
-      summary: "",
-      tags: [],
-      suggestions: [],
-      review: { recommendation: "needs_review", confidence: 0, reasons: [] },
-      evidence_refs: [],
-      knowledge_refs: [],
-    },
-    {
-      segment_id: "seg_003",
-      status: "unavailable",
-      summary: "",
-      tags: [],
-      suggestions: [],
-      review: { recommendation: "needs_review", confidence: 0, reasons: [] },
-      evidence_refs: [],
-      knowledge_refs: [],
-      error: "Agent 服务连接超时，暂时不可用。",
-    },
-  ],
-  keyframes: [
-    { id: "kf_001", timestamp: 14.0, image: null, highlight_score: 0.55 },
-    { id: "kf_002", timestamp: 22.5, image: null, highlight_score: 0.61 },
-    { id: "kf_003", timestamp: 26.0, image: null, highlight_score: 0.82 },
-    { id: "kf_004", timestamp: 42.5, image: null, highlight_score: 0.78 },
-    { id: "kf_007", timestamp: 58.5, image: null, highlight_score: 0.74 },
-    { id: "kf_008", timestamp: 72.0, image: null, highlight_score: 0.68 },
-  ],
-};
-
 // ── 状态 ─────────────────────────────────────────────────────────────
 const state = {
   jobId: null,
@@ -133,8 +14,8 @@ const state = {
   keyframes: [],
   video: null,
   selectedSegmentId: null,
-  useMock: false,
   videoElement: null,
+  timelineBound: false,
 };
 
 // ── 工具函数 ─────────────────────────────────────────────────────────
@@ -278,7 +159,7 @@ function renderVideo() {
     videoEl.hidden = false;
     placeholder.hidden = true;
   } else {
-    // Mock 模式：显示占位
+    // 后端未提供可访问的视频地址时显示明确占位。
     videoEl.hidden = true;
     placeholder.hidden = false;
   }
@@ -294,6 +175,9 @@ function renderVideo() {
 function renderTimeline() {
   if (!state.video) return;
   var duration = state.video.duration;
+  var scrubber = byId("timeline-scrubber");
+  scrubber.max = String(duration);
+  scrubber.value = "0";
 
   // 片段标记条
   var segmentsBar = byId("timeline-segments-bar");
@@ -346,6 +230,7 @@ function updatePlayhead(currentTime) {
   track.setAttribute("aria-valuenow", String(Math.round(currentTime)));
 
   byId("timeline-current").textContent = formatTime(currentTime);
+  byId("timeline-scrubber").value = String(currentTime);
 
   // 高亮当前所在片段
   highlightSegmentAtTime(currentTime);
@@ -385,7 +270,10 @@ function highlightSegmentAtTime(time) {
 }
 
 function bindTimelineEvents() {
+  if (state.timelineBound) return;
+  state.timelineBound = true;
   var track = byId("timeline-track");
+  var scrubber = byId("timeline-scrubber");
   var playButton = byId("timeline-play");
   var videoEl = state.videoElement;
   var isDragging = false;
@@ -444,6 +332,10 @@ function bindTimelineEvents() {
     }
   });
 
+  scrubber.addEventListener("input", function () {
+    seekTo(Number(scrubber.value));
+  });
+
   // 视频 timeupdate 同步
   if (videoEl) {
     videoEl.addEventListener("timeupdate", function () {
@@ -479,7 +371,7 @@ function selectSegment(segmentId) {
 }
 
 function renderSegmentList() {
-  var container = byId("segment-list");
+  var container = byId("highlight-list");
   clearChildren(container);
   byId("segments-count").textContent = state.segments.length + " 个片段";
 
@@ -714,24 +606,84 @@ function loadEditorData(jobId) {
   state.jobId = jobId;
   setView("loading");
 
-  // 先尝试真实 API
-  api
-    .get("/api/jobs/" + encodeURIComponent(jobId) + "/editor")
-    .then(
-      function (payload) {
-        applyEditorData(payload);
-        state.useMock = false;
-      },
-      function () {
-        // 降级使用 Mock 数据
-        applyEditorData(EDITOR_MOCK);
-        state.useMock = true;
-        state.jobId = EDITOR_MOCK.job_id;
-      }
-    );
+  api.get("/api/jobs/" + encodeURIComponent(jobId) + "/editor").then(
+    function (payload) {
+      applyEditorData(payload);
+    },
+    function (error) {
+      setView("error");
+      byId("editor-error-message").textContent =
+        error.message || "剪辑预览数据读取失败。";
+    }
+  );
 }
 
-function applyEditorData(data) {
+function normalizeEditorData(payload) {
+  if (payload.contract_version !== "1.0") {
+    throw new Error("剪辑预览数据契约版本不受支持。");
+  }
+  if (!payload.job || !payload.video || !Array.isArray(payload.highlights)) {
+    throw new Error("剪辑预览数据缺少必要字段。");
+  }
+
+  return {
+    job_id: payload.job.job_id,
+    status: payload.job.status,
+    video: {
+      duration: Number(payload.video.duration),
+      filename: payload.video.filename || "",
+      path: payload.video.url || null,
+    },
+    segments: payload.highlights.map(function (highlight) {
+      return {
+        id: highlight.id,
+        order: highlight.order,
+        start: Number(highlight.start),
+        end: Number(highlight.end),
+        score: highlight.score,
+        source_keyframes: highlight.source_keyframes || [],
+      };
+    }),
+    agent_comments: payload.highlights.map(function (highlight) {
+      var status =
+        highlight.agent_comment_status === "ready"
+          ? "completed"
+          : highlight.agent_comment_status;
+      return {
+        segment_id: highlight.id,
+        status: status || "pending",
+        summary: highlight.agent_comment || "",
+        tags: [],
+        suggestions: [],
+        review: {
+          recommendation: "needs_review",
+          confidence: 0,
+          reasons: [],
+        },
+        evidence_refs: (highlight.agent_evidence_refs || []).map(function (ref) {
+          return {
+            ref_id: String(ref),
+            type: "evidence",
+            source_id: String(ref),
+          };
+        }),
+        knowledge_refs: [],
+      };
+    }),
+    keyframes: [],
+    output: payload.output || {},
+  };
+}
+
+function applyEditorData(payload) {
+  var data;
+  try {
+    data = normalizeEditorData(payload);
+  } catch (error) {
+    setView("error");
+    byId("editor-error-message").textContent = error.message;
+    return;
+  }
   state.editorData = data;
   state.video = data.video || null;
   state.segments = Array.isArray(data.segments) ? data.segments : [];
@@ -768,7 +720,6 @@ function showReportDialog() {
   byId("report-content").textContent = JSON.stringify(
     {
       job_id: state.jobId,
-      use_mock: state.useMock,
       video: state.video,
       segments: state.segments,
       agent_comments: state.agentComments,

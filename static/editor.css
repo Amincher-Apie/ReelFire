@@ -179,6 +179,12 @@
   outline-offset: 2px;
 }
 
+.timeline-scrubber {
+  width: 100%;
+  margin: 8px 0 0;
+  accent-color: var(--primary);
+}
+
 .timeline-markers {
   position: absolute;
   inset: 0;

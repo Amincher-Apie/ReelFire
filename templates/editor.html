@@ -107,6 +107,9 @@
               <div id="timeline-markers" class="timeline-markers"></div>
               <div id="timeline-playhead" class="timeline-playhead" aria-hidden="true"></div>
             </div>
+            <input id="timeline-scrubber" class="timeline-scrubber" type="range"
+                   min="0" max="0" step="0.01" value="0"
+                   aria-label="视频播放位置">
           </div>
           <div class="timeline-segments-bar" id="timeline-segments-bar" aria-hidden="true"></div>
         </div>
@@ -121,7 +124,7 @@
 
         <div class="segments-layout">
           <!-- 片段列表 -->
-          <div id="segment-list" class="segment-card-grid" role="list"
+          <div id="highlight-list" class="segment-card-grid" role="list"
                aria-label="精彩片段列表，点击选中查看详情"></div>
 
           <!-- 片段详情面板 -->
