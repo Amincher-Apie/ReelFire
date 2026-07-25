@@ -1,694 +1,291 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ReelFire – 击杀集锦提取工具</title>
-<link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <title>ReelFire - 智能数字媒体内容理解系统</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script defer src="{{ url_for('static', filename='app.js') }}"></script>
 </head>
-<body>
+<body data-page="app" data-theme="dark">
+<a class="skip-link" href="#main-content">跳到主要内容</a>
 
-<div id="app">
-  <!-- ====== Header ====== -->
+<div id="app" class="app-shell">
   <header class="app-header">
-    <div class="logo">
-      <div class="logo-icon">RF</div>
-      Reel<span>Fire</span>
-    </div>
-    <nav class="header-nav">
-      <button id="nav-new-task" class="active" onclick="switchView('new-task')">上传素材</button>
-      <button id="nav-task-list" onclick="switchView('task-list')">任务记录</button>
+    <a class="brand" href="/" aria-label="ReelFire 首页">
+      <span class="brand-mark" aria-hidden="true">RF</span>
+      <span>
+        <span class="brand-name">Reel<span>Fire</span></span>
+        <span class="brand-subtitle">AI 内容理解平台</span>
+      </span>
+    </a>
+
+    <nav class="header-nav" aria-label="主导航">
+      <button id="nav-analysis" class="nav-button active" type="button" data-view="analysis">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        分析工作台
+      </button>
+      <button id="nav-history" class="nav-button" type="button" data-view="history">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>
+        历史记录
+      </button>
     </nav>
-  </header>
 
-  <!-- ====== Main Content ====== -->
-  <main class="main-content">
-
-    <!-- === View 1: New Task === -->
-    <div id="view-new-task" class="view active">
-      <div class="page-header">
-        <div>
-          <h1>新建分析任务</h1>
-          <p class="subtitle">上传 FPS 对战录像，自动提取精彩片段</p>
-        </div>
+    <div class="header-actions">
+      <div class="theme-switcher" role="group" aria-label="界面主题">
+        <button class="theme-button active" type="button" data-theme-value="dark" aria-label="暗色主题" title="暗色主题"><span class="theme-dot dark"></span></button>
+        <button class="theme-button" type="button" data-theme-value="light" aria-label="亮色主题" title="亮色主题"><span class="theme-dot light"></span></button>
+        <button class="theme-button" type="button" data-theme-value="ocean" aria-label="海洋主题" title="海洋主题"><span class="theme-dot ocean"></span></button>
+        <button class="theme-button" type="button" data-theme-value="forest" aria-label="森林主题" title="森林主题"><span class="theme-dot forest"></span></button>
       </div>
 
-      <div class="card">
-        <div class="card-header"><h3>任务配置</h3></div>
-        <div class="card-body">
-          <form id="upload-form" onsubmit="return createJob(event)">
-            <div class="form-row">
-              <div class="input-group">
-                <label>项目名称 <span class="required">*</span></label>
-                <input type="text" id="project-name" placeholder="例如：CS2 排位赛" required>
-              </div>
-              <div class="input-group">
-                <label>游戏类型 <span class="required">*</span></label>
-                <select id="game-type" required>
-                  <option value="">请选择</option>
-                  <option value="csgo">CS:GO / CS2</option>
-                  <option value="valorant">Valorant / 无畏契约</option>
-                  <option value="other">其他 FPS</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="input-group">
-              <label>视频文件 <span class="required">*</span></label>
-              <div class="upload-zone" id="upload-zone">
-                <div class="upload-icon">&#9654;</div>
-                <div class="upload-text">点击或拖拽视频文件到此区域</div>
-                <div class="upload-hint">支持 MP4、MOV、AVI、MKV，最大 2GB</div>
-                <div id="file-info" class="file-info" style="display:none"></div>
-                <input type="file" id="video-file" accept=".mp4,.mov,.avi,.mkv" required>
-              </div>
-            </div>
-
-            <div class="form-row">
-              <div class="input-group">
-                <label>采样间隔 (秒)</label>
-                <input type="number" id="sample-interval" value="0.5" min="0.25" max="2.0" step="0.25">
-              </div>
-              <div class="input-group">
-                <label>目标时长 (秒)</label>
-                <input type="number" id="target-duration" value="30" min="5" max="300" step="5">
-              </div>
-            </div>
-
-            <div class="form-row">
-              <div class="input-group">
-                <label>输出规格</label>
-                <select id="output-aspect">
-                  <option value="16:9">横屏 16:9</option>
-                  <option value="9:16">竖屏 9:16</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="form-actions">
-              <button type="submit" class="btn btn-primary" id="btn-create">创建任务并上传</button>
-              <button type="reset" class="btn btn-ghost" onclick="resetUpload()">重置</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-
-    <!-- === View 2: Task List === -->
-    <div id="view-task-list" class="view">
-      <div class="page-header">
-        <div>
-          <h1>任务记录</h1>
-          <p class="subtitle">查看和管理所有分析任务</p>
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="switchView('new-task')">+ 新建任务</button>
-      </div>
-
-      <!-- Loading state -->
-      <div id="task-list-loading" class="state-container" style="display:none">
-        <div class="spinner spinner-lg"></div>
-        <div class="state-title">加载中...</div>
-      </div>
-
-      <!-- Empty state -->
-      <div id="task-list-empty" class="state-container" style="display:none">
-        <div class="state-icon">&#9654;</div>
-        <div class="state-title">暂无任务记录</div>
-        <div class="state-desc">创建一个新任务后，它会显示在这里</div>
-        <div class="state-action">
-          <button class="btn btn-primary" onclick="switchView('new-task')">+ 新建任务</button>
-        </div>
-      </div>
-
-      <!-- Error state -->
-      <div id="task-list-error" class="state-container" style="display:none">
-        <div class="state-icon">&#9888;</div>
-        <div class="state-title">加载失败</div>
-        <div id="task-list-error-msg" class="state-desc">无法获取任务列表</div>
-        <div class="state-action">
-          <button class="btn btn-secondary" onclick="loadTaskList()">重试</button>
-        </div>
-      </div>
-
-      <!-- Table -->
-      <div id="task-list-table" class="card" style="display:none">
-        <div class="table-container">
-          <table>
-            <thead>
-              <tr>
-                <th>任务编号</th>
-                <th>项目名称</th>
-                <th>素材名称</th>
-                <th>游戏</th>
-                <th>状态</th>
-                <th>创建时间</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="task-list-body"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- === View 3: Task Detail === -->
-    <div id="view-task-detail" class="view">
-      <div class="page-header">
-        <div>
-          <button class="btn btn-ghost btn-sm" onclick="switchView('task-list')">&larr; 返回任务列表</button>
-          <h1 id="detail-title" style="margin-top:8px">任务详情</h1>
-        </div>
-        <div id="detail-actions" style="display:none">
-          <button class="btn btn-danger btn-sm" onclick="deleteCurrentJob()">删除任务</button>
-        </div>
-      </div>
-
-      <!-- Loading state -->
-      <div id="detail-loading" class="detail-loading">
-        <div class="spinner spinner-lg"></div>
-        <div class="loading-text">加载任务信息...</div>
-      </div>
-
-      <!-- Content -->
-      <div id="detail-content" style="display:none">
-
-        <!-- Video Info Bar -->
-        <div id="detail-video-info" class="video-info-bar"></div>
-
-        <!-- Running state -->
-        <div id="detail-running" style="display:none">
-          <div class="card">
-            <div class="card-body">
-              <div class="flex items-center gap-12">
-                <div class="pulse"></div>
-                <div>
-                  <div style="font-weight:600">任务正在分析中</div>
-                  <div id="detail-status-text" class="text-sm text-muted mt-8">当前状态：running</div>
-                </div>
-              </div>
-              <div class="progress-bar mt-16">
-                <div class="progress-fill" id="detail-progress" style="width:30%"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Queued state -->
-        <div id="detail-queued" style="display:none">
-          <div class="card">
-            <div class="card-body">
-              <div class="flex items-center gap-12">
-                <div class="spinner"></div>
-                <div>
-                  <div style="font-weight:600">任务已提交，等待处理...</div>
-                  <div class="text-sm text-muted mt-8">系统将在后台开始分析</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Failed state -->
-        <div id="detail-failed" style="display:none">
-          <div class="card" style="border-color:var(--danger)">
-            <div class="card-header"><h3>&#9888; 任务失败</h3></div>
-            <div class="card-body">
-              <p id="detail-error-msg" class="text-sm"></p>
-            </div>
-          </div>
-        </div>
-
-        <!-- Completed: Analysis Results -->
-        <div id="detail-completed" style="display:none">
-          <!-- Score bars -->
-          <div class="card">
-            <div class="card-header"><h3>精彩评分</h3></div>
-            <div class="card-body">
-              <div class="score-bars" id="detail-score-bars"></div>
-              <div class="text-xs text-muted mt-8" id="detail-weights-info"></div>
-            </div>
-          </div>
-
-          <!-- Segment Editor -->
-          <div class="card mt-16">
-            <div class="card-header">
-              <h3>候选片段</h3>
-              <span class="text-sm text-muted" id="detail-seg-info"></span>
-            </div>
-            <div class="card-body" id="detail-segment-editor"></div>
-          </div>
-
-          <!-- Keyframes -->
-          <div class="card mt-16">
-            <div class="card-header">
-              <h3>关键帧审核</h3>
-              <div class="flex gap-8">
-                <span id="kf-keep-count" class="text-sm" style="color:var(--success)"></span>
-                <span id="kf-skip-count" class="text-sm" style="color:var(--text-muted)"></span>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="keyframe-grid" id="detail-keyframes"></div>
-            </div>
-          </div>
-
-          <!-- Save & Generate -->
-          <div class="card mt-16">
-            <div class="card-body">
-              <div class="flex gap-12">
-                <button class="btn btn-primary" onclick="saveReview()" id="btn-save-review">保存审核结果</button>
-                <button class="btn btn-secondary" onclick="generateRoughCut()" id="btn-rough-cut">生成粗剪视频</button>
-              </div>
-              <div id="review-status" class="text-sm mt-8" style="display:none"></div>
-            </div>
-          </div>
-
-          <!-- Output -->
-          <div id="detail-output" class="output-section" style="display:none"></div>
-
-          <!-- Report link -->
-          <div class="mt-16 flex gap-12">
-            <button class="btn btn-ghost btn-sm" onclick="viewReport()">查看 JSON 报告</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  </main>
-</div>
-
-<!-- Toast container -->
-<div class="toast-container" id="toast-container"></div>
-
-<!-- Report Modal -->
-<div class="modal-overlay" id="report-modal" style="display:none" onclick="if(event.target===this)closeReport()">
-  <div class="modal">
-    <div class="modal-header">
-      <h3>分析报告</h3>
-      <button class="btn btn-ghost btn-sm" onclick="closeReport()">&times;</button>
-    </div>
-    <div class="modal-body">
-      <pre id="report-content"></pre>
-    </div>
-  </div>
-</div>
-
-<script src="{{ url_for('static', filename='app.js') }}"></script>
-</body>
-</html>
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ReelFire - 智能数字媒体内容理解系统</title>
-<link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-</head>
-<body>
-<div id="app">
-  <!-- Header -->
-  <header class="app-header">
-    <div class="logo">
-      <div class="logo-icon">RF</div>
-      Reel<span>Fire</span>
-    </div>
-    <nav class="header-nav">
-      <button id="nav-new-task" class="active" onclick="switchView('new-task')">上传素材</button>
-      <button id="nav-task-list" onclick="switchView('task-list')">任务记录</button>
-      <button id="nav-stats" onclick="switchView('stats')" style="display:none">统计分析</button>
-    </nav>
-    <div class="header-right">
-      <div id="user-info" style="display:none" class="user-menu">
+      <div id="user-info" class="user-menu" hidden>
         <span id="user-name" class="user-badge"></span>
-        <button class="btn btn-ghost btn-sm" onclick="handleLogout()">退出</button>
+        <button id="logout-button" class="button ghost small" type="button">退出</button>
       </div>
-      <a href="/login" id="login-link" class="btn btn-primary btn-sm">登录</a>
+      <a href="/login" id="login-link" class="button primary small">登录</a>
     </div>
   </header>
 
-  <main class="main-content">
-    <!-- View: New Task -->
-    <div id="view-new-task" class="view active">
-      <div class="page-header">
+  <main id="main-content" class="main-content">
+    <section id="view-analysis" class="view active" aria-labelledby="analysis-heading">
+      <div class="section-heading">
         <div>
-          <h1>新建分析任务</h1>
-          <p class="subtitle">上传FPS对战录像，自动提取精彩片段并进行AI内容理解</p>
+          <p class="eyebrow">REELFIRE WORKBENCH</p>
+          <h1 id="analysis-heading">视频理解与精彩片段分析</h1>
+          <p>上传 FPS 录屏，获取真实检测、关键帧、候选片段和可追溯报告。</p>
         </div>
+        <span class="capability-badge">当前能力：视频</span>
       </div>
-      <div class="card">
-        <div class="card-header"><h3>任务配置</h3></div>
-        <div class="card-body">
-          <form id="upload-form" onsubmit="return createJob(event)">
-            <div class="form-row">
-              <div class="input-group">
-                <label>项目名称 <span class="required">*</span></label>
-                <input type="text" id="project-name" placeholder="例如：CS2 排位赛" required>
-              </div>
-              <div class="input-group">
-                <label>游戏类型 <span class="required">*</span></label>
-                <select id="game-type" required>
-                  <option value="">请选择</option>
-                  <option value="csgo">CS:GO / CS2</option>
-                  <option value="valorant">Valorant / 无畏契约</option>
-                  <option value="other">其他 FPS</option>
-                </select>
-              </div>
-            </div>
-            <div class="input-group">
-              <label>视频文件 <span class="required">*</span></label>
-              <div class="upload-zone" id="upload-zone">
-                <div class="upload-icon">&#9654;</div>
-                <div class="upload-text">点击或拖拽视频文件到此区域</div>
-                <div class="upload-hint">支持 MP4、MOV、AVI、MKV，最大2GB</div>
-                <div id="file-info" class="file-info" style="display:none"></div>
-                <input type="file" id="video-file" accept=".mp4,.mov,.avi,.mkv" required>
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="input-group">
-                <label>采样间隔 (秒)</label>
-                <input type="number" id="sample-interval" value="0.5" min="0.25" max="2.0" step="0.25">
-              </div>
-              <div class="input-group">
-                <label>目标时长 (秒)</label>
-                <input type="number" id="target-duration" value="30" min="5" max="300" step="5">
-              </div>
-            </div>
-            <div class="form-row">
-              <div class="input-group">
-                <label>输出规格</label>
-                <select id="output-aspect">
-                  <option value="16:9">横屏 16:9</option>
-                  <option value="9:16">竖屏 9:16</option>
-                </select>
-              </div>
-            </div>
-            <div class="form-actions">
-              <button type="submit" class="btn btn-primary" id="btn-create">创建任务并上传</button>
-              <button type="reset" class="btn btn-ghost" onclick="resetUpload()">重置</button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
 
-    <!-- View: Task List -->
-    <div id="view-task-list" class="view">
-      <div class="page-header">
-        <div>
-          <h1>任务记录</h1>
-          <p class="subtitle">查看和管理所有分析任务</p>
-        </div>
-        <button class="btn btn-primary btn-sm" onclick="switchView('new-task')">+ 新建任务</button>
+      <div class="workbench">
+        <section class="panel input-panel" aria-labelledby="input-heading">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">INPUT</p>
+              <h2 id="input-heading">分析输入</h2>
+            </div>
+          </div>
+
+          <div class="media-tabs" role="tablist" aria-label="媒体类型">
+            <button class="media-tab active" type="button" role="tab" aria-selected="true" data-media="video">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
+              视频
+            </button>
+            <button class="media-tab" type="button" role="tab" aria-selected="false" disabled title="图片分析接口待接入">
+              图片 <span>待接入</span>
+            </button>
+            <button class="media-tab" type="button" role="tab" aria-selected="false" disabled title="音频分析接口待接入">
+              音频 <span>待接入</span>
+            </button>
+            <button class="media-tab" type="button" role="tab" aria-selected="false" disabled title="文本分析接口待接入">
+              文本 <span>待接入</span>
+            </button>
+          </div>
+
+          <form id="analysis-form" novalidate>
+            <div class="form-field">
+              <label for="project-name">项目名称 <span aria-hidden="true">*</span></label>
+              <input id="project-name" name="project_name" type="text" maxlength="100" value="FPS 视频内容理解" required>
+              <small>用于历史记录和结果归档。</small>
+            </div>
+
+            <div class="form-field">
+              <label for="game-type">游戏类型</label>
+              <select id="game-type" name="game_type">
+                <option value="csgo">CS:GO / CS2</option>
+                <option value="valorant">Valorant / 无畏契约</option>
+                <option value="other">其他 FPS</option>
+              </select>
+            </div>
+
+            <div class="form-field">
+              <label for="video-file">视频文件 <span aria-hidden="true">*</span></label>
+              <label id="upload-zone" class="upload-zone" for="video-file">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M5 14v5h14v-5"/></svg>
+                <strong>点击或拖拽视频到此处</strong>
+                <span>MP4、MOV、AVI、MKV，最大 2GB</span>
+                <input id="video-file" name="file" type="file" accept=".mp4,.mov,.avi,.mkv,video/*" required>
+              </label>
+              <div id="file-preview" class="file-preview" hidden>
+                <video id="preview-video" controls preload="metadata"></video>
+                <div>
+                  <strong id="video-filename"></strong>
+                  <span id="video-filesize"></span>
+                </div>
+                <button id="clear-file-button" class="button ghost small" type="button">重新选择</button>
+              </div>
+              <p id="file-error" class="field-error" role="alert"></p>
+            </div>
+
+            <div class="form-grid">
+              <div class="form-field">
+                <label for="sample-interval">采样间隔</label>
+                <div class="input-suffix"><input id="sample-interval" name="sample_interval" type="number" min="0.1" max="30" step="0.1" value="0.5"><span>秒</span></div>
+              </div>
+              <div class="form-field">
+                <label for="target-duration">目标时长</label>
+                <div class="input-suffix"><input id="target-duration" name="target_duration" type="number" min="1" step="1" value="30"><span>秒</span></div>
+              </div>
+            </div>
+
+            <div class="form-field">
+              <label for="output-ratio">输出规格</label>
+              <select id="output-ratio" name="output_ratio">
+                <option value="16:9">横屏 16:9</option>
+                <option value="9:16">竖屏 9:16</option>
+                <option value="1:1">方形 1:1</option>
+              </select>
+            </div>
+
+            <button id="analyze-button" class="button primary full" type="submit">
+              <span class="button-icon" aria-hidden="true">▶</span>
+              <span class="button-label">创建任务并开始分析</span>
+            </button>
+          </form>
+        </section>
+
+        <section class="panel results-panel" aria-labelledby="results-heading">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">RESULTS</p>
+              <h2 id="results-heading">分析结果</h2>
+            </div>
+            <span id="analysis-status" class="status-badge idle">等待输入</span>
+          </div>
+
+          <div id="result-empty" class="state-container">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9 9h6v6H9z"/></svg>
+            <h3>等待分析</h3>
+            <p>选择视频并开始任务后，这里会显示真实 CV 结果。</p>
+          </div>
+
+          <div id="result-loading" class="state-container" hidden>
+            <span class="spinner" aria-hidden="true"></span>
+            <h3>正在分析</h3>
+            <p id="loading-message">任务正在排队，请稍候。</p>
+          </div>
+
+          <div id="result-error" class="state-container error" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 20h19z"/><path d="M12 9v4m0 3h.01"/></svg>
+            <h3>分析失败</h3>
+            <p id="result-error-message"></p>
+            <button id="retry-button" class="button secondary" type="button">重新提交</button>
+          </div>
+
+          <div id="result-content" class="results-content" hidden>
+            <article class="result-card summary-card">
+              <div class="result-card-header">
+                <h3>内容摘要</h3>
+                <button id="open-report-button" class="button ghost small" type="button">查看 JSON</button>
+              </div>
+              <p id="result-summary"></p>
+              <div class="metric-grid">
+                <div><span>视频时长</span><strong id="metric-duration">—</strong></div>
+                <div><span>采样帧</span><strong id="metric-frames">—</strong></div>
+                <div><span>关键帧</span><strong id="metric-keyframes">—</strong></div>
+                <div><span>最高分</span><strong id="metric-score">—</strong></div>
+              </div>
+            </article>
+
+            <article class="result-card">
+              <div class="result-card-header"><h3>检测标签</h3><span id="detection-count" class="muted-label"></span></div>
+              <div id="result-detections" class="detection-list"></div>
+              <div id="result-tags" class="tag-list"></div>
+            </article>
+
+            <article class="result-card">
+              <div class="result-card-header"><h3>候选片段</h3><span id="segment-count" class="muted-label"></span></div>
+              <div id="segment-list" class="segment-list"></div>
+            </article>
+
+            <article class="result-card">
+              <div class="result-card-header">
+                <h3>关键帧审核</h3>
+                <div class="inline-actions">
+                  <button id="save-review-button" class="button secondary small" type="button">保存审核</button>
+                  <button id="rough-cut-button" class="button primary small" type="button">生成粗剪</button>
+                </div>
+              </div>
+              <div id="keyframe-list" class="keyframe-grid"></div>
+            </article>
+
+            <article id="output-card" class="result-card" hidden>
+              <div class="result-card-header"><h3>输出文件</h3></div>
+              <div id="output-list" class="output-list"></div>
+            </article>
+          </div>
+        </section>
+
+        <aside class="panel agent-panel" aria-labelledby="agent-heading">
+          <div class="panel-header">
+            <div>
+              <p class="panel-kicker">WORKFLOW</p>
+              <h2 id="agent-heading">Agent 工作流</h2>
+            </div>
+            <span class="capability-badge neutral">规则基线</span>
+          </div>
+
+          <p class="panel-note">当前展示真实 CV 报告解析与规则输出；独立 Agent 服务尚未接入，不会伪造模型调用。</p>
+
+          <ol id="agent-flow" class="agent-flow">
+            <li class="agent-node pending" data-step="1"><span>1</span><div><strong>视觉报告解析</strong><small>等待任务完成</small></div></li>
+            <li class="agent-node pending" data-step="2"><span>2</span><div><strong>检测标签汇总</strong><small>等待真实检测</small></div></li>
+            <li class="agent-node pending" data-step="3"><span>3</span><div><strong>知识检索与建议</strong><small>独立 Agent 待接入</small></div></li>
+            <li class="agent-node pending" data-step="4"><span>4</span><div><strong>人工审核与输出</strong><small>等待复核</small></div></li>
+          </ol>
+
+          <section class="tool-section" aria-labelledby="tool-heading">
+            <div class="subsection-heading"><h3 id="tool-heading">调用记录</h3><span id="tool-count">0</span></div>
+            <div id="tool-call-list" class="tool-call-list">
+              <p class="empty-copy">任务运行后显示 API 与处理节点。</p>
+            </div>
+          </section>
+
+          <section id="generation-panel" class="generation-section" hidden>
+            <h3>规则输出</h3>
+            <div class="generation-actions">
+              <button id="show-cover-button" class="button secondary small" type="button">封面描述</button>
+              <button id="show-tags-button" class="button secondary small" type="button">片段标签</button>
+              <button id="show-report-button" class="button secondary small" type="button">JSON 报告</button>
+            </div>
+            <pre id="generation-output" class="generation-output" hidden></pre>
+          </section>
+        </aside>
       </div>
-      <div id="task-list-loading" class="state-container" style="display:none">
-        <div class="spinner spinner-lg"></div>
-        <div class="state-title">加载中...</div>
+    </section>
+
+    <section id="view-history" class="view" aria-labelledby="history-heading" hidden>
+      <div class="section-heading">
+        <div><p class="eyebrow">ARCHIVE</p><h1 id="history-heading">历史任务</h1><p>重新打开已完成任务，或检查失败原因。</p></div>
+        <button id="refresh-history-button" class="button secondary" type="button">刷新列表</button>
       </div>
-      <div id="task-list-empty" class="state-container" style="display:none">
-        <div class="state-icon">&#9654;</div>
-        <div class="state-title">暂无任务记录</div>
-        <div class="state-desc">创建一个新任务后，它会显示在这里</div>
-        <div class="state-action"><button class="btn btn-primary" onclick="switchView('new-task')">+ 新建任务</button></div>
-      </div>
-      <div id="task-list-error" class="state-container" style="display:none">
-        <div class="state-icon">&#9888;</div>
-        <div class="state-title">加载失败</div>
-        <div id="task-list-error-msg" class="state-desc">无法获取任务列表</div>
-        <div class="state-action"><button class="btn btn-secondary" onclick="loadTaskList()">重试</button></div>
-      </div>
-      <div id="task-list-table" class="card" style="display:none">
-        <div class="table-container">
+
+      <div class="panel history-panel">
+        <div id="history-loading" class="state-container" hidden><span class="spinner" aria-hidden="true"></span><p>正在加载历史记录</p></div>
+        <div id="history-empty" class="state-container"><h3>暂无记录</h3><p>完成分析后，任务会出现在这里。</p></div>
+        <div id="history-error" class="state-container error" hidden><h3>加载失败</h3><p id="history-error-message"></p></div>
+        <div id="history-table-wrapper" class="table-wrapper" hidden>
           <table>
-            <thead>
-              <tr>
-                <th>任务编号</th>
-                <th>项目名称</th>
-                <th>素材名称</th>
-                <th>游戏</th>
-                <th>状态</th>
-                <th>审核状态</th>
-                <th>创建时间</th>
-                <th>操作</th>
-              </tr>
-            </thead>
-            <tbody id="task-list-body"></tbody>
+            <thead><tr><th>任务</th><th>素材</th><th>类型</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+            <tbody id="history-body"></tbody>
           </table>
         </div>
       </div>
-    </div>
-
-    <!-- View: Stats -->
-    <div id="view-stats" class="view">
-      <div class="page-header">
-        <div>
-          <h1>统计分析</h1>
-          <p class="subtitle">检测结果与审核状态可视化</p>
-        </div>
-        <div class="flex gap-8">
-          <button class="btn btn-secondary btn-sm" onclick="loadStatsData()">刷新数据</button>
-          <button class="btn btn-ghost btn-sm" onclick="downloadHTMLReport()">HTML报告</button>
-          <button class="btn btn-ghost btn-sm" onclick="downloadPDFReport()">PDF报告</button>
-        </div>
-      </div>
-      <div class="stats-grid" id="stats-content">
-        <div class="card stats-card">
-          <div class="card-header"><h3>检测类别分布</h3></div>
-          <div class="card-body"><canvas id="chart-category"></canvas></div>
-        </div>
-        <div class="card stats-card">
-          <div class="card-header"><h3>置信度分布</h3></div>
-          <div class="card-body"><canvas id="chart-confidence"></canvas></div>
-        </div>
-        <div class="card stats-card">
-          <div class="card-header"><h3>审核状态统计</h3></div>
-          <div class="card-body"><canvas id="chart-review"></canvas></div>
-        </div>
-        <div class="card stats-card">
-          <div class="card-header"><h3>关键帧时间分布</h3></div>
-          <div class="card-body"><canvas id="chart-timeline"></canvas></div>
-        </div>
-        <div class="card stats-card-full">
-          <div class="card-header"><h3>目标数量 vs 综合评分</h3></div>
-          <div class="card-body"><canvas id="chart-scatter"></canvas></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- View: Task Detail -->
-    <div id="view-task-detail" class="view">
-      <div class="page-header">
-        <div>
-          <button class="btn btn-ghost btn-sm" onclick="switchView('task-list')">&larr; 返回任务列表</button>
-          <h1 id="detail-title" style="margin-top:8px">任务详情</h1>
-        </div>
-        <div id="detail-actions" style="display:none" class="flex gap-8">
-          <button class="btn btn-ghost btn-sm" onclick="viewStatsFromDetail()">统计分析</button>
-          <button class="btn btn-danger btn-sm" onclick="deleteCurrentJob()">删除任务</button>
-        </div>
-      </div>
-
-      <div id="detail-loading" class="detail-loading">
-        <div class="spinner spinner-lg"></div>
-        <div class="loading-text">加载任务信息...</div>
-      </div>
-
-      <div id="detail-content" style="display:none">
-        <div id="detail-video-info" class="video-info-bar"></div>
-
-        <div id="detail-running" style="display:none">
-          <div class="card">
-            <div class="card-body">
-              <div class="flex items-center gap-12">
-                <div class="pulse"></div>
-                <div>
-                  <div style="font-weight:600">任务正在分析中</div>
-                  <div id="detail-status-text" class="text-sm text-muted mt-8">当前状态：running</div>
-                </div>
-              </div>
-              <div class="progress-bar mt-16">
-                <div class="progress-fill" id="detail-progress" style="width:30%"></div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="detail-queued" style="display:none">
-          <div class="card">
-            <div class="card-body">
-              <div class="flex items-center gap-12">
-                <div class="spinner"></div>
-                <div>
-                  <div style="font-weight:600">任务已提交，等待处理...</div>
-                  <div class="text-sm text-muted mt-8">系统将在后台开始分析</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div id="detail-failed" style="display:none">
-          <div class="card" style="border-color:var(--danger)">
-            <div class="card-header"><h3>&#9888; 任务失败</h3></div>
-            <div class="card-body"><p id="detail-error-msg" class="text-sm"></p></div>
-          </div>
-        </div>
-
-        <div id="detail-completed" style="display:none">
-          <!-- Score bars -->
-          <div class="card">
-            <div class="card-header"><h3>精彩评分</h3></div>
-            <div class="card-body">
-              <div class="score-bars" id="detail-score-bars"></div>
-              <div class="text-xs text-muted mt-8" id="detail-weights-info"></div>
-            </div>
-          </div>
-
-          <!-- Agent Results Card -->
-          <div class="card mt-16" id="agent-result-card">
-            <div class="card-header">
-              <h3>AI 内容理解报告</h3>
-              <span class="badge-status" id="agent-status-badge">分析中</span>
-            </div>
-            <div class="card-body" id="agent-result-body">
-              <div id="agent-loading" class="flex items-center gap-8" style="padding:16px">
-                <div class="spinner"></div>
-                <span class="text-sm text-muted">AI 智能分析中...</span>
-              </div>
-              <div id="agent-content" style="display:none">
-                <div class="agent-summary-box">
-                  <div class="agent-section">
-                    <div class="agent-section-title">内容摘要</div>
-                    <p id="agent-summary" class="text-sm"></p>
-                  </div>
-                  <div class="agent-section">
-                    <div class="agent-section-title">标签</div>
-                    <div id="agent-tags" class="tags-container"></div>
-                  </div>
-                  <div class="agent-section">
-                    <div class="agent-section-title">素材使用建议</div>
-                    <p id="agent-suggestion" class="text-sm"></p>
-                  </div>
-                  <div class="agent-section">
-                    <div class="agent-section-title">引用来源</div>
-                    <div id="agent-citations" class="citations-container"></div>
-                  </div>
-                  <div class="agent-section">
-                    <div class="agent-section-title">工具调用轨迹</div>
-                    <div id="agent-tool-calls" class="tool-calls-container"></div>
-                  </div>
-                </div>
-              </div>
-              <div id="agent-error" style="display:none">
-                <div class="state-container" style="padding:24px">
-                  <div class="state-icon">&#9888;</div>
-                  <div class="state-title">AI 分析暂不可用</div>
-                  <div id="agent-error-msg" class="state-desc"></div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Three-state Review -->
-          <div class="card mt-16" id="review-card">
-            <div class="card-header"><h3>内容审核</h3></div>
-            <div class="card-body">
-              <div class="review-controls">
-                <button class="review-btn review-pass" onclick="setReviewStatus('approved')" id="review-approved">
-                  <span class="review-icon">&#10003;</span> 通过
-                </button>
-                <button class="review-btn review-pending" onclick="setReviewStatus('pending')" id="review-pending">
-                  <span class="review-icon">&#9888;</span> 待复核
-                </button>
-                <button class="review-btn review-fail" onclick="setReviewStatus('rejected')" id="review-rejected">
-                  <span class="review-icon">&#10007;</span> 不通过
-                </button>
-              </div>
-              <div class="input-group mt-16">
-                <label>审核备注</label>
-                <input type="text" id="review-note" placeholder="可选：填写审核意见..." maxlength="200">
-              </div>
-              <div id="review-status-msg" class="text-sm mt-8" style="display:none"></div>
-            </div>
-          </div>
-
-          <!-- Trajectory -->
-          <div class="card mt-16" id="trajectory-card">
-            <div class="card-header"><h3>目标运动轨迹</h3></div>
-            <div class="card-body">
-              <div id="trajectory-container" style="width:100%;height:300px;background:var(--bg-primary);border-radius:var(--radius-sm);position:relative;overflow:hidden">
-                <canvas id="trajectory-canvas" style="width:100%;height:100%"></canvas>
-                <div id="trajectory-empty" class="state-container" style="position:absolute;top:0;left:0;right:0;bottom:0">
-                  <div class="state-title">暂无轨迹数据</div>
-                  <div class="state-desc">分析完成后将在此显示目标运动轨迹</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Keyframes -->
-          <div class="card mt-16">
-            <div class="card-header">
-              <h3>关键帧审核</h3>
-              <div class="flex gap-8">
-                <span id="kf-keep-count" class="text-sm" style="color:var(--success)"></span>
-                <span id="kf-skip-count" class="text-sm" style="color:var(--text-muted)"></span>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="keyframe-grid" id="detail-keyframes"></div>
-            </div>
-          </div>
-
-          <!-- Segments -->
-          <div class="card mt-16">
-            <div class="card-header">
-              <h3>候选片段</h3>
-              <span class="text-sm text-muted" id="detail-seg-info"></span>
-            </div>
-            <div class="card-body" id="detail-segment-editor"></div>
-          </div>
-
-          <!-- Save & Generate -->
-          <div class="card mt-16">
-            <div class="card-body">
-              <div class="flex gap-12 flex-wrap">
-                <button class="btn btn-primary" onclick="saveReview()" id="btn-save-review">保存审核结果</button>
-                <button class="btn btn-secondary" onclick="generateRoughCut()" id="btn-rough-cut">生成粗剪视频</button>
-                <button class="btn btn-ghost" onclick="downloadHTMLReport()">下载HTML报告</button>
-                <button class="btn btn-ghost" onclick="downloadPDFReport()">下载PDF报告</button>
-              </div>
-              <div id="review-status" class="text-sm mt-8" style="display:none"></div>
-            </div>
-          </div>
-
-          <!-- Output -->
-          <div id="detail-output" class="output-section" style="display:none"></div>
-
-          <div class="mt-16 flex gap-12">
-            <button class="btn btn-ghost btn-sm" onclick="viewReport()">查看 JSON 报告</button>
-          </div>
-        </div>
-      </div>
-    </div>
+    </section>
   </main>
 </div>
 
-<div class="toast-container" id="toast-container"></div>
-
-<!-- Report Modal -->
-<div class="modal-overlay" id="report-modal" style="display:none" onclick="if(event.target===this)closeReport()">
-  <div class="modal">
-    <div class="modal-header">
-      <h3>分析报告</h3>
-      <button class="btn btn-ghost btn-sm" onclick="closeReport()">&times;</button>
-    </div>
-    <div class="modal-body"><pre id="report-content"></pre></div>
+<dialog id="report-dialog" class="report-dialog">
+  <div class="dialog-header">
+    <div><p class="panel-kicker">RAW DATA</p><h2>分析报告</h2></div>
+    <button id="close-report-button" class="icon-button" type="button" aria-label="关闭报告">×</button>
   </div>
-</div>
+  <pre id="report-content"></pre>
+</dialog>
 
-<script src="{{ url_for('static', filename='app.js') }}"></script>
+<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>

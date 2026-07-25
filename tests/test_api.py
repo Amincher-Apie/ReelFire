@@ -19,6 +19,7 @@ class ApiTestCase(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
         self.outputs_dir = root / "outputs"
+        self.users_file = root / "users.db"
         self.app = create_app(
             {
                 "TESTING": True,
@@ -57,12 +58,46 @@ class ApiTestCase(unittest.TestCase):
 
     def test_frontend_and_favicon_are_available(self) -> None:
         page = self.client.get("/")
+        login = self.client.get("/login")
         favicon = self.client.get("/favicon.ico")
+        html = page.get_data(as_text=True)
+        login_html = login.get_data(as_text=True)
         self.assertEqual(page.status_code, 200)
-        self.assertIn("ReelFire", page.get_data(as_text=True))
+        self.assertEqual(login.status_code, 200)
+        self.assertIn("ReelFire", html)
+        self.assertEqual(html.lower().count("<!doctype html>"), 1)
+        self.assertEqual(html.lower().count("<html"), 1)
+        self.assertEqual(html.count('id="app"'), 1)
+        self.assertEqual(html.count("app.js"), 1)
+        self.assertNotIn("onclick=", html)
+        self.assertEqual(login_html.lower().count("<!doctype html>"), 1)
+        self.assertEqual(login_html.lower().count("<html"), 1)
+        self.assertEqual(login_html.count('id="login-form"'), 1)
+        self.assertEqual(login_html.count('id="register-form"'), 1)
+        self.assertEqual(login_html.count("app.js"), 1)
+        self.assertNotIn("onsubmit=", login_html)
         self.assertEqual(favicon.status_code, 200)
         self.assertEqual(favicon.mimetype, "image/svg+xml")
         favicon.close()
+
+    def test_register_login_and_logout_flow(self) -> None:
+        credentials = {
+            "username": "frontend-reviewer",
+            "password": "test-passphrase",
+        }
+        with patch("routes.auth_routes.USERS_FILE", self.users_file):
+            register = self.client.post("/api/auth/register", json=credentials)
+            current = self.client.get("/api/auth/me")
+            logout = self.client.post("/api/auth/logout")
+            anonymous = self.client.get("/api/auth/me")
+            login = self.client.post("/api/auth/login", json=credentials)
+
+        self.assertEqual(register.status_code, 201)
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(logout.status_code, 200)
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(login.status_code, 200)
+        self.assertTrue(self.users_file.is_file())
 
     def test_create_job_persists_workspace_and_metadata(self) -> None:
         job_id = self.create_job()
