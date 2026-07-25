@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import math
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from flask import Blueprint, current_app, jsonify, request
+from flask import Blueprint, current_app, jsonify, request, session
 from werkzeug.datastructures import FileStorage
 
+from database import get_db
 from services.analysis_service import AnalysisService
 from services.ffmpeg_service import create_rough_cut, is_ffmpeg_available
 from services.file_service import FileService, FileValidationError
@@ -192,6 +194,10 @@ def _validate_keyframes(value: Any, duration: float | None) -> list[dict[str, An
             frame["timestamp"] = timestamp
         if "keep" in frame and not isinstance(frame["keep"], bool):
             raise FileValidationError(f"keyframes[{index}].keep 必须是布尔值")
+        if "decision" in frame and frame["decision"] not in {"keep", "skip"}:
+            raise FileValidationError(
+                f"keyframes[{index}].decision 仅支持 keep 或 skip"
+            )
         if "order" in frame:
             frame["order"] = _integer(
                 frame, "order", index, minimum=0, maximum=100_000
@@ -210,6 +216,39 @@ def _validate_keyframes(value: Any, duration: float | None) -> list[dict[str, An
     return keyframes
 
 
+def _validate_segments(value: Any, duration: float | None) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        raise FileValidationError("segments 必须是非空数组")
+    segments: list[dict[str, Any]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, dict):
+            raise FileValidationError(f"segments[{index}] 必须是 JSON 对象")
+        segment = dict(item)
+        start = _number(
+            segment, "start", 0.0, minimum=0.0, maximum=86_400_000.0
+        )
+        end = _number(
+            segment, "end", 0.0, minimum=0.0, maximum=86_400_000.0
+        )
+        if start >= end:
+            raise FileValidationError(
+                f"segments[{index}] 必须满足 0 <= start < end"
+            )
+        if duration is not None and end > duration:
+            raise FileValidationError(f"segments[{index}].end 超过视频时长")
+        order = _integer(
+            segment, "order", index + 1, minimum=1, maximum=100_000
+        )
+        segment.update(
+            id=str(segment.get("id") or f"seg_{index + 1:03d}"),
+            start=start,
+            end=end,
+            order=order,
+        )
+        segments.append(segment)
+    return sorted(segments, key=lambda item: item["order"])
+
+
 def _json_object(*, optional: bool = False) -> dict[str, Any]:
     if optional and not request.data:
         return {}
@@ -225,8 +264,8 @@ def health():
     return jsonify(
         ok=True,
         status="ok",
-        service="day08-video-highlight",
-        version="0.1.0",
+        service="reelfire",
+        version="1.0.0",
         model_ready=model_path.is_file(),
         ffmpeg_ready=is_ffmpeg_available(),
     )
@@ -248,6 +287,9 @@ def create_job():
         project_name = current_app.config["DEFAULT_PROJECT_NAME"]
     if len(project_name) > 100:
         raise FileValidationError("project_name 长度不能超过 100")
+    game_type = str(request.form.get("game_type", "other")).strip().lower()
+    if game_type not in {"csgo", "valorant", "other"}:
+        raise FileValidationError("game_type 仅支持 csgo、valorant 或 other")
 
     job_id, job_dir = jobs.reserve_workspace()
     try:
@@ -260,6 +302,7 @@ def create_job():
         )
         if original_name != saved_path.name:
             job = jobs.update_job(job_id, original_asset_name=original_name)
+        job = jobs.update_job(job_id, game_type=game_type)
     except Exception:
         jobs.discard_workspace(job_id)
         raise
@@ -301,11 +344,11 @@ def review_job(job_id: str):
         raise JobStateConflictError("分析报告尚未生成，不能进行人工审核")
     report = jobs.read_report(job_id)
     payload = _json_object()
-    unexpected = set(payload) - {"keyframes", "recommended_clip"}
+    unexpected = set(payload) - {"keyframes", "recommended_clip", "segments"}
     if unexpected:
         raise FileValidationError(f"不支持的审核字段：{', '.join(sorted(unexpected))}")
     if not payload:
-        raise FileValidationError("至少提交 keyframes 或 recommended_clip")
+        raise FileValidationError("至少提交 keyframes、segments 或 recommended_clip")
     duration = _duration(job, report)
     changes: dict[str, Any] = {}
     if "keyframes" in payload:
@@ -313,6 +356,24 @@ def review_job(job_id: str):
     if "recommended_clip" in payload:
         changes["recommended_clip"] = _validate_clip(
             payload["recommended_clip"], duration
+        )
+    if "segments" in payload:
+        segments = _validate_segments(payload["segments"], duration)
+        changes["segments"] = segments
+        first = segments[0]
+        existing_clip = report.get("recommended_clip", {})
+        ratio = (
+            existing_clip.get("output_ratio", "16:9")
+            if isinstance(existing_clip, dict)
+            else "16:9"
+        )
+        changes["recommended_clip"] = _validate_clip(
+            {
+                "start_time": first["start"],
+                "end_time": first["end"],
+                "output_ratio": ratio,
+            },
+            duration,
         )
 
     updated = jobs.update_report(job_id, lambda current: {**current, **changes})
@@ -376,7 +437,7 @@ def get_editor(job_id: str):
     Agent 评论不存在时返回空数组，编辑页展示 pending 状态。
     """
     jobs, _, _ = _services()
-    job = jobs.read_job(job_id)
+    job = jobs.get_job(job_id)
     report = jobs.read_report(job_id) if job.get("status") == "completed" else {}
 
     video = report.get("video") or {}
@@ -412,3 +473,91 @@ def get_editor(job_id: str):
         agent_comments=agent_comments,
         keyframes=keyframes,
     )
+
+
+# ── Project endpoints (SQLite-backed) ──────────────────────────────────
+
+def _current_user_id() -> int | None:
+    return session.get("user_id")
+
+
+def _require_user() -> int:
+    user_id = _current_user_id()
+    if user_id is None:
+        from services.file_service import FileValidationError
+        raise FileValidationError("请先登录后再操作项目")
+    return user_id
+
+
+@api_bp.post("/projects")
+def create_project():
+    """Create a new project for the authenticated user."""
+    user_id = _require_user()
+    payload = _json_object()
+    name = str(payload.get("name", "")).strip()
+    if not name or len(name) > 100:
+        raise FileValidationError("project name 必须为 1-100 个字符")
+    game_type = str(payload.get("game_type", "other")).strip().lower()
+    if game_type not in {"csgo", "valorant", "other"}:
+        raise FileValidationError("game_type 仅支持 csgo、valorant 或 other")
+
+    db = get_db()
+    now = datetime.now().replace(microsecond=0).isoformat()
+    cursor = db.execute(
+        """
+        INSERT INTO projects (owner_id, name, game_type, status, created_at, updated_at)
+        VALUES (?, ?, ?, 'active', ?, ?)
+        """,
+        (user_id, name, game_type, now, now),
+    )
+    db.commit()
+    return jsonify(
+        ok=True,
+        project={
+            "id": cursor.lastrowid,
+            "owner_id": user_id,
+            "name": name,
+            "game_type": game_type,
+            "status": "active",
+            "created_at": now,
+            "updated_at": now,
+        },
+    ), 201
+
+
+@api_bp.get("/projects")
+def list_projects():
+    """List projects belonging to the authenticated user."""
+    user_id = _require_user()
+    db = get_db()
+    rows = db.execute(
+        """
+        SELECT id, owner_id, name, description, game_type, status, created_at, updated_at
+        FROM projects
+        WHERE owner_id = ? AND status = 'active'
+        ORDER BY updated_at DESC
+        """,
+        (user_id,),
+    ).fetchall()
+    return jsonify(
+        ok=True,
+        projects=[dict(row) for row in rows],
+    )
+
+
+@api_bp.get("/projects/<int:project_id>")
+def get_project(project_id: int):
+    """Get a single project by id."""
+    user_id = _require_user()
+    db = get_db()
+    row = db.execute(
+        """
+        SELECT id, owner_id, name, description, game_type, status, created_at, updated_at
+        FROM projects
+        WHERE id = ? AND owner_id = ?
+        """,
+        (project_id, user_id),
+    ).fetchone()
+    if row is None:
+        return jsonify(ok=False, error="项目不存在"), 404
+    return jsonify(ok=True, project=dict(row))

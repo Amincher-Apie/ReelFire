@@ -13,6 +13,12 @@ class Config:
     """Default configuration for the first backend release."""
 
     BASE_DIR = BASE_DIR
+    DATABASE = Path(
+        os.environ.get(
+            "REELFIRE_DATABASE",
+            str(BASE_DIR / "instance" / "reelfire.db"),
+        )
+    )
     OUTPUTS_DIR = BASE_DIR / "outputs"
     MODELS_DIR = BASE_DIR / "models"
     MODEL_PATH = Path(

@@ -4,6 +4,7 @@ const state = {
   currentJobId: null,
   currentJob: null,
   currentProjectId: null,
+  currentProjectName: null,
   report: null,
   keyframes: [],
   segments: [],
@@ -28,10 +29,14 @@ const api = {
     try {
       payload = await response.json();
     } catch {
-      throw new Error(`服务返回了无法解析的响应（HTTP ${response.status}）`);
+      const err = new Error(`服务返回了无法解析的响应（HTTP ${response.status}）`);
+      err.status = response.status;
+      throw err;
     }
     if (!response.ok || payload.ok === false) {
-      throw new Error(payload.error || `请求失败（HTTP ${response.status}）`);
+      const err = new Error(payload.error || `请求失败（HTTP ${response.status}）`);
+      err.status = response.status;
+      throw err;
     }
     return payload;
   },
@@ -582,10 +587,14 @@ async function pollJob(jobId) {
 }
 
 async function resolveProject(projectName, gameType) {
-  // 如果已有缓存的 project_id，直接复用
-  if (state.currentProjectId) {
+  // 如果已有缓存的 project_id 且项目名称未变更，直接复用
+  if (state.currentProjectId && state.currentProjectName === projectName) {
     return state.currentProjectId;
   }
+  // 项目名称已变更或尚无缓存，清空旧 project_id
+  state.currentProjectId = null;
+  state.currentProjectName = null;
+
   // 尝试创建项目（后端兼容期可能返回 404，降级使用 project_name）
   try {
     const payload = await api.post("/api/projects", {
@@ -594,10 +603,19 @@ async function resolveProject(projectName, gameType) {
     });
     if (payload.project && payload.project.id) {
       state.currentProjectId = payload.project.id;
+      state.currentProjectName = projectName;
       return payload.project.id;
     }
-  } catch (_err) {
-    // 后端项目 API 尚未就绪，不阻塞上传流程
+  } catch (err) {
+    const status = err.status || 0;
+    // 404 或接口尚未接入：静默降级，不阻塞上传流程
+    if (status === 404) {
+      // 后端项目 API 尚未接入，此场景允许兼容回退
+    } else if (status === 400 || status === 401 || status === 403 || status === 500) {
+      // 明确的服务器错误，提示用户
+      showToast(`项目创建失败：${err.message}`, "error");
+    }
+    // 网络超时、DNS 错误等（status === 0）也静默降级
   }
   return null;
 }
@@ -826,6 +844,13 @@ function initApp() {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
   byId("logout-button").addEventListener("click", logout);
+  // project_name 变更时清空旧 currentProjectId，防止新名称与旧 ID 一起提交
+  byId("project-name").addEventListener("input", () => {
+    if (state.currentProjectId) {
+      state.currentProjectId = null;
+      state.currentProjectName = null;
+    }
+  });
   byId("analysis-form").addEventListener("submit", (event) => {
     event.preventDefault();
     submitAnalysis();

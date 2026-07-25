@@ -12,6 +12,8 @@ from flask import Flask, jsonify, render_template, send_file
 from werkzeug.exceptions import MethodNotAllowed, NotFound, RequestEntityTooLarge
 
 from config import Config
+from database import init_app as init_database_app
+from database import init_db
 from routes.api_routes import api_bp
 from routes.auth_routes import auth_bp
 from services.analysis_service import AnalysisService
@@ -53,6 +55,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     if not app.testing:
         atexit.register(analysis.shutdown, False)
 
+    init_database_app(app)
+    with app.app_context():
+        init_db()
+
     app.register_blueprint(api_bp)
     app.register_blueprint(auth_bp)
 
@@ -67,10 +73,9 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @app.get("/jobs/<job_id>/editor")
     def editor_page(job_id: str):
         """剪辑预览工作台页面。"""
-        # 验证任务存在
         try:
-            jobs.read_job(job_id)
-        except Exception:
+            jobs.get_job(job_id)
+        except (JobNotFoundError, InvalidJobIdError):
             pass
         return render_template("editor.html")
 
