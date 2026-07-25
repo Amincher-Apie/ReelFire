@@ -12,9 +12,10 @@ from flask import Flask, jsonify, render_template, send_file
 from werkzeug.exceptions import MethodNotAllowed, NotFound, RequestEntityTooLarge
 
 from config import Config
+from database import init_app as init_database_app
+from database import init_db
 from routes.api_routes import api_bp
 from routes.auth_routes import auth_bp
-from services.analysis_service import AnalysisService
 from services.file_service import FileService, FileValidationError
 from services.job_service import (
     CorruptDataError,
@@ -23,6 +24,16 @@ from services.job_service import (
     JobService,
     JobStateConflictError,
 )
+
+
+def _create_analysis_service(
+    jobs: JobService,
+    max_workers: int,
+    model_path: Path,
+):
+    from services.analysis_service import AnalysisService
+
+    return AnalysisService(jobs, max_workers, model_path)
 
 
 def create_app(test_config: dict[str, Any] | None = None) -> Flask:
@@ -41,7 +52,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     jobs = JobService(outputs_dir)
     files = FileService(app.config["ALLOWED_VIDEO_EXTENSIONS"])
-    analysis = AnalysisService(
+    analysis_factory = app.config.get(
+        "ANALYSIS_SERVICE_FACTORY",
+        _create_analysis_service,
+    )
+    analysis = analysis_factory(
         jobs,
         app.config["BACKGROUND_WORKERS"],
         Path(app.config["MODEL_PATH"]),
@@ -52,6 +67,10 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     jobs.recover_interrupted_jobs()
     if not app.testing:
         atexit.register(analysis.shutdown, False)
+
+    init_database_app(app)
+    with app.app_context():
+        init_db()
 
     app.register_blueprint(api_bp)
     app.register_blueprint(auth_bp)

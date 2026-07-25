@@ -7,15 +7,12 @@ import math
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-import cv2
-import numpy as np
-
-from cv_engine.highlight_scorer import HighlightScorer
-from cv_engine.video_processor import VideoProcessor
-from cv_engine.yolo_detector import YoloDetector
 from services.job_service import JobService, JobStateConflictError, iso_now
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 LOGGER = logging.getLogger(__name__)
@@ -55,6 +52,8 @@ def _select_keyframes(
 
 def _annotate_frame(frame: np.ndarray, objects: list[dict[str, Any]]) -> np.ndarray:
     """Draw YOLO boxes on a copy of a frame for human-verifiable evidence."""
+    import cv2
+
     annotated = frame.copy()
     for detected in objects:
         bbox = detected.get("bbox")
@@ -107,6 +106,9 @@ def _save_contact_sheet(
     frames: list[np.ndarray],
     destination: Path,
 ) -> bool:
+    import cv2
+    import numpy as np
+
     if not selected:
         return False
     thumb_width, thumb_height, columns = 320, 180, 3
@@ -143,6 +145,12 @@ def analyze_video(
     settings: dict[str, Any],
 ) -> dict[str, Any]:
     """Run OpenCV sampling, YOLO detection and explainable scoring."""
+    import cv2
+
+    from cv_engine.highlight_scorer import HighlightScorer
+    from cv_engine.video_processor import VideoProcessor
+    from cv_engine.yolo_detector import YoloDetector
+
     processor = VideoProcessor()
     video = processor.get_video_info(video_path)
     duration = float(video.get("duration", 0.0))
