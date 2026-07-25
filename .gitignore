@@ -34,3 +34,9 @@ models/*.engine
 
 # Private
 RealName.md
+
+# Local SQLite runtime data
+instance/
+*.db
+*.sqlite
+*.sqlite3
