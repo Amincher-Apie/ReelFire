@@ -3,6 +3,7 @@
 const state = {
   currentJobId: null,
   currentJob: null,
+  currentProjectId: null,
   report: null,
   keyframes: [],
   segments: [],
@@ -530,9 +531,15 @@ function renderReport(report) {
   byId("report-content").textContent = JSON.stringify(report, null, 2);
   byId("generation-panel").hidden = false;
   byId("generation-output").hidden = true;
-  byId("open-editor-button").hidden = false;
   updateAgentFlow(true);
   setResultState("content", "completed");
+
+  // 显示剪辑预览入口
+  var editorLink = byId("editor-link");
+  if (editorLink) {
+    editorLink.href = "/jobs/" + encodeURIComponent(state.currentJobId) + "/editor";
+    editorLink.hidden = false;
+  }
 }
 
 async function loadReport(jobId) {
@@ -574,6 +581,27 @@ async function pollJob(jobId) {
   }
 }
 
+async function resolveProject(projectName, gameType) {
+  // 如果已有缓存的 project_id，直接复用
+  if (state.currentProjectId) {
+    return state.currentProjectId;
+  }
+  // 尝试创建项目（后端兼容期可能返回 404，降级使用 project_name）
+  try {
+    const payload = await api.post("/api/projects", {
+      name: projectName,
+      game_type: gameType,
+    });
+    if (payload.project && payload.project.id) {
+      state.currentProjectId = payload.project.id;
+      return payload.project.id;
+    }
+  } catch (_err) {
+    // 后端项目 API 尚未就绪，不阻塞上传流程
+  }
+  return null;
+}
+
 async function submitAnalysis() {
   const file = state.selectedFile || byId("video-file").files[0];
   const projectName = byId("project-name").value.trim();
@@ -589,10 +617,21 @@ async function submitAnalysis() {
   }
 
   const button = byId("analyze-button");
+  const gameType = byId("game-type").value;
+
+  // 解析项目：优先获取 project_id，失败时降级为 project_name
+  setButtonLoading(button, true, "正在准备…");
+  const projectId = await resolveProject(projectName, gameType);
+
   const form = new FormData();
   form.append("file", file, file.name);
+  // project_id 是任务归属依据（整数），优先使用
+  if (projectId) {
+    form.append("project_id", String(projectId));
+  }
+  // project_name 仅用于页面显示和兼容期降级
   form.append("project_name", projectName);
-  form.append("game_type", byId("game-type").value);
+  form.append("game_type", gameType);
   form.append("sample_interval", byId("sample-interval").value);
   form.append("target_duration", byId("target-duration").value);
   form.append("output_ratio", byId("output-ratio").value);
@@ -607,6 +646,7 @@ async function submitAnalysis() {
     logTool("POST", "/api/jobs", `上传 ${file.name}`);
     const created = await api.post("/api/jobs", form);
     state.currentJobId = created.job_id;
+    if (created.project_id) state.currentProjectId = created.project_id;
     logTool("POST", `/api/jobs/${created.job_id}/analyze`, "启动真实 CV 分析");
     await api.post(`/api/jobs/${encodeURIComponent(created.job_id)}/analyze`, {});
     setButtonLoading(button, false);
@@ -793,11 +833,6 @@ function initApp() {
   byId("retry-button").addEventListener("click", submitAnalysis);
   byId("save-review-button").addEventListener("click", saveReview);
   byId("rough-cut-button").addEventListener("click", createRoughCut);
-  byId("open-editor-button").addEventListener("click", () => {
-    if (state.currentJobId) {
-      window.location.assign(`/jobs/${encodeURIComponent(state.currentJobId)}/editor`);
-    }
-  });
   byId("open-report-button").addEventListener("click", showReportDialog);
   byId("close-report-button").addEventListener("click", () => byId("report-dialog").close());
   byId("report-dialog").addEventListener("click", (event) => {

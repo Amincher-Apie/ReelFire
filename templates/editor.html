@@ -4,125 +4,229 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark light">
-  <title>ReelFire - 剪辑预览</title>
+  <title>ReelFire - 剪辑预览工作台</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='editor.css') }}">
   <script defer src="{{ url_for('static', filename='editor.js') }}"></script>
 </head>
-<body class="editor-page" data-page="editor" data-theme="dark" data-job-id="{{ job_id }}">
-<a class="skip-link" href="#editor-main">跳到剪辑预览主体</a>
+<body data-page="editor" data-theme="dark">
 
-<header id="editor-header" class="editor-header">
-  <a id="editor-back-link" class="editor-back-link" href="/" aria-label="返回分析工作台">
-    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
-    返回工作台
-  </a>
-  <a class="brand editor-brand" href="/" aria-label="ReelFire 首页">
-    <span class="brand-mark" aria-hidden="true">RF</span>
-    <span>
-      <span class="brand-name">Reel<span>Fire</span></span>
-      <span class="brand-subtitle">剪辑预览</span>
-    </span>
-  </a>
-  <div class="editor-header-actions">
-    <span id="editor-job-status" class="status-badge running" aria-live="polite">读取任务</span>
-    <button id="editor-export-button" class="button primary small" type="button" disabled>打开粗剪</button>
-  </div>
-</header>
+<a class="skip-link" href="#editor-main">跳到主要内容</a>
 
-<main id="editor-main" class="editor-main" aria-busy="true">
-  <aside id="highlight-sidebar" class="editor-sidebar" aria-labelledby="highlight-heading">
-    <div class="editor-section-heading">
-      <div>
-        <p class="panel-kicker">HIGHLIGHTS</p>
-        <h1 id="highlight-heading">精彩片段</h1>
-      </div>
-      <output id="highlight-count" aria-live="polite">—</output>
+<div id="editor-app" class="editor-shell">
+  <header class="app-header editor-header">
+    <a class="brand" href="/" aria-label="ReelFire 首页">
+      <span class="brand-mark" aria-hidden="true">RF</span>
+      <span>
+        <span class="brand-name">Reel<span>Fire</span></span>
+        <span class="brand-subtitle">AI 内容理解平台</span>
+      </span>
+    </a>
+
+    <div class="editor-task-info" id="task-info">
+      <span class="task-job-id" id="header-job-id">—</span>
+      <span class="task-meta" id="header-meta"></span>
     </div>
 
-    <div class="highlight-table-wrapper">
-      <table id="highlight-table" class="highlight-table">
-        <thead>
-          <tr>
-            <th scope="col">时间区间</th>
-            <th scope="col">Agent 评论</th>
-          </tr>
-        </thead>
-        <tbody id="highlight-list"></tbody>
-      </table>
+    <div class="header-actions">
+      <div class="theme-switcher" role="group" aria-label="界面主题">
+        <button class="theme-button active" type="button" data-theme-value="dark" aria-label="暗色主题" title="暗色主题"><span class="theme-dot dark"></span></button>
+        <button class="theme-button" type="button" data-theme-value="light" aria-label="亮色主题" title="亮色主题"><span class="theme-dot light"></span></button>
+        <button class="theme-button" type="button" data-theme-value="ocean" aria-label="海洋主题" title="海洋主题"><span class="theme-dot ocean"></span></button>
+        <button class="theme-button" type="button" data-theme-value="forest" aria-label="森林主题" title="森林主题"><span class="theme-dot forest"></span></button>
+      </div>
+
+      <div id="user-info" class="user-menu" hidden>
+        <span id="user-name" class="user-badge"></span>
+        <a href="/" class="button ghost small">返回工作台</a>
+      </div>
+      <a href="/login" id="login-link" class="button primary small">登录</a>
     </div>
-    <p id="highlight-list-state" class="editor-state-copy" aria-live="polite">正在读取剪辑预览数据…</p>
-  </aside>
+  </header>
 
-  <section id="editor-workspace" class="editor-workspace" aria-label="视频预览与时间轴">
-    <div class="workspace-title">
-      <div>
-        <p class="panel-kicker">CURRENT VIDEO</p>
-        <h2 id="editor-project-name">正在加载项目</h2>
-      </div>
-      <span id="editor-video-name" class="muted-label"></span>
+  <main id="editor-main" class="editor-main">
+
+    <!-- 加载中 -->
+    <div id="editor-loading" class="state-container">
+      <span class="spinner" aria-hidden="true"></span>
+      <h3>正在加载编辑数据</h3>
+      <p>读取视频分析结果与 Agent 评论…</p>
     </div>
 
-    <section id="video-stage" class="video-stage" aria-labelledby="video-heading">
-      <h2 id="video-heading" class="visually-hidden">当前视频</h2>
-      <video id="editor-video" controls preload="metadata" playsinline></video>
-      <div id="video-state" class="video-state" aria-live="polite">
-        <span class="spinner" aria-hidden="true"></span>
-        <p>正在准备视频预览…</p>
-      </div>
-    </section>
-
-    <section id="playback-controls" class="playback-controls" aria-label="播放控制">
-      <button id="skip-back-button" class="editor-control-button" type="button" aria-label="后退 5 秒" disabled>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 8V4l-3 3 3 3V8a8 8 0 1 1-1 7"/><path d="M10 10v5m4-5v5"/></svg>
-      </button>
-      <button id="play-toggle-button" class="editor-play-button" type="button" aria-label="播放视频" disabled>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 6 9 6-9 6z"/></svg>
-      </button>
-      <button id="skip-forward-button" class="editor-control-button" type="button" aria-label="前进 5 秒" disabled>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19 8V4l3 3-3 3V8a8 8 0 1 0 1 7"/><path d="M10 10v5m4-5v5"/></svg>
-      </button>
-      <output id="playback-time" class="playback-time">00:00 / 00:00</output>
-    </section>
-
-    <section id="timeline-section" class="timeline-section" aria-labelledby="timeline-heading">
-      <div class="timeline-heading">
-        <div>
-          <p class="panel-kicker">TIMELINE</p>
-          <h2 id="timeline-heading">视频时间轴</h2>
-        </div>
-        <output id="timeline-description" class="muted-label">等待视频信息</output>
-      </div>
-
-      <div id="timeline-track" class="timeline-track">
-        <div id="highlight-marker-layer" class="highlight-marker-layer" aria-label="精彩片段标记"></div>
-        <input id="timeline-scrubber" type="range" min="0" max="0" step="0.01" value="0" aria-label="视频播放位置" disabled>
-      </div>
-      <div id="timeline-scale" class="timeline-scale" aria-hidden="true">
-        <output id="timeline-start">00:00</output>
-        <output id="timeline-end">00:00</output>
-      </div>
-    </section>
-
-    <section id="active-highlight-detail" class="active-highlight-detail" aria-labelledby="active-highlight-heading">
-      <div>
-        <p class="panel-kicker">SELECTED SEGMENT</p>
-        <h2 id="active-highlight-heading">当前片段</h2>
-      </div>
-      <dl>
-        <div><dt>时间</dt><dd><output id="active-highlight-time">尚未选择</output></dd></div>
-        <div><dt>精彩度</dt><dd><output id="active-highlight-score">—</output></dd></div>
-      </dl>
-      <p id="active-highlight-comment">从左侧列表或时间轴选择一个精彩片段。</p>
-    </section>
-
-    <section id="editor-error" class="editor-error" role="alert" hidden>
-      <h2>无法打开剪辑预览</h2>
+    <!-- 加载失败 -->
+    <div id="editor-error" class="state-container error" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 20h19z"/><path d="M12 9v4m0 3h.01"/></svg>
+      <h3>加载失败</h3>
       <p id="editor-error-message"></p>
-      <a class="button secondary" href="/">返回分析工作台</a>
-    </section>
-  </section>
-</main>
+      <button id="editor-retry-button" class="button secondary" type="button">重试</button>
+    </div>
+
+    <!-- 空片段 -->
+    <div id="editor-empty" class="state-container" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
+      <h3>没有精彩片段</h3>
+      <p>该任务未生成精彩片段，请检查分析参数或尝试其他视频。</p>
+      <a href="/" class="button secondary">返回工作台</a>
+    </div>
+
+    <!-- 主内容区 -->
+    <div id="editor-content" class="editor-content" hidden>
+
+      <!-- 视频预览区 -->
+      <section class="editor-video-section" aria-labelledby="video-heading">
+        <h2 id="video-heading" class="editor-section-title">视频预览</h2>
+        <div class="video-container">
+          <video id="editor-video" class="editor-video" preload="metadata" controls
+                 aria-label="视频播放器，使用空格键暂停或播放，左右方向键快退快进">
+            <p>您的浏览器不支持视频播放。</p>
+          </video>
+          <div id="video-placeholder" class="video-placeholder" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
+            <p>视频文件不可用，使用 Mock 数据进行预览。</p>
+          </div>
+        </div>
+
+        <!-- 时间轴 -->
+        <div class="timeline-section">
+          <div class="timeline-header">
+            <span id="timeline-current" class="timeline-time">00:00</span>
+            <span class="timeline-sep">/</span>
+            <span id="timeline-duration" class="timeline-time">00:00</span>
+            <div class="timeline-controls">
+              <button id="timeline-play" class="timeline-play-button" type="button" aria-label="播放">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="timeline-track-wrapper">
+            <div id="timeline-track" class="timeline-track" role="slider"
+                 aria-label="视频时间轴，左右方向键快退快进"
+                 aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+                 tabindex="0">
+              <div id="timeline-markers" class="timeline-markers"></div>
+              <div id="timeline-playhead" class="timeline-playhead" aria-hidden="true"></div>
+            </div>
+          </div>
+          <div class="timeline-segments-bar" id="timeline-segments-bar" aria-hidden="true"></div>
+        </div>
+      </section>
+
+      <!-- 精彩片段区 -->
+      <section class="editor-segments-section" aria-labelledby="segments-heading">
+        <div class="segments-header">
+          <h2 id="segments-heading" class="editor-section-title">精彩片段</h2>
+          <span id="segments-count" class="segments-badge">0 个片段</span>
+        </div>
+
+        <div class="segments-layout">
+          <!-- 片段列表 -->
+          <div id="segment-list" class="segment-card-grid" role="list"
+               aria-label="精彩片段列表，点击选中查看详情"></div>
+
+          <!-- 片段详情面板 -->
+          <aside id="segment-detail" class="segment-detail-panel" aria-labelledby="detail-heading">
+            <div id="detail-placeholder" class="detail-placeholder">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+              <h3 id="detail-heading">选择一个片段</h3>
+              <p>点击左侧片段卡片查看 Agent 评论与详情。</p>
+            </div>
+
+            <div id="detail-content" hidden>
+              <div class="detail-header">
+                <h3 id="detail-title">片段详情</h3>
+                <span id="detail-score" class="detail-score-badge"></span>
+              </div>
+
+              <div class="detail-meta">
+                <div class="detail-meta-item">
+                  <span class="detail-meta-label">时间范围</span>
+                  <strong id="detail-time"></strong>
+                </div>
+                <div class="detail-meta-item">
+                  <span class="detail-meta-label">时长</span>
+                  <strong id="detail-duration"></strong>
+                </div>
+                <div class="detail-meta-item">
+                  <span class="detail-meta-label">来源关键帧</span>
+                  <strong id="detail-keyframes"></strong>
+                </div>
+              </div>
+
+              <!-- Agent 评论区 -->
+              <div class="agent-comment-section" aria-labelledby="agent-heading">
+                <div class="agent-comment-header">
+                  <h4 id="agent-heading">Agent 评论</h4>
+                  <span id="agent-status-badge" class="agent-status-badge"></span>
+                </div>
+
+                <div id="agent-completed-content" hidden>
+                  <div class="agent-field">
+                    <span class="agent-field-label">摘要</span>
+                    <p id="agent-summary" class="agent-field-value"></p>
+                  </div>
+                  <div class="agent-field">
+                    <span class="agent-field-label">标签</span>
+                    <div id="agent-tags" class="agent-tag-list"></div>
+                  </div>
+                  <div class="agent-field">
+                    <span class="agent-field-label">建议</span>
+                    <div id="agent-suggestions" class="agent-suggestion-list"></div>
+                  </div>
+                  <div class="agent-field">
+                    <span class="agent-field-label">审核意见</span>
+                    <div id="agent-review" class="agent-review-card"></div>
+                  </div>
+                  <div class="agent-field">
+                    <span class="agent-field-label">证据引用</span>
+                    <div id="agent-evidence" class="agent-evidence-list"></div>
+                  </div>
+                  <div class="agent-field">
+                    <span class="agent-field-label">知识库引用</span>
+                    <div id="agent-knowledge" class="agent-evidence-list"></div>
+                  </div>
+                </div>
+
+                <div id="agent-pending-content" hidden>
+                  <div class="agent-placeholder-state pending">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                    <p>Agent 分析正在进行中，完成后将显示摘要、标签和建议。</p>
+                  </div>
+                </div>
+
+                <div id="agent-unavailable-content" hidden>
+                  <div class="agent-placeholder-state unavailable">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 20h19z"/><path d="M12 9v4m0 3h.01"/></svg>
+                    <p id="agent-unavailable-message">Agent 服务当前不可用，以下为基于 CV 检测的规则输出。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <!-- 底部工具栏 -->
+      <footer class="editor-toolbar" role="toolbar" aria-label="编辑操作">
+        <button id="save-review-button" class="button secondary" type="button">保存审核</button>
+        <button id="rough-cut-button" class="button primary" type="button">生成粗剪视频</button>
+        <button id="view-report-button" class="button ghost" type="button">查看 JSON 报告</button>
+        <a id="back-workbench-link" href="/" class="button ghost">返回工作台</a>
+      </footer>
+    </div>
+
+  </main>
+</div>
+
+<!-- JSON 报告弹窗 -->
+<dialog id="report-dialog" class="report-dialog">
+  <div class="dialog-header">
+    <div><p class="panel-kicker">RAW DATA</p><h2>编辑数据</h2></div>
+    <button id="close-report-button" class="icon-button" type="button" aria-label="关闭报告">×</button>
+  </div>
+  <pre id="report-content"></pre>
+</dialog>
+
+<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 </body>
 </html>
