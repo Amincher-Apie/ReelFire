@@ -1,7 +1,7 @@
 # Valorant 自定义 YOLO 数据集配置
 # 类别：weapon（武器）, enemy（敌人）
 
-path: D:/_Keshe/ReelFire/data/valorant_dataset  # 数据集根目录（绝对路径）
+path: ../data/valorant_dataset  # 数据集根目录（相对路径）
 train: images/train
 val: images/val
 

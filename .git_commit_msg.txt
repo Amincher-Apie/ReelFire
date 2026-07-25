@@ -1,0 +1,6 @@
+fix: 修复数据集配置绝对路径问题
+
+- custom.yaml: D:/_Keshe/... -> ../data/custom_dataset
+- valorant.yaml: D:/_Keshe/... -> ../data/valorant_dataset
+
+使用相对路径确保跨机器可用
