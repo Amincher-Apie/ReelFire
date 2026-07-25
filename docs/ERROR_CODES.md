@@ -544,9 +544,15 @@ FFmpeg 缺失时必须明确失败，不得创建空文件或假视频作为成�
 
 | `AGENT\_ALREADY\_RUNNING`     |  409 | 同一任务已有活动 Agent 调用         |
 
+| `AGENT\_CALL\_INPUT\_INVALID` |  400 | Agent 调用输入或编号不合法           |
+
 | `AGENT\_CALL\_NOT\_FOUND`      |  404 | Agent 调用记录不存在             |
 
-| `AGENT\_ACCESS\_DENIED`       |  403 | 当前用户无权访问该调用               |
+| `AGENT\_CALL\_PERSISTENCE\_UNAVAILABLE` | 409 | Legacy 任务无法保存 Agent 调用 |
+
+| `AGENT\_CALL\_STATE\_CONFLICT` | 409 | Agent 调用状态流转不合法            |
+
+| `JOB\_ACCESS\_DENIED`         |  403 | 当前用户无权访问调用所属任务            |
 
 | `AGENT\_SERVICE\_UNAVAILABLE` |  503 | Agent 或模型服务不可用            |
 

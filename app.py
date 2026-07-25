@@ -16,6 +16,14 @@ from database import init_app as init_database_app
 from database import init_db
 from routes.api_routes import api_bp
 from routes.auth_routes import auth_bp
+from services.agent_call_service import (
+    AgentAlreadyRunningError,
+    AgentCallNotFoundError,
+    AgentCallPersistenceUnavailableError,
+    AgentCallStateConflictError,
+    AgentCallValidationError,
+    AgentReportNotReadyError,
+)
 from services.auth_service import import_legacy_users
 from services.file_service import FileService, FileValidationError
 from services.job_access_service import JobAccessDeniedError, require_job_access
@@ -186,6 +194,58 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             error=str(exc),
             error_code="REVIEW_PERSISTENCE_UNAVAILABLE",
         ), 409
+
+    @app.errorhandler(AgentCallValidationError)
+    def handle_agent_call_input_invalid(exc: AgentCallValidationError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AGENT_CALL_INPUT_INVALID",
+        ), 400
+
+    @app.errorhandler(AgentCallPersistenceUnavailableError)
+    def handle_agent_call_persistence_unavailable(
+        exc: AgentCallPersistenceUnavailableError,
+    ):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AGENT_CALL_PERSISTENCE_UNAVAILABLE",
+        ), 409
+
+    @app.errorhandler(AgentAlreadyRunningError)
+    def handle_agent_already_running(exc: AgentAlreadyRunningError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AGENT_ALREADY_RUNNING",
+        ), 409
+
+    @app.errorhandler(AgentReportNotReadyError)
+    def handle_agent_report_not_ready(exc: AgentReportNotReadyError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="REPORT_NOT_READY",
+        ), 409
+
+    @app.errorhandler(AgentCallStateConflictError)
+    def handle_agent_call_state_conflict(
+        exc: AgentCallStateConflictError,
+    ):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AGENT_CALL_STATE_CONFLICT",
+        ), 409
+
+    @app.errorhandler(AgentCallNotFoundError)
+    def handle_agent_call_not_found(exc: AgentCallNotFoundError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AGENT_CALL_NOT_FOUND",
+        ), 404
 
     @app.errorhandler(JobNotFoundError)
     def handle_not_found(exc: JobNotFoundError):

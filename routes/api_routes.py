@@ -11,6 +11,14 @@ from flask import Blueprint, current_app, jsonify, request, url_for
 from werkzeug.datastructures import FileStorage
 
 from services.analysis_service import AnalysisService
+from services.agent_call_service import (
+    AgentCallPersistenceUnavailableError,
+    AgentCallValidationError,
+    AgentReportNotReadyError,
+    create_agent_call,
+    get_agent_call,
+    list_agent_calls,
+)
 from services.ffmpeg_service import create_rough_cut, is_ffmpeg_available
 from services.file_service import FileService, FileValidationError
 from services.job_access_service import (
@@ -360,6 +368,15 @@ def _positive_project_id(raw_value: object) -> int:
     return project_id
 
 
+def _positive_agent_call_id(raw_value: object) -> int:
+    if isinstance(raw_value, bool) or not isinstance(raw_value, str):
+        raise AgentCallValidationError("agent_call_id 必须是正整数")
+    value = raw_value.strip()
+    if not value.isascii() or not value.isdecimal() or int(value) <= 0:
+        raise AgentCallValidationError("agent_call_id 必须是正整数")
+    return int(value)
+
+
 @api_bp.get("/health")
 def health():
     model_path = Path(current_app.config["MODEL_PATH"])
@@ -633,6 +650,58 @@ def get_latest_job_review(job_id: str):
         else get_latest_review(job_id)
     )
     return jsonify(ok=True, review=review)
+
+
+@api_bp.post("/jobs/<job_id>/agent-calls")
+def create_job_agent_call(job_id: str):
+    jobs, _, _ = _services()
+    access = require_job_access(job_id)
+    if access["is_legacy"]:
+        raise AgentCallPersistenceUnavailableError(
+            "旧文件任务无法持久化 Agent 调用日志"
+        )
+
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise AgentCallValidationError("请求体必须是合法的 JSON 对象")
+    unexpected = set(payload) - {"prompt_version", "force"}
+    if unexpected:
+        raise AgentCallValidationError(
+            f"不支持的 Agent 调用字段：{', '.join(sorted(unexpected))}"
+        )
+    force = payload.get("force", False)
+    if not isinstance(force, bool):
+        raise AgentCallValidationError("force 必须是布尔值")
+
+    job = jobs.get_job(job_id)
+    if job.get("status") != "completed" or not jobs.report_path(job_id).is_file():
+        raise AgentReportNotReadyError(
+            "任务必须 completed 且分析报告已生成"
+        )
+    agent_call = create_agent_call(
+        public_job_id=job_id,
+        requested_by=int(access["user_id"]),
+        prompt_version=payload.get("prompt_version"),
+    )
+    return jsonify(ok=True, agent_call=agent_call), 202
+
+
+@api_bp.get("/jobs/<job_id>/agent-calls")
+def get_job_agent_calls(job_id: str):
+    access = require_job_access(job_id)
+    agent_calls = (
+        []
+        if access["is_legacy"]
+        else list_agent_calls(job_id)
+    )
+    return jsonify(ok=True, agent_calls=agent_calls)
+
+
+@api_bp.get("/agent-calls/<agent_call_id>")
+def get_agent_call_detail(agent_call_id: str):
+    agent_call = get_agent_call(_positive_agent_call_id(agent_call_id))
+    require_job_access(str(agent_call["job_id"]))
+    return jsonify(ok=True, agent_call=agent_call)
 
 
 @api_bp.post("/jobs/<job_id>/rough-cut")
