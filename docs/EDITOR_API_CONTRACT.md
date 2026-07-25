@@ -146,6 +146,14 @@ Agent 评论状态：
 
 后端不得把未经 Agent 输出验证的前端拼接文案标记为 `ready`。
 
+`agent_calls` 是 Agent 执行日志，不是 Editor 评论的直接数据源。
+`agent_calls.status = completed` 不代表 `agent_comment_status = ready`。
+Editor 1.0 仍只按照上述 `agent_report.json.segment_comments[]` 和带可验证
+证据的 `suggestions[]` 聚合评论。`agent_calls.result`、`result_path` 或
+`inline_json$` 编码内容不得直接填入 `highlights[].agent_comment`。
+`queued`、`running`、`completed`、`failed`、`needs_review` 也不得与
+`ready`、`pending`、`unavailable` 建立一一映射。
+
 建议的 Agent 原生输出：
 
 ```json
@@ -174,6 +182,8 @@ Agent 评论状态：
 | HTTP 状态 | 场景 |
 | --- | --- |
 | `400` | `job_id` 格式不合法或报告字段不合法 |
+| `401` | 项目任务未登录，`AUTH_REQUIRED` |
+| `403` | 当前用户无权访问项目任务，`JOB_ACCESS_DENIED` |
 | `404` | 任务或源视频不存在 |
 | `409` | 任务未完成或报告尚未生成 |
 | `500` | 持久化数据损坏或服务内部错误 |

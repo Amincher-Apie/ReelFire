@@ -106,7 +106,7 @@ multipart/form-data
 
 当前系统采用混合存储：
 
-- SQLite：用户、项目归属，以及携带 `project_id` 创建的素材和任务索引；审核记录和 Agent 调用日志仍属于后续阶段；
+- SQLite：用户、项目归属、项目型任务索引、人工审核历史和 Agent 调用日志；
 - 文件系统：源视频、`job.json`、`analysis_report.json`、`agent_report.json`、关键帧和导出文件。
 
 任务运行链仍以 `JobService` 和任务目录中的 JSON 文件为事实来源；项目型上传同时在 SQLite 建立归属索引。
@@ -871,11 +871,12 @@ Legacy 文件任务不携带 `status` 时继续更新文件报告；携带 `stat
 
 ---
 
-## 12. 规划中：Agent 调用日志
+## 12. 已实现：Agent 调用日志
 
-Agent 业务由 Agent 模块实现；后端负责权限、状态和日志持久化。
+本阶段只实现真实调用日志的创建、状态服务和查询，不执行模型、RAG、
+Prompt 或工具编排，也不生成虚假的 Agent 成功结果。
 
-计划接口：
+接口：
 
 ```http
 POST /api/jobs/<job_id>/agent-calls
@@ -883,37 +884,60 @@ GET  /api/jobs/<job_id>/agent-calls
 GET  /api/agent-calls/<agent_call_id>
 ```
 
-状态：
+`POST` 要求任务属于当前用户、任务状态为 `completed` 且
+`analysis_report.json` 已存在。成功返回 `202` 和一条真实 `queued`
+日志，但不会启动 Agent。`force` 是兼容字段，不能绕过活动调用保护。
+
+状态机：
 
 ```text
-queued
-running
-completed
-failed
-needs_review
+queued → running
+queued → failed
+running → completed
+running → failed
+running → needs_review
 ```
 
-后端至少记录：
+终态不能再次运行或互相覆盖。后续 Agent 工作流只能通过
+`services.agent_call_service` 的状态更新函数写入真实执行元数据。
 
-```text
-job_id
-requested_by
-status
-model_name
-prompt_version
-input_summary
-output_summary
-tool_trace_json
-references_json
-result_path
-duration_ms
-error_code
-error_message
-created_at
-completed_at
-```
+历史接口按调用 `id` 降序返回摘要；详情接口联表取得公开 `job_id`，
+不会返回 `agent_calls.job_row_id` 或 SQLite `jobs.id`。
 
-Agent 失败不得破坏已有 CV 报告；缺失或损坏的 Agent 结果应在编辑聚合接口中表现为 `pending` 或 `unavailable`。
+主要错误：
+
+| HTTP | `error_code` | 场景 |
+| ---: | --- | --- |
+| 400 | `AGENT_CALL_INPUT_INVALID` | 创建输入或调用 ID 不合法 |
+| 401 | `AUTH_REQUIRED` | 未登录访问项目任务 |
+| 403 | `JOB_ACCESS_DENIED` | 当前用户不是任务所有者 |
+| 404 | `AGENT_CALL_NOT_FOUND` | 调用记录不存在 |
+| 409 | `AGENT_CALL_PERSISTENCE_UNAVAILABLE` | Legacy 任务无法持久化日志 |
+| 409 | `AGENT_ALREADY_RUNNING` | 已存在活动调用 |
+| 409 | `REPORT_NOT_READY` | 任务或报告尚未就绪 |
+| 409 | `AGENT_CALL_STATE_CONFLICT` | 状态流转非法 |
+
+Legacy 任务的创建接口返回持久化不可用，历史接口返回空数组，不创建
+隐式 SQLite 任务，也不在文件系统伪造日志。
+
+现有表没有 `result_json`，且本阶段不增加迁移或结果文件。服务使用
+`result_path` 保存带 `inline_json$` 前缀的 JSON 兼容编码，并在 API
+读取时恢复为 `result` 对象；API 不暴露该内部编码。后续若引入真实结果
+文件，应通过正式迁移明确拆分。
+
+`failed` 必须保存错误码和错误信息。`needs_review` 是 Agent 建议状态，
+不等于人工 `reviews.pending`。Agent 服务不写入 `reviews`，也不修改
+`analysis_report.json` 或 `agent_report.json`。
+
+`agent_calls.result` 只是调用日志的一部分。阶段 D 不将 Agent 调用日志
+接入 Editor 聚合，也不修改 Editor 1.0 的评论来源或状态映射：
+Editor 评论仍只来自 `agent_report.json.segment_comments[]` 或带可验证
+证据的 `suggestions[]`。调用状态（包括 `completed`）不得直接映射为
+`agent_comment_status`，日志中的 `result`、`result_path` 或
+`inline_json$` 内容也不得直接作为 Editor 评论。
+
+日志不得保存 API Key、完整系统 Prompt 或未经脱敏的原始输入。SQLite
+只作为单机调用日志，不是生产级消息队列。
 
 ---
 

@@ -405,6 +405,35 @@ agent_calls.job_row_id → jobs.id
 agent_calls.requested_by → users.id
 ```
 
+当前服务实现以下单向状态机：
+
+```text
+queued → running
+queued → failed
+running → completed
+running → failed
+running → needs_review
+```
+
+终态不允许再次转换。创建调用时在同一 `BEGIN IMMEDIATE` 事务内检查
+`queued/running` 并插入 queued 行，同时使用进程内锁覆盖当前单进程
+Flask 场景。SQLite 仍是单机日志存储，不是分布式队列；多进程部署若需
+严格全局去重，应通过后续迁移增加数据库级约束。
+
+`agent_calls.job_row_id` 使用内部 `jobs.id`，API 和路由继续使用公开
+`jobs.public_job_id`。Legacy 文件任务没有任务行，不能持久化 Agent
+日志。
+
+当前表没有独立 `result_json` 字段，本阶段又禁止新增迁移和结果文件。
+服务因此在 `result_path` 中使用带 `inline_json$` 前缀的 JSON 兼容编码，
+读取时恢复为普通 `result` 对象且不向 API 暴露内部编码。后续落地真实
+结果文件时必须通过正式迁移澄清字段职责。
+
+Agent 调用日志与人工 `reviews` 完全独立：`needs_review` 只是 Agent
+建议，不会写成人工 `pending`，任何 Agent 状态更新都不得覆盖人工
+labels、note、segments 或 keyframes。日志不保存密钥、完整 Prompt 或
+敏感原始输入。
+
 ## 11. knowledge_documents 表
 
 ### 11.1 用途
@@ -642,7 +671,7 @@ SQLite 是业务索引和权限来源，分析 JSON 是视觉处理结果来源�
 
 携带 `status` 的 `PATCH review` 已写入 SQLite `reviews` 表，并保留
 逐次审核历史；不携带 `status` 的旧文件审核行为保持兼容。Agent 调用
-日志及 Agent 对审核结果的消费仍属于阶段 D，且不得覆盖人工记录。
+日志已单独写入 `agent_calls`，其状态和结果不得覆盖人工记录。
 
 每次访问任务时，不能只验证公开 `job_id` 是否存在，还必须验证：
 

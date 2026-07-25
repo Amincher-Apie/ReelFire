@@ -170,6 +170,9 @@ document
 
 ### Agent 评论
 
+- 页面只消费 Editor 聚合接口，不直接请求 Agent 调用日志来生成片段评论。
+- Agent 调用日志完成不表示最终评论已经可展示。
+- 只有 Editor 接口返回 `agent_comment_status = ready` 时才显示评论。
 - `ready`：显示后端给出的最终评论。
 - `pending`：显示“Agent 评论尚未生成”。
 - `unavailable`：显示“Agent 评论不可用”。
