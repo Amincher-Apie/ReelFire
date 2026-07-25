@@ -1,0 +1,117 @@
+{
+  "video": {
+    "duration": 12.0,
+    "width": 1920,
+    "height": 1080,
+    "fps": 30.0
+  },
+  "duration": 12.0,
+  "settings": {
+    "sample_interval": 0.5,
+    "target_duration": 8.0
+  },
+  "model": {
+    "path": "yolo11n.pt"
+  },
+  "sample_interval": 0.5,
+  "total_sampled_frames": 2,
+  "score_weights": {
+    "object": 0.45,
+    "scene_change": 0.35,
+    "motion": 0.2
+  },
+  "samples": [
+    {
+      "frame_index": 0,
+      "timestamp": 1.0,
+      "object_count": 1,
+      "object_score": 0.4,
+      "scene_change_score": 0.2,
+      "motion_score": 0.3,
+      "highlight_score": 0.32,
+      "objects": [
+        {
+          "class": "person",
+          "confidence": 0.42,
+          "bbox": [1, 2, 30, 40]
+        }
+      ]
+    },
+    {
+      "frame_index": 1,
+      "timestamp": 6.0,
+      "object_count": 2,
+      "object_score": 0.7,
+      "scene_change_score": 0.8,
+      "motion_score": 0.75,
+      "highlight_score": 0.735,
+      "objects": [
+        {
+          "class": "person",
+          "confidence": 0.88,
+          "bbox": [5, 8, 35, 45]
+        },
+        {
+          "class": "car",
+          "confidence": 0.81,
+          "bbox": [40, 10, 90, 55]
+        }
+      ]
+    }
+  ],
+  "keyframes": [
+    {
+      "frame_index": 1,
+      "timestamp": 6.0,
+      "object_count": 2,
+      "object_score": 0.7,
+      "scene_change_score": 0.8,
+      "motion_score": 0.75,
+      "highlight_score": 0.735,
+      "objects": [
+        {
+          "class": "person",
+          "confidence": 0.88,
+          "bbox": [5, 8, 35, 45]
+        },
+        {
+          "class": "car",
+          "confidence": 0.81,
+          "bbox": [40, 10, 90, 55]
+        }
+      ],
+      "id": "kf_001",
+      "image": "keyframes/kf_001.jpg",
+      "decision": "keep",
+      "label": "",
+      "note": "",
+      "order": 1
+    }
+  ],
+  "segments": [
+    {
+      "id": "seg_001",
+      "start": 2.0,
+      "end": 10.0,
+      "score": 0.735,
+      "source_keyframes": ["kf_001"],
+      "order": 1
+    }
+  ],
+  "segment_tags": {
+    "total_tags": 2,
+    "summary": ["person(2)", "car(1)"]
+  },
+  "ai_cover_prompt": "6.0 秒检测到 person 和 car。",
+  "recommended_clip": {
+    "start_time": 2.0,
+    "end_time": 10.0,
+    "output_ratio": "16:9"
+  },
+  "output": {
+    "video": null,
+    "contact_sheet": "result/contact_sheet.jpg"
+  },
+  "job_id": "job_contract_001",
+  "updated_at": "2026-07-25T02:00:00+00:00"
+}

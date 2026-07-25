@@ -159,6 +159,12 @@ Day 02～Day 03 的代码接入遵循以下原则：
 5. 后端按 `job_id` 提供 Agent 报告和轨迹查询；
 6. API 字段变化必须同步更新 `docs/API.md` 和测试。
 
+当前主干的 `analysis_report.json` 通过
+`agent.integrations.build_agent_input()` 添加 Agent 边界元数据，
+`AgentService.run_analysis_report()` 可直接运行该真实报告。Agent 结果通过
+`agent.integrations.to_backend_agent_call()` 映射到后端 `agent_calls` 契约；
+内部 `degraded` 对外映射为 `needs_review`，不会伪装成成功。
+
 ## 10. Day 01 验收
 
 - [x] 规则基线与独立 Agent 的边界明确；
@@ -171,3 +177,18 @@ Day 02～Day 03 的代码接入遵循以下原则：
 - [x] 密钥与调用日志安全边界明确；
 - [x] 知识库、输入输出 Schema 和 Prompt v1 通过本地资产测试。
 - [x] 本地 Ollama 已完成真实 Embedding，并保存两组 Top-K=5 检索结果。
+
+## 11. Day 02 验收
+
+- [x] `ReportParserTool` 校验报告、检测结果、时间戳和片段边界；
+- [x] `KnowledgeRetrieverTool` 完成向量索引、Top-K、规则重排和确定性降级；
+- [x] `AdviceGeneratorTool` 支持本地 Ollama 与规则生成；
+- [x] `RuleValidatorTool` 校验所有证据引用和知识引用，拒绝虚构内容及示例占位文本；
+- [x] `AgentService` 保存输入摘要哈希、工具状态、耗时、错误和降级状态；
+- [x] Agent 报告与脱敏调用轨迹使用原子 JSON 写入；
+- [x] Mock CV 报告稳定返回结构化 JSON，空检测和非法输入均有明确状态；
+- [x] 真实 `qwen3-embedding:0.6b` 检索与 `qwen3:0.6b` 生成链路已执行；
+- [x] 小模型复制示例占位文本的真实失败被规则校验拦截，并安全降级。
+- [x] 已检查 CV、后端和前端远端分支，保存跨成员契约对接记录；
+- [x] 当前主干真实 `analysis_report.json` 结构已通过契约夹具测试；
+- [x] Agent 状态、工具轨迹、引用和错误已映射到后端 `agent_calls` 字段。
