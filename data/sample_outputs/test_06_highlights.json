@@ -1,0 +1,279 @@
+{
+  "segments": [
+    {
+      "start": 0.0,
+      "end": 6.4,
+      "duration": 6.4,
+      "enemy_appear_at": 1.433,
+      "enemy_disappear_at": 4.9,
+      "peak_enemy_count": 1,
+      "detected_classes": [
+        "enemy",
+        "weapon"
+      ],
+      "enemy_classes_in_segment": [
+        "enemy"
+      ],
+      "detections_summary": [
+        {
+          "track_id": 1,
+          "class": "weapon",
+          "first_seen": 0.0,
+          "last_seen": 2.933,
+          "detection_count": 73,
+          "confidence": 0.8912,
+          "confidence_max": 0.977,
+          "confidence_min": 0.3711
+        },
+        {
+          "track_id": 2,
+          "class": "enemy",
+          "first_seen": 1.6,
+          "last_seen": 1.633,
+          "detection_count": 2,
+          "confidence": 0.4068,
+          "confidence_max": 0.4415,
+          "confidence_min": 0.3722
+        },
+        {
+          "track_id": 3,
+          "class": "weapon",
+          "first_seen": 1.933,
+          "last_seen": 2.333,
+          "detection_count": 8,
+          "confidence": 0.6401,
+          "confidence_max": 0.7946,
+          "confidence_min": 0.4734
+        },
+        {
+          "track_id": 6,
+          "class": "weapon",
+          "first_seen": 3.033,
+          "last_seen": 6.4,
+          "detection_count": 91,
+          "confidence": 0.8776,
+          "confidence_max": 0.9772,
+          "confidence_min": 0.3714
+        },
+        {
+          "track_id": 7,
+          "class": "weapon",
+          "first_seen": 3.033,
+          "last_seen": 3.033,
+          "detection_count": 1,
+          "confidence": 0.3746,
+          "confidence_max": 0.3746,
+          "confidence_min": 0.3746
+        },
+        {
+          "track_id": 11,
+          "class": "enemy",
+          "first_seen": 4.433,
+          "last_seen": 4.867,
+          "detection_count": 13,
+          "confidence": 0.6858,
+          "confidence_max": 0.9558,
+          "confidence_min": 0.3745
+        },
+        {
+          "track_id": 12,
+          "class": "weapon",
+          "first_seen": 5.733,
+          "last_seen": 6.4,
+          "detection_count": 14,
+          "confidence": 0.7042,
+          "confidence_max": 0.8992,
+          "confidence_min": 0.4019
+        }
+      ],
+      "reason": "enemy_engagement"
+    },
+    {
+      "start": 50.767,
+      "end": 58.4,
+      "duration": 7.633,
+      "enemy_appear_at": 52.267,
+      "enemy_disappear_at": 56.9,
+      "peak_enemy_count": 2,
+      "detected_classes": [
+        "enemy",
+        "weapon"
+      ],
+      "enemy_classes_in_segment": [
+        "enemy"
+      ],
+      "detections_summary": [
+        {
+          "track_id": 107,
+          "class": "weapon",
+          "first_seen": 51.733,
+          "last_seen": 58.4,
+          "detection_count": 188,
+          "confidence": 0.942,
+          "confidence_max": 0.984,
+          "confidence_min": 0.653
+        },
+        {
+          "track_id": 112,
+          "class": "enemy",
+          "first_seen": 52.433,
+          "last_seen": 52.767,
+          "detection_count": 6,
+          "confidence": 0.5163,
+          "confidence_max": 0.5991,
+          "confidence_min": 0.4508
+        },
+        {
+          "track_id": 115,
+          "class": "enemy",
+          "first_seen": 53.7,
+          "last_seen": 53.9,
+          "detection_count": 4,
+          "confidence": 0.4158,
+          "confidence_max": 0.4818,
+          "confidence_min": 0.3626
+        },
+        {
+          "track_id": 116,
+          "class": "enemy",
+          "first_seen": 54.533,
+          "last_seen": 54.767,
+          "detection_count": 3,
+          "confidence": 0.6284,
+          "confidence_max": 0.7173,
+          "confidence_min": 0.4892
+        },
+        {
+          "track_id": 119,
+          "class": "enemy",
+          "first_seen": 54.833,
+          "last_seen": 54.833,
+          "detection_count": 1,
+          "confidence": 0.7281,
+          "confidence_max": 0.7281,
+          "confidence_min": 0.7281
+        },
+        {
+          "track_id": 122,
+          "class": "enemy",
+          "first_seen": 55.033,
+          "last_seen": 55.067,
+          "detection_count": 2,
+          "confidence": 0.3957,
+          "confidence_max": 0.4324,
+          "confidence_min": 0.3591
+        },
+        {
+          "track_id": 125,
+          "class": "enemy",
+          "first_seen": 56.3,
+          "last_seen": 56.433,
+          "detection_count": 4,
+          "confidence": 0.7752,
+          "confidence_max": 0.9248,
+          "confidence_min": 0.6248
+        },
+        {
+          "track_id": 126,
+          "class": "enemy",
+          "first_seen": 56.567,
+          "last_seen": 56.767,
+          "detection_count": 5,
+          "confidence": 0.4858,
+          "confidence_max": 0.5895,
+          "confidence_min": 0.4016
+        },
+        {
+          "track_id": 127,
+          "class": "enemy",
+          "first_seen": 56.733,
+          "last_seen": 56.867,
+          "detection_count": 4,
+          "confidence": 0.5671,
+          "confidence_max": 0.6586,
+          "confidence_min": 0.4215
+        },
+        {
+          "track_id": 131,
+          "class": "weapon",
+          "first_seen": 57.567,
+          "last_seen": 58.267,
+          "detection_count": 18,
+          "confidence": 0.6147,
+          "confidence_max": 0.9433,
+          "confidence_min": 0.368
+        }
+      ],
+      "reason": "enemy_engagement"
+    },
+    {
+      "start": 63.533,
+      "end": 66.57,
+      "duration": 3.037,
+      "enemy_appear_at": 65.033,
+      "enemy_disappear_at": 65.7,
+      "peak_enemy_count": 1,
+      "detected_classes": [
+        "enemy",
+        "weapon"
+      ],
+      "enemy_classes_in_segment": [
+        "enemy"
+      ],
+      "detections_summary": [
+        {
+          "track_id": 158,
+          "class": "weapon",
+          "first_seen": 63.533,
+          "last_seen": 66.533,
+          "detection_count": 83,
+          "confidence": 0.9572,
+          "confidence_max": 0.988,
+          "confidence_min": 0.5611
+        },
+        {
+          "track_id": 159,
+          "class": "enemy",
+          "first_seen": 65.2,
+          "last_seen": 65.667,
+          "detection_count": 8,
+          "confidence": 0.638,
+          "confidence_max": 0.888,
+          "confidence_min": 0.3822
+        },
+        {
+          "track_id": 160,
+          "class": "weapon",
+          "first_seen": 66.433,
+          "last_seen": 66.533,
+          "detection_count": 4,
+          "confidence": 0.6893,
+          "confidence_max": 0.7412,
+          "confidence_min": 0.6403
+        }
+      ],
+      "reason": "enemy_engagement"
+    }
+  ],
+  "stats": {
+    "total_segments": 3,
+    "total_duration": 17.07,
+    "highlight_ratio": 0.2564,
+    "video_duration": 66.57,
+    "frames_analyzed": 1997,
+    "frames_with_enemy": 51,
+    "enemy_presence_ratio": 0.0255
+  },
+  "config": {
+    "enemy_classes": [
+      "character_ct",
+      "character_t",
+      "enemy"
+    ],
+    "pre_buffer": 1.5,
+    "post_buffer": 1.5,
+    "smooth_frames": 5,
+    "min_duration": 1.0,
+    "merge_gap": 1.0
+  }
+}
