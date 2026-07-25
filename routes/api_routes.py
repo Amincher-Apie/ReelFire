@@ -26,6 +26,16 @@ from services.project_service import (
     get_owned_project,
     list_projects_for_owner,
 )
+from services.review_service import (
+    ReviewPersistenceUnavailableError,
+    ReviewValidationError,
+    create_review,
+    get_latest_review,
+    list_review_history,
+    normalize_review_labels,
+    normalize_review_note,
+    validate_review_status,
+)
 from services.session_service import require_authenticated_user_id
 
 
@@ -501,17 +511,47 @@ def analyze_job(job_id: str):
 @api_bp.patch("/jobs/<job_id>/review")
 def review_job(job_id: str):
     jobs, _, _ = _services()
-    require_job_access(job_id)
+    access = require_job_access(job_id)
     job = jobs.get_job(job_id)
     if not jobs.report_path(job_id).is_file():
         raise JobStateConflictError("分析报告尚未生成，不能进行人工审核")
     report = jobs.read_report(job_id)
-    payload = _json_object()
-    unexpected = set(payload) - {"keyframes", "recommended_clip", "segments"}
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise ReviewValidationError("请求体必须是合法的 JSON 对象")
+    unexpected = set(payload) - {
+        "keyframes",
+        "recommended_clip",
+        "segments",
+        "status",
+        "labels",
+        "note",
+    }
     if unexpected:
-        raise FileValidationError(f"不支持的审核字段：{', '.join(sorted(unexpected))}")
+        raise ReviewValidationError(
+            f"不支持的审核字段：{', '.join(sorted(unexpected))}"
+        )
     if not payload:
-        raise FileValidationError("至少提交 keyframes、segments 或 recommended_clip")
+        raise ReviewValidationError(
+            "至少提交审核状态或报告审核字段"
+        )
+    status = (
+        validate_review_status(payload["status"])
+        if "status" in payload
+        else None
+    )
+    labels = (
+        normalize_review_labels(payload["labels"])
+        if "labels" in payload
+        else None
+    )
+    note = (
+        normalize_review_note(payload["note"])
+        if "note" in payload
+        else None
+    )
+    if status is None and ("labels" in payload or "note" in payload):
+        raise ReviewValidationError("labels 和 note 必须与 status 一同提交")
     duration = _duration(job, report)
     changes: dict[str, Any] = {}
     if "keyframes" in payload:
@@ -539,9 +579,60 @@ def review_job(job_id: str):
             duration,
         )
 
-    updated = jobs.update_report(job_id, lambda current: {**current, **changes})
+    apply_report_update = lambda: jobs.update_report(
+        job_id,
+        lambda current: {**current, **changes},
+    )
+    if status is None:
+        updated = apply_report_update()
+    else:
+        if access["is_legacy"]:
+            raise ReviewPersistenceUnavailableError(
+                "旧文件任务无法持久化 SQLite 审核记录"
+            )
+        _, updated = create_review(
+            public_job_id=job_id,
+            reviewer_id=int(access["user_id"]),
+            status=status,
+            labels=labels,
+            note=note,
+            segments=(
+                changes.get("segments")
+                if "segments" in payload
+                else None
+            ),
+            keyframes=(
+                changes.get("keyframes")
+                if "keyframes" in payload
+                else None
+            ),
+            apply_report_update=apply_report_update,
+            restore_report=lambda: jobs.write_report(job_id, report),
+        )
     jobs.update_job(job_id)
     return jsonify(ok=True, report=updated)
+
+
+@api_bp.get("/jobs/<job_id>/reviews")
+def get_review_history(job_id: str):
+    access = require_job_access(job_id)
+    reviews = (
+        []
+        if access["is_legacy"]
+        else list_review_history(job_id)
+    )
+    return jsonify(ok=True, reviews=reviews)
+
+
+@api_bp.get("/jobs/<job_id>/review/latest")
+def get_latest_job_review(job_id: str):
+    access = require_job_access(job_id)
+    review = (
+        None
+        if access["is_legacy"]
+        else get_latest_review(job_id)
+    )
+    return jsonify(ok=True, review=review)
 
 
 @api_bp.post("/jobs/<job_id>/rough-cut")

@@ -32,6 +32,10 @@ from services.project_service import (
     ProjectOwnerForbiddenError,
     ProjectValidationError,
 )
+from services.review_service import (
+    ReviewPersistenceUnavailableError,
+    ReviewValidationError,
+)
 from services.session_service import AuthenticationRequiredError
 
 
@@ -164,6 +168,24 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             error=str(exc),
             error_code="JOB_ACCESS_DENIED",
         ), 403
+
+    @app.errorhandler(ReviewValidationError)
+    def handle_review_input_invalid(exc: ReviewValidationError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="REVIEW_INPUT_INVALID",
+        ), 400
+
+    @app.errorhandler(ReviewPersistenceUnavailableError)
+    def handle_review_persistence_unavailable(
+        exc: ReviewPersistenceUnavailableError,
+    ):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="REVIEW_PERSISTENCE_UNAVAILABLE",
+        ), 409
 
     @app.errorhandler(JobNotFoundError)
     def handle_not_found(exc: JobNotFoundError):

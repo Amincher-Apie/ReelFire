@@ -342,6 +342,14 @@ reviews.reviewer_id → users.id
 
 查询当前审核结果时，按最新 `updated_at` 或最大 `id` 获取。
 
+当前实现每次携带三态 `status` 的人工审核都插入新记录，不执行覆盖式
+更新。SQLite 插入与 `analysis_report.json` 写回由审核服务协调：文件
+写入失败时回滚本次插入，数据库写入失败时不修改报告。API 始终使用
+公开 `job_id`，服务内部再解析为 `reviews.job_row_id`。
+
+Legacy 文件任务没有 SQLite `jobs` 行，因此只能继续使用原文件审核，
+不能创建 `reviews` 记录。Agent 工作流不得修改或静默覆盖人工审核历史。
+
 ## 10. agent_calls 表
 
 ### 10.1 用途
@@ -632,8 +640,9 @@ SQLite 是业务索引和权限来源，分析 JSON 是视觉处理结果来源�
 任务列表一次读取索引归属：匿名用户只看到旧文件任务；登录用户看到旧
 文件任务和自己的项目任务，不看到其他用户的项目任务。
 
-本阶段没有把 `PATCH review` 的内容写入 SQLite `reviews` 表；内容级
-三态审核持久化仍属于阶段 C。
+携带 `status` 的 `PATCH review` 已写入 SQLite `reviews` 表，并保留
+逐次审核历史；不携带 `status` 的旧文件审核行为保持兼容。Agent 调用
+日志及 Agent 对审核结果的消费仍属于阶段 D，且不得覆盖人工记录。
 
 每次访问任务时，不能只验证公开 `job_id` 是否存在，还必须验证：
 
