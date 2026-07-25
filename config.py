@@ -18,6 +18,8 @@ class Config:
     MODEL_PATH = Path(
         os.environ.get("DAY08_MODEL_PATH", str(MODELS_DIR / "yolo11n.pt"))
     )
+    # Custom model path (v5 best.pt)
+    CUSTOM_MODEL_PATH = BASE_DIR / "runs" / "detect" / "custom_fps_v5" / "weights" / "best.pt"
     ALLOWED_VIDEO_EXTENSIONS = frozenset({".mp4", ".avi", ".mov", ".mkv"})
     ALLOWED_OUTPUT_RATIOS = frozenset({"16:9", "9:16", "1:1"})
     MAX_CONTENT_LENGTH = 2 * 1024 * 1024 * 1024
@@ -34,5 +36,6 @@ class Config:
         "scene_change_weight": 0.35,
         "motion_weight": 0.20,
         "output_ratio": "16:9",
+        "model_id": "custom_v5",
     }
     JSON_SORT_KEYS = False

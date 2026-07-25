@@ -36,15 +36,40 @@ models/*.engine
 *.whl
 yolo26n.pt
 
-# 训练中间产物：只保留 v3 最终成果，排除 v1/v2 和中间 epoch 权重
+# 训练中间产物：只保留必要文件（best.pt + results.png + args.yaml）
 runs/detect/custom_fps/
 runs/detect/custom_fps_v2/
+runs/detect/custom_fps_v4/
 runs/detect/val/
 runs/detect/val-2/
 runs/detect/val-3/
 runs/detect/val-4/
+runs/detect/val-5/
+runs/detect/val-6/
+runs/detect/val-7/
+runs/detect/val-8/
+runs/detect/val-9/
+runs/detect/val-10/
+# 所有训练版本只保留 best.pt + results.png + args.yaml，排除其他
 runs/detect/custom_fps_v3/weights/epoch*.pt
 runs/detect/custom_fps_v3/weights/last.pt
+runs/detect/custom_fps_v5/weights/epoch*.pt
+runs/detect/custom_fps_v5/weights/last.pt
+runs/detect/valorant_v1/weights/epoch*.pt
+runs/detect/valorant_v1/weights/last.pt
+runs/detect/valorant_v2/weights/epoch*.pt
+runs/detect/valorant_v2/weights/last.pt
+# 排除训练缓存和混淆矩阵等大图（保留 results.png 即可）
+runs/detect/*/confusion_matrix*
+runs/detect/*/F1_curve*
+runs/detect/*/P_curve*
+runs/detect/*/R_curve*
+runs/detect/*/PR_curve*
+runs/detect/*/labels*
+runs/detect/*/train_batch*.jpg
+runs/detect/*/val_batch*.jpg
+runs/detect/*/predictions.json
+runs/detect/*/confusion_matrix_normalized*
 
 # Private
 RealName.md

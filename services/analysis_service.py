@@ -13,6 +13,7 @@ import cv2
 import numpy as np
 
 from cv_engine.highlight_scorer import HighlightScorer
+from cv_engine.model_registry import ModelRegistry
 from cv_engine.video_processor import VideoProcessor
 from cv_engine.yolo_detector import YoloDetector
 from services.job_service import JobService, JobStateConflictError, iso_now
@@ -141,6 +142,7 @@ def analyze_video(
     video_path: Path,
     job_dir: Path,
     settings: dict[str, Any],
+    model_registry: ModelRegistry | None = None,
 ) -> dict[str, Any]:
     """Run OpenCV sampling, YOLO detection and explainable scoring."""
     processor = VideoProcessor()
@@ -154,7 +156,15 @@ def analyze_video(
     if not frames:
         raise ValueError("视频中没有可分析的画面")
 
-    model_path = Path(str(settings.get("model_path", "models/yolo11n.pt")))
+    # Resolve model path using registry if available
+    if model_registry:
+        model_id = settings.get("model_id", "custom_v5")
+        model_path = model_registry.resolve_model_path(model_id)
+        model_info = model_registry.get(model_id)
+    else:
+        model_path = Path(str(settings.get("model_path", "models/yolo11n.pt")))
+        model_info = None
+
     detector = YoloDetector(
         model_path,
         confidence_threshold=float(settings.get("confidence_threshold", 0.35)),
@@ -241,11 +251,25 @@ def analyze_video(
 
     contact_sheet = job_dir / "result" / "contact_sheet.jpg"
     contact_sheet_ready = _save_contact_sheet(selected, frames, contact_sheet)
+
+    # Build model info for report
+    model_report = {"path": model_path.name}
+    if model_info:
+        model_report.update({
+            "id": model_info.model_id,
+            "display_name": model_info.display_name,
+            "is_custom": model_info.is_custom,
+            "num_classes": model_info.num_classes,
+            "class_names": model_info.class_names,
+            "mAP50": model_info.mAP50,
+            "mAP50_95": model_info.mAP50_95,
+        })
+
     return {
         "video": video,
         "duration": duration,
         "settings": {key: value for key, value in settings.items() if key != "model_path"},
-        "model": {"path": model_path.name},
+        "model": model_report,
         "sample_interval": sample_interval,
         "total_sampled_frames": len(samples),
         "score_weights": {
@@ -279,6 +303,7 @@ class AnalysisService:
     ) -> None:
         self.jobs = jobs
         self.model_path = Path(model_path).resolve()
+        self.model_registry = ModelRegistry(Path(__file__).resolve().parent.parent)
         self._executor = ThreadPoolExecutor(
             max_workers=max(1, int(max_workers)),
             thread_name_prefix="reelfire-analysis",

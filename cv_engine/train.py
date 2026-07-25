@@ -45,6 +45,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--name", type=str, default="custom_fps", help="训练实验名称")
     parser.add_argument("--resume", action="store_true", help="从上次中断处继续训练")
     parser.add_argument("--save-period", type=int, default=10, help="每 N 轮保存一次权重 (default: 10)")
+    # 数据增强参数
+    parser.add_argument("--hsv-h", type=float, default=0.015, help="色调增强 (default: 0.015)")
+    parser.add_argument("--hsv-s", type=float, default=0.7, help="饱和度增强 (default: 0.7)")
+    parser.add_argument("--hsv-v", type=float, default=0.4, help="明度增强 (default: 0.4)")
+    parser.add_argument("--degrees", type=float, default=0.0, help="旋转角度 (default: 0.0)")
+    parser.add_argument("--translate", type=float, default=0.1, help="平移比例 (default: 0.1)")
+    parser.add_argument("--scale", type=float, default=0.5, help="缩放比例 (default: 0.5)")
+    parser.add_argument("--mosaic", type=float, default=1.0, help="马赛克增强 (default: 1.0)")
+    parser.add_argument("--mixup", type=float, default=0.0, help="MixUp 增强 (default: 0.0)")
+    parser.add_argument("--fliplr", type=float, default=0.5, help="左右翻转概率 (default: 0.5)")
+    parser.add_argument("--flipud", type=float, default=0.0, help="上下翻转概率 (default: 0.0)")
     return parser.parse_args()
 
 
@@ -79,6 +90,16 @@ def run(args: argparse.Namespace) -> Path:
         name=args.name,
         resume=args.resume,
         save_period=args.save_period,
+        hsv_h=args.hsv_h,
+        hsv_s=args.hsv_s,
+        hsv_v=args.hsv_v,
+        degrees=args.degrees,
+        translate=args.translate,
+        scale=args.scale,
+        mosaic=args.mosaic,
+        mixup=args.mixup,
+        fliplr=args.fliplr,
+        flipud=args.flipud,
         plots=True,
         exist_ok=True,
         verbose=True,
