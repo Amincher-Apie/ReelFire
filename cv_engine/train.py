@@ -33,18 +33,66 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_PRETRAINED,
         help="预训练权重路径 (default: models/yolo11n.pt)",
     )
-    parser.add_argument("--epochs", type=int, default=100, help="训练轮数 (default: 100)")
-    parser.add_argument("--imgsz", type=int, default=640, help="输入图片尺寸 (default: 640)")
-    parser.add_argument("--batch", type=int, default=16, help="batch size (default: 16)")
-    parser.add_argument("--device", type=str, default="0", help="训练设备: 0/cpu/mps (default: 0)")
-    parser.add_argument("--workers", type=int, default=4, help="数据加载线程数 (default: 4)")
-    parser.add_argument("--lr0", type=float, default=0.01, help="初始学习率 (default: 0.01)")
-    parser.add_argument("--lrf", type=float, default=0.01, help="最终学习率系数 (default: 0.01)")
-    parser.add_argument("--patience", type=int, default=20, help="早停耐心值 (default: 20)")
+    parser.add_argument(
+        "--epochs", type=int, default=100, help="训练轮数 (default: 100)"
+    )
+    parser.add_argument(
+        "--imgsz", type=int, default=640, help="输入图片尺寸 (default: 640)"
+    )
+    parser.add_argument(
+        "--batch", type=int, default=16, help="batch size (default: 16)"
+    )
+    parser.add_argument(
+        "--device", type=str, default="0", help="训练设备: 0/cpu/mps (default: 0)"
+    )
+    parser.add_argument(
+        "--workers", type=int, default=4, help="数据加载线程数 (default: 4)"
+    )
+    parser.add_argument(
+        "--lr0", type=float, default=0.01, help="初始学习率 (default: 0.01)"
+    )
+    parser.add_argument(
+        "--lrf", type=float, default=0.01, help="最终学习率系数 (default: 0.01)"
+    )
+    parser.add_argument(
+        "--patience", type=int, default=20, help="早停耐心值 (default: 20)"
+    )
     parser.add_argument("--project", type=Path, default=None, help="训练输出目录")
     parser.add_argument("--name", type=str, default="custom_fps", help="训练实验名称")
     parser.add_argument("--resume", action="store_true", help="从上次中断处继续训练")
-    parser.add_argument("--save-period", type=int, default=10, help="每 N 轮保存一次权重 (default: 10)")
+    parser.add_argument(
+        "--save-period", type=int, default=10, help="每 N 轮保存一次权重 (default: 10)"
+    )
+    parser.add_argument(
+        "--hsv-h", type=float, default=0.015, help="色调增强 (default: 0.015)"
+    )
+    parser.add_argument(
+        "--hsv-s", type=float, default=0.7, help="饱和度增强 (default: 0.7)"
+    )
+    parser.add_argument(
+        "--hsv-v", type=float, default=0.4, help="明度增强 (default: 0.4)"
+    )
+    parser.add_argument(
+        "--degrees", type=float, default=0.0, help="旋转角度 (default: 0.0)"
+    )
+    parser.add_argument(
+        "--translate", type=float, default=0.1, help="平移比例 (default: 0.1)"
+    )
+    parser.add_argument(
+        "--scale", type=float, default=0.5, help="缩放比例 (default: 0.5)"
+    )
+    parser.add_argument(
+        "--mosaic", type=float, default=1.0, help="马赛克增强 (default: 1.0)"
+    )
+    parser.add_argument(
+        "--mixup", type=float, default=0.0, help="MixUp 增强 (default: 0.0)"
+    )
+    parser.add_argument(
+        "--fliplr", type=float, default=0.5, help="左右翻转概率 (default: 0.5)"
+    )
+    parser.add_argument(
+        "--flipud", type=float, default=0.0, help="上下翻转概率 (default: 0.0)"
+    )
     return parser.parse_args()
 
 
@@ -79,6 +127,16 @@ def run(args: argparse.Namespace) -> Path:
         name=args.name,
         resume=args.resume,
         save_period=args.save_period,
+        hsv_h=args.hsv_h,
+        hsv_s=args.hsv_s,
+        hsv_v=args.hsv_v,
+        degrees=args.degrees,
+        translate=args.translate,
+        scale=args.scale,
+        mosaic=args.mosaic,
+        mixup=args.mixup,
+        fliplr=args.fliplr,
+        flipud=args.flipud,
         plots=True,
         exist_ok=True,
         verbose=True,
