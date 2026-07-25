@@ -16,6 +16,7 @@ from database import init_app as init_database_app
 from database import init_db
 from routes.api_routes import api_bp
 from routes.auth_routes import auth_bp
+from services.auth_service import import_legacy_users
 from services.file_service import FileService, FileValidationError
 from services.job_service import (
     CorruptDataError,
@@ -71,6 +72,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     init_database_app(app)
     with app.app_context():
         init_db()
+        import_legacy_users(app.config["LEGACY_USERS_FILE"])
 
     app.register_blueprint(api_bp)
     app.register_blueprint(auth_bp)
