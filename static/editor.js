@@ -656,7 +656,7 @@ function normalizeEditorData(payload) {
         tags: [],
         suggestions: [],
         review: {
-          recommendation: "needs_review",
+          recommendation: highlight.agent_review_status || "needs_review",
           confidence: 0,
           reasons: [],
         },

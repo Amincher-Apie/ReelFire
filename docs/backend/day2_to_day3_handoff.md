@@ -14,6 +14,7 @@
 - `services/job_access_service.py`：区分项目任务与 legacy 任务，对项目任务执行统一 owner 权限校验和列表可见性过滤。
 - `services/review_service.py`：校验三态人工审核，追加历史，并协调 SQLite 写入与报告文件补偿。
 - `services/agent_call_service.py`：创建和查询 Agent 调用日志，并执行受约束的生命周期状态更新。
+- `services/agent_execution_service.py`：后台执行真实 Agent 工作流并写回报告、轨迹和调用终态。
 
 ## 3. Day 3 上游输入契约
 
@@ -82,6 +83,6 @@ Agent 输入至少需要：
 - 删除任务后的 SQLite 关联记录生命周期仍需设计。
 - Agent 结果暂以 `inline_json$` 编码保存在 `result_path`，后续需要正式迁移。
 - Agent 活动调用去重只覆盖 SQLite 单机和当前进程，不是分布式队列。
-- 真实 Agent、RAG 和 `segment_comments[]` 尚未接入。
+- 在线 Dify 需要测试人员在本机 `.env` 填入已发布应用的 API Key；空 Key 会安全降级而不会伪造在线成功。
 - 多片段生产、聚合和导出尚未实现。
 - legacy 文件任务没有完整 SQLite 业务索引。

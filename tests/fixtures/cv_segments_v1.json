@@ -23,7 +23,12 @@
       {
         "track_id": 7,
         "class": "enemy",
-        "confidence": 0.91
+        "confidence": 0.91,
+        "confidence_max": 0.94,
+        "confidence_min": 0.87,
+        "first_seen": 1.2,
+        "last_seen": 5.8,
+        "detection_count": 8
       }
     ]
   },

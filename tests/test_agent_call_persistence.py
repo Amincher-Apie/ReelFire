@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import io
+import json
+import os
 import sqlite3
 import tempfile
+import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from app import create_app
 from database import get_db
@@ -16,6 +20,7 @@ from services.agent_call_service import (
     get_agent_call,
     mark_agent_call_running,
 )
+from services.agent_execution_service import AgentExecutionService
 
 
 class FakeAnalysisService:
@@ -25,6 +30,27 @@ class FakeAnalysisService:
 
 def fake_analysis_service_factory(*_args) -> FakeAnalysisService:
     return FakeAnalysisService()
+
+
+class FakeAgentExecutionService:
+    def __init__(self) -> None:
+        self.enqueued: list[tuple[int, str, str]] = []
+
+    def enqueue(
+        self,
+        agent_call_id: int,
+        job_id: str,
+        *,
+        prompt_version: str,
+    ) -> None:
+        self.enqueued.append((agent_call_id, job_id, prompt_version))
+
+    def shutdown(self, wait: bool = False) -> None:
+        del wait
+
+
+def fake_agent_execution_service_factory(*_args) -> FakeAgentExecutionService:
+    return FakeAgentExecutionService()
 
 
 class AgentCallPersistenceTestCase(unittest.TestCase):
@@ -45,6 +71,9 @@ class AgentCallPersistenceTestCase(unittest.TestCase):
                 "MODEL_PATH": self.root / "models" / "missing.pt",
                 "BACKGROUND_WORKERS": 1,
                 "ANALYSIS_SERVICE_FACTORY": fake_analysis_service_factory,
+                "AGENT_EXECUTION_SERVICE_FACTORY": (
+                    fake_agent_execution_service_factory
+                ),
             }
         )
         self.owner = self.app.test_client()
@@ -142,6 +171,10 @@ class AgentCallPersistenceTestCase(unittest.TestCase):
         self.assertIsNone(created["completed_at"])
         self.assertNotIn("job_row_id", created)
         self.assertNotIn("public_job_id", created)
+        self.assertEqual(
+            self.app.extensions["agent_execution_service"].enqueued,
+            [(created["id"], self.job_id, "prompt-v1")],
+        )
         with self.app.app_context():
             row = get_db().execute(
                 """
@@ -160,6 +193,50 @@ class AgentCallPersistenceTestCase(unittest.TestCase):
         self.assertEqual(
             self.jobs.report_path(self.job_id).read_bytes(),
             report_before,
+        )
+
+    def test_real_executor_runs_report_and_persists_editor_comment(self) -> None:
+        fixture_path = Path(__file__).parent / "fixtures" / "cv_analysis_report_v1.json"
+        report = json.loads(fixture_path.read_text(encoding="utf-8"))
+        report["job_id"] = self.job_id
+        self.jobs.write_report(self.job_id, report)
+        created = self._create_call("v2")
+        executor = AgentExecutionService(
+            self.app,
+            self.jobs,
+            max_workers=1,
+            provider="rule_only",
+        )
+        try:
+            with patch.dict(os.environ, {"OLLAMA_EMBED_MODEL": ""}):
+                executor.enqueue(
+                    created["id"],
+                    self.job_id,
+                    prompt_version="v2",
+                )
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    with self.app.app_context():
+                        current = get_agent_call(created["id"])
+                    if current["status"] in {
+                        "completed",
+                        "needs_review",
+                        "failed",
+                    }:
+                        break
+                    time.sleep(0.01)
+        finally:
+            executor.shutdown()
+
+        self.assertIn(current["status"], {"completed", "needs_review"})
+        self.assertTrue(self.jobs.agent_report_path(self.job_id).is_file())
+        editor = self.owner.get(f"/api/jobs/{self.job_id}/editor")
+        self.assertEqual(editor.status_code, 200, editor.get_json())
+        highlights = editor.get_json()["highlights"]
+        self.assertEqual(highlights[0]["agent_comment_status"], "ready")
+        self.assertIn(
+            highlights[0]["agent_review_status"],
+            {"pass", "needs_review", "reject"},
         )
 
     def test_create_input_validation_is_stable(self) -> None:

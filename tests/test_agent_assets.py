@@ -18,6 +18,7 @@ INPUT_SCHEMA_PATH = ROOT / "agent" / "schemas" / "agent_input.schema.json"
 OUTPUT_SCHEMA_PATH = ROOT / "agent" / "schemas" / "agent_output.schema.json"
 PROMPT_PATH = ROOT / "agent" / "prompts" / "review_agent_v2.md"
 WORKFLOW_PATH = ROOT / "docs" / "AGENT_WORKFLOW.md"
+ENV_EXAMPLE_PATH = ROOT / ".env.example"
 
 
 def load_json(path: Path) -> dict:
@@ -156,6 +157,19 @@ class AgentKnowledgeAssetsTests(unittest.TestCase):
 
 
 class AgentSchemaAndPromptTests(unittest.TestCase):
+    def test_dify_example_keeps_public_key_empty(self) -> None:
+        lines = ENV_EXAMPLE_PATH.read_text(encoding="utf-8").splitlines()
+        self.assertIn("AGENT_PROVIDER=dify", lines)
+        self.assertIn("DIFY_BASE_URL=https://api.dify.ai", lines)
+        self.assertIn("DIFY_API_KEY=", lines)
+        self.assertFalse(
+            any(
+                line.startswith("DIFY_API_KEY=")
+                and line != "DIFY_API_KEY="
+                for line in lines
+            )
+        )
+
     def test_input_schema_matches_current_report_contract(self) -> None:
         schema = load_json(INPUT_SCHEMA_PATH)
         self.assertEqual(schema["$schema"], "https://json-schema.org/draft/2020-12/schema")

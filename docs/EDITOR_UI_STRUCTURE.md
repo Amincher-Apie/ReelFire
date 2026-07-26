@@ -108,6 +108,7 @@ document
 | `highlights[].score` | 当前片段评分 | 只格式化为百分比 |
 | `highlights[].agent_comment` | 第二列 | 仅 `ready` 时显示 |
 | `highlights[].agent_comment_status` | 第二列状态 | `pending/unavailable` 显示明确占位状态 |
+| `highlights[].agent_review_status` | 第二列审核结论 | 展示 `pass/needs_review/reject`，不得由前端猜测 |
 
 ## 5. 页面状态机
 

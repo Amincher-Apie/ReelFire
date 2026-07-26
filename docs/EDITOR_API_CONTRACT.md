@@ -65,6 +65,7 @@ Accept: application/json
       "source_keyframes": ["kf_001", "kf_003"],
       "agent_comment": "该区间的运动变化与场景变化评分较高，建议优先复核。",
       "agent_comment_status": "ready",
+      "agent_review_status": "needs_review",
       "agent_evidence_refs": ["ev:segment:seg_001"]
     }
   ],
@@ -109,6 +110,7 @@ Accept: application/json
 | `source_keyframes` | string[] | 否 | 片段关联关键帧编号 |
 | `agent_comment` | string | 是 | Agent 最终评论；前端不得自行生成替代文本 |
 | `agent_comment_status` | string | 否 | `ready`、`pending` 或 `unavailable` |
+| `agent_review_status` | string | 是 | Agent 逐片段结论：`pass`、`needs_review`、`reject`；评论未就绪时为 `null` |
 | `agent_evidence_refs` | string[] | 否 | Agent 评论引用的证据编号 |
 
 片段约束：

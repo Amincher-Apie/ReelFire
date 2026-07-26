@@ -33,4 +33,3 @@
 - **建议修复**：
   1. 后端入库前对 project_name 做 HTML 实体编码或保留原始值不做转换
   2. 前端统一使用 `textContent` 渲染用户可控字段，或引入 DOMPurify 等 XSS 过滤库
-*（内容由AI生成，仅供参考）*
