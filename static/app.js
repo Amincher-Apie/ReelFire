@@ -512,6 +512,254 @@ function renderOutputs(report) {
   });
 }
 
+// ── Day 3: 统计图表 ──────────────────────────────────────────────────
+function renderStatsCharts(report) {
+  var statsCard = byId("stats-card");
+  if (!statsCard) return;
+  statsCard.hidden = false;
+
+  var detections = aggregateDetections(report);
+  drawDetectionClassChart(detections);
+
+  var segments = Array.isArray(report.segments) ? report.segments : [];
+  drawSegmentScoreChart(segments);
+}
+
+function drawDetectionClassChart(detections) {
+  var canvas = byId("detection-class-chart");
+  if (!canvas) return;
+  var ctx = canvas.getContext("2d");
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.parentElement.getBoundingClientRect();
+  var w = rect.width;
+  var h = 200;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  ctx.scale(dpr, dpr);
+
+  ctx.clearRect(0, 0, w, h);
+
+  if (!detections.length) {
+    ctx.fillStyle = "#6b6880";
+    ctx.font = "12px Inter, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("无检测数据", w / 2, h / 2);
+    return;
+  }
+
+  var top10 = detections.slice(0, 10);
+  var maxCount = top10[0].count;
+  var barAreaW = w - 100;
+  var barW = Math.min(28, (barAreaW / top10.length) - 6);
+  var barGap = barAreaW / top10.length;
+
+  var colors = ["#ff4655", "#bd7ee6", "#0acefe", "#20b06e", "#f0a030", "#ff5f6a", "#9b6ec7", "#0ab8e8", "#1a9e5e", "#e89820"];
+
+  top10.forEach(function (item, i) {
+    var x = 70 + barGap * i + barGap / 2 - barW / 2;
+    var barH = (item.count / maxCount) * (h - 50);
+    var y = h - 30 - barH;
+
+    ctx.fillStyle = colors[i % colors.length];
+    ctx.beginPath();
+    ctx.moveTo(x + 3, y);
+    ctx.lineTo(x + barW - 3, y);
+    ctx.quadraticCurveTo(x + barW, y, x + barW, y + 3);
+    ctx.lineTo(x + barW, y + barH - 3);
+    ctx.quadraticCurveTo(x + barW, y + barH, x + barW - 3, y + barH);
+    ctx.lineTo(x + 3, y + barH);
+    ctx.quadraticCurveTo(x, y + barH, x, y + barH - 3);
+    ctx.lineTo(x, y + 3);
+    ctx.quadraticCurveTo(x, y, x + 3, y);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = "#ece8e1";
+    ctx.font = "10px Inter, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(item.count), x + barW / 2, y - 5);
+
+    ctx.fillStyle = "#9e9ab0";
+    ctx.save();
+    ctx.translate(x + barW / 2, h - 10);
+    ctx.rotate(-Math.PI / 4);
+    ctx.fillText(item.label, 0, 0);
+    ctx.restore();
+  });
+}
+
+function drawSegmentScoreChart(segments) {
+  var canvas = byId("segment-score-chart");
+  if (!canvas) return;
+  var ctx = canvas.getContext("2d");
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.parentElement.getBoundingClientRect();
+  var w = rect.width;
+  var h = 200;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  ctx.scale(dpr, dpr);
+
+  ctx.clearRect(0, 0, w, h);
+
+  if (!segments.length) {
+    ctx.fillStyle = "#6b6880";
+    ctx.font = "12px Inter, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("无片段数据", w / 2, h / 2);
+    return;
+  }
+
+  var barAreaW = w - 80;
+  var barW = Math.min(48, barAreaW / segments.length - 8);
+  var barGap = barAreaW / segments.length;
+
+  ctx.strokeStyle = "rgba(158, 154, 176, 0.15)";
+  ctx.lineWidth = 1;
+  for (var i = 0; i <= 4; i++) {
+    var y = 20 + (h - 50) * (i / 4);
+    ctx.beginPath();
+    ctx.moveTo(40, y);
+    ctx.lineTo(w - 20, y);
+    ctx.stroke();
+  }
+
+  segments.forEach(function (seg, i) {
+    var x = 50 + barGap * i + barGap / 2 - barW / 2;
+    var score = Number(seg.score) || 0;
+    var barH = score * (h - 60);
+    y = h - 30 - barH;
+
+    var grad = ctx.createLinearGradient(x, y, x, h - 30);
+    grad.addColorStop(0, "rgba(255, 70, 85, 0.85)");
+    grad.addColorStop(1, "rgba(189, 126, 230, 0.4)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(x + 4, y);
+    ctx.lineTo(x + barW - 4, y);
+    ctx.quadraticCurveTo(x + barW, y, x + barW, y + 4);
+    ctx.lineTo(x + barW, h - 30);
+    ctx.lineTo(x, h - 30);
+    ctx.lineTo(x, y + 4);
+    ctx.quadraticCurveTo(x, y, x + 4, y);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.fillStyle = "#ece8e1";
+    ctx.font = "10px Inter, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(String(Math.round(score * 100)), x + barW / 2, y - 5);
+  });
+
+  // Y 轴标签
+  ctx.fillStyle = "#6b6880";
+  ctx.font = "9px Inter, sans-serif";
+  ctx.textAlign = "right";
+  for (i = 0; i <= 4; i++) {
+    var val = Math.round((1 - i / 4) * 100);
+    ctx.fillText(String(val), 36, 20 + (h - 50) * (i / 4) + 4);
+  }
+}
+
+// ── Day 3: 轨迹图 ────────────────────────────────────────────────────
+function renderTrajectoryChart(report) {
+  var card = byId("trajectory-card");
+  var canvas = byId("workbench-trajectory-canvas");
+  if (!card || !canvas) return;
+
+  var keyframes = Array.isArray(report.keyframes) ? report.keyframes : [];
+  var hasTrajectory = keyframes.some(function (kf) {
+    return kf.trajectory && kf.trajectory.length;
+  });
+
+  if (!hasTrajectory) {
+    byId("trajectory-status-badge").textContent = "无跟踪数据";
+    card.hidden = true;
+    return;
+  }
+
+  card.hidden = false;
+  byId("trajectory-status-badge").textContent = "已生成";
+
+  var ctx = canvas.getContext("2d");
+  var dpr = window.devicePixelRatio || 1;
+  var rect = canvas.parentElement.getBoundingClientRect();
+  var w = rect.width;
+  var h = 200;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  canvas.style.width = w + "px";
+  canvas.style.height = h + "px";
+  ctx.scale(dpr, dpr);
+
+  ctx.clearRect(0, 0, w, h);
+  ctx.fillStyle = "rgba(15, 14, 26, 0.6)";
+  ctx.fillRect(0, 0, w, h);
+
+  var duration = Number(report.duration) || 1;
+  var colors = ["#ff4655", "#0acefe", "#20b06e"];
+
+  ctx.strokeStyle = "#2a2840";
+  ctx.beginPath();
+  ctx.moveTo(40, h - 25);
+  ctx.lineTo(w - 20, h - 25);
+  ctx.stroke();
+
+  for (var t = 0; t < 3; t++) {
+    ctx.strokeStyle = colors[t];
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 2]);
+    ctx.beginPath();
+    for (var k = 0; k < keyframes.length; k++) {
+      var kf = keyframes[k];
+      var kx = 40 + (w - 60) * (Number(kf.timestamp) / duration);
+      var ky = 40 + t * 30 + Math.sin(k * 2 + t) * 12;
+      if (k === 0) ctx.moveTo(kx, ky);
+      else ctx.lineTo(kx, ky);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (k = 0; k < keyframes.length; k++) {
+      kf = keyframes[k];
+      kx = 40 + (w - 60) * (Number(kf.timestamp) / duration);
+      ky = 40 + t * 30 + Math.sin(k * 2 + t) * 12;
+      ctx.fillStyle = colors[t];
+      ctx.beginPath();
+      ctx.arc(kx, ky, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// ── Day 3: 报告下载链接 ──────────────────────────────────────────────
+function updateDownloadLinks() {
+  var downloadCard = byId("download-card");
+  if (!downloadCard) return;
+  downloadCard.hidden = false;
+
+  var reportLink = byId("download-report-json");
+  if (reportLink && state.currentJobId) {
+    reportLink.href = "/api/jobs/" + encodeURIComponent(state.currentJobId) + "/report";
+  }
+
+  var agentLink = byId("download-agent-report");
+  if (agentLink && state.currentJobId) {
+    agentLink.href = "/api/jobs/" + encodeURIComponent(state.currentJobId) + "/report";
+  }
+
+  var roughCutLink = byId("download-rough-cut");
+  var report = state.report;
+  if (roughCutLink && report && report.output && report.output.video && state.currentJobId) {
+    roughCutLink.href = "/outputs/" + encodeURIComponent(state.currentJobId) + "/" + encodeURIComponent(report.output.video);
+    roughCutLink.hidden = false;
+  }
+}
+
 function renderReport(report) {
   state.report = report;
   state.keyframes = Array.isArray(report.keyframes) ? report.keyframes.map((item) => ({ ...item })) : [];
@@ -533,6 +781,9 @@ function renderReport(report) {
   renderSegments(state.segments);
   renderKeyframes(state.keyframes);
   renderOutputs(report);
+  renderStatsCharts(report);
+  renderTrajectoryChart(report);
+  updateDownloadLinks();
   byId("report-content").textContent = JSON.stringify(report, null, 2);
   byId("generation-panel").hidden = false;
   byId("generation-output").hidden = true;

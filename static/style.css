@@ -2722,6 +2722,10 @@ td .job-id {
     padding: 8px 10px;
     font-size: 12px;
   }
+
+  .stats-chart-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 600px) {
@@ -2739,4 +2743,56 @@ td .job-id {
     width: 100%;
     justify-content: center;
   }
+}
+
+/* ========== Day 3: Stats Charts ========== */
+.stats-chart-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 12px 0;
+}
+
+.stats-chart-container {
+  min-height: 200px;
+}
+
+.stats-chart-container h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.stats-chart-container canvas {
+  display: block;
+  width: 100%;
+}
+
+.trajectory-placeholder {
+  padding: 8px 0;
+}
+
+.trajectory-placeholder canvas {
+  display: block;
+  width: 100%;
+  border-radius: var(--radius-sm);
+}
+
+.download-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 0;
+}
+
+.download-links .button svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+.muted-label {
+  font-size: 11px;
+  color: var(--text-muted);
 }

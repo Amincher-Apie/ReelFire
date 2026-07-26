@@ -217,6 +217,54 @@
               <div class="result-card-header"><h3>输出文件</h3></div>
               <div id="output-list" class="output-list"></div>
             </article>
+
+            <!-- Day 3: 检测统计图 -->
+            <article id="stats-card" class="result-card" hidden>
+              <div class="result-card-header">
+                <h3>检测统计</h3>
+                <span class="muted-label">类别分布与置信度</span>
+              </div>
+              <div class="stats-chart-grid">
+                <div class="stats-chart-container">
+                  <h4>检测类别分布</h4>
+                  <canvas id="detection-class-chart" aria-label="检测类别柱状图" role="img"></canvas>
+                </div>
+                <div class="stats-chart-container">
+                  <h4>片段分值分布</h4>
+                  <canvas id="segment-score-chart" aria-label="片段分值图" role="img"></canvas>
+                </div>
+              </div>
+            </article>
+
+            <!-- Day 3: 轨迹展示 -->
+            <article id="trajectory-card" class="result-card" hidden>
+              <div class="result-card-header">
+                <h3>目标跟踪轨迹</h3>
+                <span id="trajectory-status-badge" class="muted-label">无跟踪数据</span>
+              </div>
+              <div class="trajectory-placeholder">
+                <canvas id="workbench-trajectory-canvas" aria-label="目标跟踪轨迹图" role="img"></canvas>
+              </div>
+            </article>
+
+            <!-- Day 3: 报告下载 -->
+            <article id="download-card" class="result-card" hidden>
+              <div class="result-card-header"><h3>报告下载</h3></div>
+              <div class="download-links">
+                <a id="download-report-json" class="button secondary small" href="#" target="_blank" rel="noopener">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                  分析报告 JSON
+                </a>
+                <a id="download-agent-report" class="button secondary small" href="#" target="_blank" rel="noopener">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
+                  Agent 报告 JSON
+                </a>
+                <a id="download-rough-cut" class="button secondary small" href="#" target="_blank" rel="noopener" hidden>
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
+                  粗剪视频
+                </a>
+              </div>
+            </article>
           </div>
         </section>
 

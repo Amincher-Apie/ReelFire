@@ -153,6 +153,38 @@
                 </div>
               </div>
 
+              <!-- Day 3: 边界编辑 -->
+              <div class="boundary-editor" aria-labelledby="boundary-heading">
+                <h4 id="boundary-heading" class="detail-subheading">调整边界</h4>
+                <div class="boundary-row">
+                  <div class="boundary-field">
+                    <label for="edit-seg-start">起始 (秒)</label>
+                    <input id="edit-seg-start" type="number" step="0.1" min="0" class="boundary-input">
+                  </div>
+                  <span class="boundary-sep">–</span>
+                  <div class="boundary-field">
+                    <label for="edit-seg-end">结束 (秒)</label>
+                    <input id="edit-seg-end" type="number" step="0.1" min="0" class="boundary-input">
+                  </div>
+                  <button id="apply-boundary-btn" class="button primary small" type="button">应用</button>
+                  <button id="play-from-seg-btn" class="button ghost small" type="button" title="从片段起始播放">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Day 3: 三态审核 -->
+              <div class="review-section" aria-labelledby="review-heading">
+                <h4 id="review-heading" class="detail-subheading">人工审核</h4>
+                <div id="review-btn-group" class="review-btn-group" role="group" aria-label="审核决定">
+                  <!-- JS 填充 -->
+                </div>
+                <span id="review-ai-suggestion" class="review-ai-hint" hidden></span>
+                <label for="review-note" class="review-note-label">审核备注</label>
+                <textarea id="review-note" class="review-note-input" rows="2" maxlength="500"
+                          placeholder="可选：记录审核理由或片段备注…"></textarea>
+              </div>
+
               <!-- Agent 评论区 -->
               <div class="agent-comment-section" aria-labelledby="agent-heading">
                 <div class="agent-comment-header">
@@ -203,6 +235,172 @@
               </div>
             </div>
           </aside>
+        </div>
+      </section>
+
+      <!-- Day 3: 统计仪表盘 -->
+      <section class="stats-dashboard" aria-labelledby="stats-heading" id="stats-section">
+        <div class="stats-header">
+          <h2 id="stats-heading" class="editor-section-title">分析统计</h2>
+        </div>
+
+        <div class="stats-grid">
+          <!-- 审核汇总 -->
+          <article class="stats-card">
+            <div class="stats-card-header">
+              <h3>审核汇总</h3>
+            </div>
+            <div class="stats-card-body">
+              <div class="stat-tiles">
+                <div class="stat-tile pass">
+                  <span class="stat-tile-value" id="stat-review-pass">0</span>
+                  <span class="stat-tile-label">通过</span>
+                </div>
+                <div class="stat-tile pending">
+                  <span class="stat-tile-value" id="stat-review-pending">0</span>
+                  <span class="stat-tile-label">待复核</span>
+                </div>
+                <div class="stat-tile reject">
+                  <span class="stat-tile-value" id="stat-review-reject">0</span>
+                  <span class="stat-tile-label">不通过</span>
+                </div>
+                <div class="stat-tile unset">
+                  <span class="stat-tile-value" id="stat-review-unset">0</span>
+                  <span class="stat-tile-label">未审核</span>
+                </div>
+              </div>
+              <div class="stat-pie-wrap">
+                <canvas id="stat-review-pie" aria-label="审核比例饼图" role="img"></canvas>
+              </div>
+            </div>
+          </article>
+
+          <!-- Agent 状态 -->
+          <article class="stats-card">
+            <div class="stats-card-header">
+              <h3>Agent 状态</h3>
+            </div>
+            <div class="stats-card-body">
+              <div class="stat-tiles">
+                <div class="stat-tile completed">
+                  <span class="stat-tile-value" id="stat-agent-ok">0</span>
+                  <span class="stat-tile-label">已完成</span>
+                </div>
+                <div class="stat-tile pending">
+                  <span class="stat-tile-value" id="stat-agent-wait">0</span>
+                  <span class="stat-tile-label">待分析</span>
+                </div>
+                <div class="stat-tile unavailable">
+                  <span class="stat-tile-value" id="stat-agent-fail">0</span>
+                  <span class="stat-tile-label">不可用</span>
+                </div>
+              </div>
+            </div>
+          </article>
+
+          <!-- 片段分值 -->
+          <article class="stats-card">
+            <div class="stats-card-header">
+              <h3>片段分值分布</h3>
+            </div>
+            <div class="stats-card-body">
+              <div class="stat-tiles">
+                <div class="stat-tile info">
+                  <span class="stat-tile-value" id="stat-segment-count">0</span>
+                  <span class="stat-tile-label">总片段数</span>
+                </div>
+                <div class="stat-tile success">
+                  <span class="stat-tile-value" id="stat-avg-score">0</span>
+                  <span class="stat-tile-label">平均分</span>
+                </div>
+                <div class="stat-tile accent">
+                  <span class="stat-tile-value" id="stat-max-score">0</span>
+                  <span class="stat-tile-label">最高分</span>
+                </div>
+                <div class="stat-tile muted">
+                  <span class="stat-tile-value" id="stat-total-duration">—</span>
+                  <span class="stat-tile-label">总时长</span>
+                </div>
+              </div>
+              <canvas id="stat-score-chart" aria-label="片段分值柱状图" role="img"></canvas>
+            </div>
+          </article>
+
+          <!-- 片段时长 -->
+          <article class="stats-card">
+            <div class="stats-card-header">
+              <h3>片段时长对比</h3>
+            </div>
+            <div class="stats-card-body">
+              <canvas id="stat-duration-chart" aria-label="片段时长横向柱状图" role="img"></canvas>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <!-- Day 3: 目标跟踪轨迹 -->
+      <section class="trajectory-section" aria-labelledby="trajectory-heading" id="trajectory-section">
+        <div class="trajectory-header">
+          <h2 id="trajectory-heading" class="editor-section-title">目标跟踪轨迹</h2>
+          <span id="trajectory-status" class="traj-status unavailable">数据加载中…</span>
+        </div>
+        <div class="trajectory-container">
+          <canvas id="trajectory-canvas" aria-label="目标跟踪轨迹图" role="img"></canvas>
+        </div>
+        <div class="trajectory-legend">
+          <span class="traj-legend-item"><span class="traj-dot" style="background:#ff4655"></span> 目标 1</span>
+          <span class="traj-legend-item"><span class="traj-dot" style="background:#0acefe"></span> 目标 2</span>
+          <span class="traj-legend-item"><span class="traj-dot" style="background:#20b06e"></span> 目标 3</span>
+        </div>
+      </section>
+
+      <!-- Day 3: 导出与报告 -->
+      <section class="export-section" aria-labelledby="export-heading">
+        <h2 id="export-heading" class="editor-section-title">导出与报告</h2>
+        <div class="export-grid">
+          <div class="export-card">
+            <div class="export-card-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8"/></svg>
+            </div>
+            <div class="export-card-body">
+              <h3>分析报告 JSON</h3>
+              <p>CV 检测的完整 JSON 报告，包含关键帧、检测结果与评分。</p>
+              <a id="export-report-link" class="button secondary small" href="#" target="_blank" rel="noopener">
+                打开报告
+              </a>
+            </div>
+          </div>
+
+          <div class="export-card">
+            <div class="export-card-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5M12 15V3"/></svg>
+            </div>
+            <div class="export-card-body">
+              <h3>审核数据导出</h3>
+              <p>包含人工三态审核、边界调整和备注的完整审核包。</p>
+              <button id="export-report-download" class="button secondary small" type="button">
+                导出 JSON
+              </button>
+            </div>
+          </div>
+
+          <div class="export-card">
+            <div class="export-card-icon">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
+            </div>
+            <div class="export-card-body">
+              <h3>多片段粗剪</h3>
+              <p>按已审核片段边界生成合并粗剪视频（需 FFmpeg）。</p>
+              <button id="rough-cut-button-2" class="button primary small" type="button"
+                      onclick="document.getElementById('rough-cut-button').click()">
+                生成粗剪
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="export-job-ref">
+          任务编号：<code id="export-job-id">—</code>
         </div>
       </section>
 

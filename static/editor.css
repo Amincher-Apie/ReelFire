@@ -1,8 +1,33 @@
 /* ===================================================================
-   ReelFire Editor — 剪辑预览工作台
-   复用全局 CSS 变量（--bg, --panel, --text, --primary, --accent 等）
+   ReelFire Editor — 剪辑预览工作台 (Day 3)
+   新增：三态审核 · 边界编辑 · 排序 · 统计图 · 轨迹 · 导出
+   复用全局 CSS 变量（来自 style.css）
    =================================================================== */
 
+/* ── CSS 变量桥接（确保 editor 变量与 style.css 一致）───────────────── */
+:root {
+  --panel: var(--bg-surface, #1a1830);
+  --panel-soft: var(--bg-secondary, #0f1923);
+  --panel-strong: var(--bg-elevated, #252245);
+  --border: var(--border-color, #2a2840);
+  --border-strong: var(--text-muted, #6b6880);
+  --text: var(--text-primary, #ece8e1);
+  --text-faint: var(--text-muted, #6b6880);
+  --text-muted: var(--text-secondary, #9e9ab0);
+  --primary: var(--accent-primary, #ff4655);
+  --primary-soft: rgba(255, 70, 85, 0.12);
+  --accent: var(--accent-secondary, #bd7ee6);
+  --accent-soft: rgba(189, 126, 230, 0.12);
+  --success: #20b06e;
+  --warning: #f0a030;
+  --danger: #ff4655;
+  --info: #0acefe;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+}
+
+/* ── Shell ─────────────────────────────────────────────────────────── */
 .editor-shell {
   min-height: 100vh;
 }
@@ -43,8 +68,7 @@
   white-space: nowrap;
 }
 
-/* ---- 主内容区 ---- */
-
+/* ── 主内容区 ──────────────────────────────────────────────────────── */
 .editor-main {
   width: min(100%, 1700px);
   margin: 0 auto;
@@ -62,8 +86,7 @@
   letter-spacing: -0.02em;
 }
 
-/* ---- 视频区 ---- */
-
+/* ── 视频区 ────────────────────────────────────────────────────────── */
 .editor-video-section {
   min-width: 0;
 }
@@ -105,8 +128,7 @@
   font-size: 13px;
 }
 
-/* ---- 时间轴 ---- */
-
+/* ── 时间轴 ────────────────────────────────────────────────────────── */
 .timeline-section {
   margin-top: 14px;
   padding: 14px 16px;
@@ -228,8 +250,7 @@
 .timeline-segment-marker.seg-2 { background: var(--success); }
 .timeline-segment-marker.seg-3 { background: var(--warning); }
 
-/* ---- 片段区 ---- */
-
+/* ── 片段区 ────────────────────────────────────────────────────────── */
 .editor-segments-section {
   min-width: 0;
 }
@@ -267,11 +288,12 @@
   gap: 10px;
 }
 
-/* ---- 片段卡片 ---- */
-
+/* ── 片段卡片 ──────────────────────────────────────────────────────── */
 .segment-card {
   padding: 14px;
   border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-left-color: var(--border);
   border-radius: var(--radius-md);
   background: var(--panel);
   cursor: pointer;
@@ -290,8 +312,14 @@
 
 .segment-card.selected {
   border-color: var(--primary);
+  border-left-color: var(--primary);
   box-shadow: 0 0 0 1px var(--primary-soft);
 }
+
+/* 审核状态左边框色 */
+.segment-card.review-pass { border-left-color: var(--success); }
+.segment-card.review-needs_review { border-left-color: var(--warning); }
+.segment-card.review-reject { border-left-color: var(--danger); }
 
 .segment-card-top {
   display: flex;
@@ -347,16 +375,83 @@
   font-weight: 800;
 }
 
+/* Day 3: 排序按钮 */
+.segment-order-btns {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.seg-order-btn {
+  display: grid;
+  width: 22px;
+  height: 18px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-faint);
+  background: var(--panel-soft);
+  cursor: pointer;
+  padding: 0;
+  transition: all 100ms ease;
+}
+
+.seg-order-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--border-strong);
+}
+
+.seg-order-btn:disabled {
+  opacity: 0.25;
+  cursor: not-allowed;
+}
+
+.seg-order-btn svg {
+  width: 10px;
+  height: 10px;
+  fill: currentColor;
+}
+
 .segment-card-bottom {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  flex-wrap: wrap;
 }
 
 .segment-card-keyframes {
   color: var(--text-faint);
   font-size: 10px;
+}
+
+/* Day 3: 人工审核标记 */
+.segment-review-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  min-height: 20px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.segment-review-badge.pass {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.segment-review-badge.needs_review {
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.segment-review-badge.reject {
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
 }
 
 .segment-card-agent {
@@ -402,12 +497,13 @@
   background: var(--text-faint);
 }
 
-/* ---- 详情面板 ---- */
-
+/* ── 详情面板 ──────────────────────────────────────────────────────── */
 .segment-detail-panel {
   position: sticky;
-  top: calc(var(--header-height) + 16px);
+  top: 72px;
   min-height: 400px;
+  max-height: calc(100vh - 100px);
+  overflow-y: auto;
   padding: 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -471,9 +567,7 @@
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
-  margin-bottom: 20px;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--border);
+  margin-bottom: 14px;
 }
 
 .detail-meta-item {
@@ -498,8 +592,167 @@
   font-size: 12px;
 }
 
-/* ---- Agent 评论 ---- */
+/* ── Day 3: 子标题 ────────────────────────────────────────────────── */
+.detail-subheading {
+  margin: 0 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.03em;
+}
 
+/* ── Day 3: 边界编辑器 ────────────────────────────────────────────── */
+.boundary-editor {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+}
+
+.boundary-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.boundary-field {
+  flex: 1;
+  min-width: 0;
+}
+
+.boundary-field label {
+  display: block;
+  margin-bottom: 3px;
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.boundary-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--panel);
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 150ms ease;
+}
+
+.boundary-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-soft);
+}
+
+.boundary-sep {
+  color: var(--text-faint);
+  font-size: 14px;
+  padding-bottom: 6px;
+}
+
+/* ── Day 3: 三态审核 ──────────────────────────────────────────────── */
+.review-section {
+  margin-bottom: 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+}
+
+.review-btn-group {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.review-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1;
+  justify-content: center;
+  padding: 8px 6px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--panel);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 120ms ease;
+  font-family: inherit;
+}
+
+.review-btn:hover {
+  border-color: var(--border-strong);
+}
+
+.review-btn .review-icon {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.review-btn.review-pass.active {
+  border-color: var(--success);
+  background: color-mix(in srgb, var(--success) 14%, transparent);
+  color: var(--success);
+  font-weight: 700;
+}
+
+.review-btn.review-needs_review.active {
+  border-color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+  color: var(--warning);
+  font-weight: 700;
+}
+
+.review-btn.review-reject.active {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.review-ai-hint {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--text-faint);
+  font-size: 10px;
+  font-style: italic;
+}
+
+.review-note-label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--text-faint);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.review-note-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--panel);
+  font-family: inherit;
+  font-size: 11px;
+  resize: vertical;
+  outline: none;
+}
+
+.review-note-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px var(--primary-soft);
+}
+
+/* ── Agent 评论 ────────────────────────────────────────────────────── */
 .agent-comment-section {
   padding-top: 2px;
 }
@@ -639,6 +892,7 @@
   border: 1px solid var(--border);
   border-radius: 9px;
   background: var(--panel-soft);
+  flex-wrap: wrap;
 }
 
 .agent-review-rec {
@@ -675,6 +929,7 @@
   margin: 6px 0 0;
   padding: 0;
   list-style: none;
+  width: 100%;
 }
 
 .agent-review-reasons li {
@@ -729,10 +984,17 @@
   color: var(--text-muted);
   text-overflow: ellipsis;
   white-space: nowrap;
+  flex: 1;
 }
 
-/* ---- Agent 占位状态 ---- */
+.agent-evidence-confidence {
+  color: var(--info);
+  font-size: 10px;
+  font-family: Consolas, monospace;
+  font-weight: 600;
+}
 
+/* Agent 占位状态 */
 .agent-placeholder-state {
   display: flex;
   min-height: 160px;
@@ -770,8 +1032,246 @@
   border-color: color-mix(in srgb, var(--text-faint) 18%, transparent);
 }
 
-/* ---- 底部工具栏 ---- */
+/* ── Day 3: 统计仪表盘 ────────────────────────────────────────────── */
+.stats-dashboard {
+  margin-top: 4px;
+}
 
+.stats-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.stats-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.stats-card-header {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel-soft);
+}
+
+.stats-card-header h3 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.stats-card-body {
+  padding: 14px;
+}
+
+/* 统计磁贴 */
+.stat-tiles {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+  min-width: 60px;
+  padding: 10px 8px;
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+  border: 1px solid var(--border);
+}
+
+.stat-tile-value {
+  font-size: 22px;
+  font-weight: 800;
+  line-height: 1;
+  font-family: Consolas, "SFMono-Regular", monospace;
+}
+
+.stat-tile-label {
+  margin-top: 3px;
+  font-size: 10px;
+  color: var(--text-faint);
+  font-weight: 500;
+}
+
+.stat-tile.pass .stat-tile-value { color: var(--success); }
+.stat-tile.pending .stat-tile-value { color: var(--warning); }
+.stat-tile.reject .stat-tile-value { color: var(--danger); }
+.stat-tile.unset .stat-tile-value { color: var(--text-faint); }
+.stat-tile.completed .stat-tile-value { color: var(--success); }
+.stat-tile.unavailable .stat-tile-value { color: var(--text-faint); }
+.stat-tile.info .stat-tile-value { color: var(--info); }
+.stat-tile.success .stat-tile-value { color: var(--success); }
+.stat-tile.accent .stat-tile-value { color: var(--accent); }
+.stat-tile.muted .stat-tile-value { color: var(--text-muted); font-size: 14px; }
+
+.stat-pie-wrap {
+  display: flex;
+  justify-content: center;
+}
+
+.stat-pie-wrap canvas {
+  max-width: 150px;
+  max-height: 150px;
+}
+
+/* ── Day 3: 轨迹可视化 ────────────────────────────────────────────── */
+.trajectory-section {
+  margin-top: 4px;
+}
+
+.trajectory-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.traj-status {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.traj-status.available {
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 12%, transparent);
+}
+
+.traj-status.unavailable {
+  color: var(--text-faint);
+  background: color-mix(in srgb, var(--text-faint) 10%, transparent);
+}
+
+.trajectory-container {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #0a0a14;
+  overflow: hidden;
+}
+
+.trajectory-container canvas {
+  display: block;
+  width: 100%;
+}
+
+.trajectory-legend {
+  display: flex;
+  gap: 18px;
+  margin-top: 8px;
+  padding: 0 4px;
+}
+
+.traj-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.traj-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+/* ── Day 3: 导出与报告 ────────────────────────────────────────────── */
+.export-section {
+  margin-top: 4px;
+}
+
+.export-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.export-card {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+  transition: border-color 150ms ease;
+}
+
+.export-card:hover {
+  border-color: var(--border-strong);
+}
+
+.export-card-icon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--panel-soft);
+  color: var(--accent);
+}
+
+.export-card-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.export-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.export-card-body h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.export-card-body p {
+  margin: 0 0 8px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.export-job-ref {
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.export-job-ref code {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--panel-soft);
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ── 底部工具栏 ────────────────────────────────────────────────────── */
 .editor-toolbar {
   display: flex;
   align-items: center;
@@ -782,6 +1282,28 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--panel-soft);
+  margin-top: 4px;
+}
+
+.editor-toolbar .button.has-changes {
+  position: relative;
+}
+
+.editor-toolbar .button.has-changes::after {
+  content: "";
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warning);
+}
+
+/* ── 按钮加载态 ────────────────────────────────────────────────────── */
+.button.is-loading {
+  opacity: 0.6;
+  cursor: wait;
 }
 
 /* ===================================================================
@@ -795,9 +1317,14 @@
 
   .segment-detail-panel {
     position: static;
+    max-height: none;
   }
 
   .segment-card-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .export-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -828,6 +1355,14 @@
 
   .detail-meta {
     grid-template-columns: repeat(3, 1fr);
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .export-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -871,5 +1406,17 @@
 
   .editor-toolbar .button {
     width: 100%;
+  }
+
+  .review-btn-group {
+    flex-direction: column;
+  }
+
+  .export-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .stat-tiles {
+    flex-direction: column;
   }
 }
