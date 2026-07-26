@@ -67,6 +67,10 @@ class RuleValidatorTool:
             set(knowledge_by_id),
         )
         review = self._validate_review(draft.get("review"))
+        segment_comments = self._build_segment_comments(
+            visual_summary,
+            evidence_ids,
+        )
 
         if not visual_summary.get("detected_classes"):
             if review["recommendation"] != "needs_review":
@@ -85,6 +89,7 @@ class RuleValidatorTool:
             "summary": summary,
             "tags": tags,
             "suggestions": suggestions,
+            "segment_comments": segment_comments,
             "review": review,
             "evidence_refs": list(evidence),
             "knowledge_refs": [
@@ -184,6 +189,122 @@ class RuleValidatorTool:
             )
         return suggestions
 
+    def _build_segment_comments(
+        self,
+        visual_summary: dict[str, Any],
+        evidence_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        raw_segments = visual_summary.get("segments", [])
+        if not isinstance(raw_segments, list):
+            raise OutputValidationError("visual_summary.segments 必须是数组")
+        comments = []
+        seen_ids = set()
+        for index, raw in enumerate(raw_segments):
+            field = f"visual_summary.segments[{index}]"
+            if not isinstance(raw, dict):
+                raise OutputValidationError(f"{field} 必须是对象")
+            segment_id = self._string(raw.get("id"), f"{field}.id")
+            if segment_id in seen_ids:
+                raise OutputValidationError("segment_comments.segment_id 不能重复")
+            seen_ids.add(segment_id)
+            start = self._finite_number(raw.get("start"), f"{field}.start")
+            end = self._finite_number(raw.get("end"), f"{field}.end")
+            if start < 0 or start >= end:
+                raise OutputValidationError(f"{field} 时间边界非法")
+
+            segment_ref = f"ev:segment:{segment_id}"
+            if segment_ref not in evidence_ids:
+                raise OutputValidationError(
+                    f"{field} 缺少对应片段证据"
+                )
+            refs = [segment_ref]
+            class_parts = []
+            raw_classes = raw.get("detected_classes", [])
+            if not isinstance(raw_classes, list):
+                raise OutputValidationError(
+                    f"{field}.detected_classes 必须是数组"
+                )
+            max_confidence = 0.0
+            for class_index, detected in enumerate(raw_classes):
+                if not isinstance(detected, dict):
+                    raise OutputValidationError(
+                        f"{field}.detected_classes[{class_index}] 必须是对象"
+                    )
+                class_name = self._string(
+                    detected.get("name"),
+                    f"{field}.detected_classes[{class_index}].name",
+                )
+                label = self._class_label(class_name)
+                track_count = detected.get("track_count", 0)
+                if (
+                    isinstance(track_count, int)
+                    and not isinstance(track_count, bool)
+                    and track_count > 0
+                ):
+                    class_parts.append(f"{track_count}个{label}")
+                else:
+                    class_parts.append(label)
+                confidence = detected.get("max_confidence", 0)
+                if isinstance(confidence, (int, float)) and not isinstance(
+                    confidence,
+                    bool,
+                ):
+                    max_confidence = max(max_confidence, float(confidence))
+                class_refs = detected.get("evidence_refs", [])
+                if isinstance(class_refs, list):
+                    refs.extend(
+                        ref
+                        for ref in class_refs
+                        if isinstance(ref, str) and ref in evidence_ids
+                    )
+
+            score = raw.get("score")
+            score_value = None
+            if score is not None:
+                score_value = self._finite_number(score, f"{field}.score")
+                if not 0 <= score_value <= 1:
+                    raise OutputValidationError(
+                        f"{field}.score 必须位于 0 到 1"
+                    )
+
+            time_text = f"{start:.1f}—{end:.1f}秒"
+            if class_parts:
+                fact_text = "检测到" + "、".join(class_parts)
+            else:
+                fact_text = "未检出可用于评论的稳定目标类别"
+            if score_value is None:
+                score_reason = "CV 未提供可验证的片段评分"
+                action_text = "建议结合关键帧人工复核"
+                review_status = "needs_review"
+            elif score_value >= 0.7:
+                score_reason = f"CV 精彩度评分为 {score_value:.3f}"
+                action_text = "评分较高，建议优先复核"
+                review_status = (
+                    "pass" if max_confidence >= 0.7 else "needs_review"
+                )
+            elif score_value >= 0.4:
+                score_reason = f"CV 精彩度评分为 {score_value:.3f}"
+                action_text = "评分中等，建议结合关键帧复核"
+                review_status = "needs_review"
+            else:
+                score_reason = f"CV 精彩度评分为 {score_value:.3f}"
+                action_text = "评分较低，建议人工确认是否保留"
+                review_status = "needs_review"
+
+            comments.append(
+                {
+                    "segment_id": segment_id,
+                    "title": f"片段 {index + 1}",
+                    "comment": (
+                        f"{time_text}{fact_text}；{score_reason}，{action_text}。"
+                    ),
+                    "score_reason": score_reason,
+                    "review_status": review_status,
+                    "evidence_refs": list(dict.fromkeys(refs))[:20],
+                }
+            )
+        return comments
+
     def _validate_review(self, raw_review: Any) -> dict[str, Any]:
         if not isinstance(raw_review, dict):
             raise OutputValidationError("review 必须是对象")
@@ -244,6 +365,29 @@ class RuleValidatorTool:
         if len(result) > 2000:
             raise OutputValidationError(f"{field} 过长")
         return result
+
+    @staticmethod
+    def _finite_number(value: Any, field: str) -> float:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+        ):
+            raise OutputValidationError(f"{field} 必须是数字")
+        result = float(value)
+        if result != result or result in {float("inf"), float("-inf")}:
+            raise OutputValidationError(f"{field} 必须是有限数字")
+        return result
+
+    @staticmethod
+    def _class_label(class_name: str) -> str:
+        return {
+            "character_ct": "CT角色",
+            "character_t": "T角色",
+            "enemy": "敌方角色",
+            "weapon": "武器",
+            "weapon_rifle": "步枪",
+            "weapon_pistol": "手枪",
+        }.get(class_name.casefold(), class_name)
 
     @staticmethod
     def _reject_ungrounded_text(value: str, field: str) -> None:

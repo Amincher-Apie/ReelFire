@@ -13,3 +13,4 @@ Pillow==12.3.0
 ultralytics==8.4.95
 PyYAML==6.0.3
 requests==2.34.2
+jsonschema==4.25.0
