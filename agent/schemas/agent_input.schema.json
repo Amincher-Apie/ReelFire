@@ -214,6 +214,10 @@
           "type": "string",
           "minLength": 1
         },
+        "order": {
+          "type": "integer",
+          "minimum": 1
+        },
         "start": {
           "type": "number",
           "minimum": 0
@@ -223,12 +227,85 @@
           "exclusiveMinimum": 0
         },
         "score": {
-          "type": "number"
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
         },
         "source_keyframes": {
           "type": "array",
           "items": {
             "type": "string"
+          }
+        },
+        "detected_classes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enemy_classes_in_segment": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "peak_enemy_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "detections_summary": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "required": [
+              "track_id",
+              "class",
+              "first_seen",
+              "last_seen"
+            ],
+            "properties": {
+              "track_id": {
+                "type": [
+                  "integer",
+                  "string"
+                ]
+              },
+              "class": {
+                "type": "string",
+                "minLength": 1
+              },
+              "first_seen": {
+                "type": "number",
+                "minimum": 0
+              },
+              "last_seen": {
+                "type": "number",
+                "minimum": 0
+              },
+              "detection_count": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "confidence": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "confidence_max": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "confidence_min": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            }
           }
         }
       }

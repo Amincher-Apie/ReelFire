@@ -19,6 +19,7 @@ def build_agent_input(
     analysis_report: dict[str, Any],
     *,
     provider: dict[str, Any] | None = None,
+    highlight_report: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Wrap the real CV ``analysis_report.json`` for the Agent service.
 
@@ -30,7 +31,12 @@ def build_agent_input(
 
     if not isinstance(analysis_report, dict):
         raise TypeError("analysis_report 必须是 JSON 对象")
-    job_id = analysis_report.get("job_id")
+    normalized_report = (
+        merge_highlight_report(analysis_report, highlight_report)
+        if highlight_report is not None
+        else copy.deepcopy(analysis_report)
+    )
+    job_id = normalized_report.get("job_id")
     if not isinstance(job_id, str) or not job_id.strip():
         raise ValueError("analysis_report.job_id 必须是非空字符串")
 
@@ -45,14 +51,86 @@ def build_agent_input(
         "schema_version": "1.0",
         "job_id": job_id.strip(),
         "provider": normalized_provider,
-        "analysis_report": copy.deepcopy(analysis_report),
+        "analysis_report": normalized_report,
     }
+
+
+def merge_highlight_report(
+    analysis_report: dict[str, Any],
+    highlight_report: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge the CV teammate's multi-segment export into a Web CV report.
+
+    The CLI highlight exporter intentionally owns detection/track statistics,
+    while the Web report owns job, video and keyframe metadata.  The editor
+    contract requires stable segment identifiers and ordering, so missing
+    values are assigned deterministically from the source array order.  A
+    missing score remains missing; the Agent must not invent one.
+    """
+
+    if not isinstance(analysis_report, dict):
+        raise TypeError("analysis_report 必须是 JSON 对象")
+    if not isinstance(highlight_report, dict):
+        raise TypeError("highlight_report 必须是 JSON 对象")
+    raw_segments = highlight_report.get("segments")
+    if not isinstance(raw_segments, list):
+        raise ValueError("highlight_report.segments 必须是数组")
+
+    merged = copy.deepcopy(analysis_report)
+    keyframes = merged.get("keyframes")
+    keyframes = keyframes if isinstance(keyframes, list) else []
+    segments = []
+    for index, raw in enumerate(raw_segments, start=1):
+        if not isinstance(raw, dict):
+            raise ValueError(
+                f"highlight_report.segments[{index - 1}] 必须是对象"
+            )
+        segment = copy.deepcopy(raw)
+        segment["id"] = str(
+            segment.get("id") or f"seg_{index:03d}"
+        )
+        segment["order"] = index
+        if not isinstance(segment.get("source_keyframes"), list):
+            start = segment.get("start")
+            end = segment.get("end")
+            if (
+                isinstance(start, (int, float))
+                and not isinstance(start, bool)
+                and isinstance(end, (int, float))
+                and not isinstance(end, bool)
+            ):
+                segment["source_keyframes"] = [
+                    str(frame["id"])
+                    for frame in keyframes
+                    if isinstance(frame, dict)
+                    and frame.get("id")
+                    and isinstance(frame.get("timestamp"), (int, float))
+                    and not isinstance(frame.get("timestamp"), bool)
+                    and float(start) <= float(frame["timestamp"]) <= float(end)
+                ]
+            else:
+                segment["source_keyframes"] = []
+        segments.append(segment)
+
+    merged["segments"] = segments
+    stats = highlight_report.get("stats")
+    if isinstance(stats, dict):
+        merged["cv_highlight_stats"] = copy.deepcopy(stats)
+        if "duration" not in merged:
+            duration = stats.get("video_duration")
+            if isinstance(duration, (int, float)) and not isinstance(
+                duration,
+                bool,
+            ):
+                merged["duration"] = float(duration)
+    return merged
 
 
 def to_backend_agent_call(
     result: dict[str, Any],
     *,
-    prompt_version: str = "v1",
+    prompt_version: str = "v2",
+    result_path: str = "agent_report.json",
 ) -> dict[str, Any]:
     """Map an Agent result to the backend ``agent_calls`` JSON contract."""
 
@@ -75,6 +153,10 @@ def to_backend_agent_call(
     tags = tags if isinstance(tags, list) else []
     suggestions = result.get("suggestions")
     suggestions = suggestions if isinstance(suggestions, list) else []
+    segment_comments = result.get("segment_comments")
+    segment_comments = (
+        segment_comments if isinstance(segment_comments, list) else []
+    )
     knowledge_refs = result.get("knowledge_refs")
     knowledge_refs = (
         knowledge_refs if isinstance(knowledge_refs, list) else []
@@ -97,11 +179,14 @@ def to_backend_agent_call(
                 ),
                 "status": str(item.get("status", "failed")),
                 "duration_ms": max(0, int(item.get("duration_ms", 0))),
+                "input_summary": str(item.get("input_summary", "")),
+                "output_summary": str(item.get("output_summary", "")),
             }
             for item in tools
             if isinstance(item, dict)
         ],
         "references": copy.deepcopy(knowledge_refs),
+        "result_path": str(result_path),
         "result": {
             "summary": str(result.get("summary", "")),
             "labels": [
@@ -115,6 +200,7 @@ def to_backend_agent_call(
                 if isinstance(item, dict)
                 and (item.get("action") or item.get("title"))
             ],
+            "segment_comments": copy.deepcopy(segment_comments),
             "review_status": (
                 "pending"
                 if status == "needs_review"

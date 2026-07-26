@@ -71,6 +71,8 @@ class AgentService:
                 trace_tools,
                 "report_parser",
                 lambda: self.report_parser.run(payload),
+                input_summary=self._report_input_summary(payload),
+                output_summary_getter=self._visual_summary,
             )
         except Exception as exc:
             errors.append(
@@ -105,9 +107,11 @@ class AgentService:
                 trace_tools,
                 "knowledge_retriever",
                 lambda: self.knowledge_retriever.run(visual_summary),
+                input_summary=self._visual_summary(visual_summary),
                 status_getter=lambda value: str(
                     value.get("status", "completed")
                 ),
+                output_summary_getter=self._retrieval_summary,
             )
         except Exception as exc:
             errors.append(
@@ -123,6 +127,8 @@ class AgentService:
                 "name": "knowledge_retriever",
                 "status": "degraded",
                 "duration_ms": trace_tools[-1]["duration_ms"],
+                "input_summary": self._visual_summary(visual_summary),
+                "output_summary": self._retrieval_summary(retrieval),
                 "detail": "检索工具失败，已使用确定性规则检索",
             }
         if retrieval.get("status") == "degraded":
@@ -147,9 +153,14 @@ class AgentService:
                     retrieval,
                     requested_provider=provider_config,
                 ),
+                input_summary=(
+                    f"{self._visual_summary(visual_summary)}；"
+                    f"knowledge_hits={len(retrieval.get('results', []))}"
+                ),
                 status_getter=lambda value: str(
                     value.get("status", "completed")
                 ),
+                output_summary_getter=self._generation_summary,
             )
         except Exception as exc:
             errors.append(
@@ -188,6 +199,11 @@ class AgentService:
                     "name": "rule_validator",
                     "status": "completed",
                     "duration_ms": _duration_ms(validation_started),
+                    "input_summary": self._validation_input_summary(
+                        generation,
+                        visual_summary,
+                    ),
+                    "output_summary": self._business_summary(business),
                 }
             )
         except Exception as exc:
@@ -215,6 +231,10 @@ class AgentService:
                         "name": "rule_validator",
                         "status": "failed",
                         "duration_ms": _duration_ms(validation_started),
+                        "input_summary": self._validation_input_summary(
+                            generation,
+                            visual_summary,
+                        ),
                         "detail": self._safe_error(fallback_exc),
                     }
                 )
@@ -250,6 +270,11 @@ class AgentService:
                     "name": "rule_validator",
                     "status": "degraded",
                     "duration_ms": _duration_ms(validation_started),
+                    "input_summary": self._validation_input_summary(
+                        generation,
+                        visual_summary,
+                    ),
+                    "output_summary": self._business_summary(business),
                     "detail": "模型草稿被拒绝，已使用确定性安全输出",
                 }
             )
@@ -282,15 +307,17 @@ class AgentService:
         analysis_report: dict[str, Any],
         *,
         provider: dict[str, Any] | None = None,
+        highlight_report: dict[str, Any] | None = None,
         output_dir: Path | None = None,
     ) -> dict[str, Any]:
-        """Run directly from the CV module's persisted report contract."""
+        """Run from Web CV data plus an optional multi-segment CV export."""
 
         from agent.integrations.reelfire import build_agent_input
 
         payload = build_agent_input(
             analysis_report,
             provider=provider,
+            highlight_report=highlight_report,
         )
         return self.run(payload, output_dir=output_dir)
 
@@ -301,6 +328,8 @@ class AgentService:
         function: Callable[[], Any],
         *,
         status_getter: Callable[[Any], str] | None = None,
+        input_summary: str | None = None,
+        output_summary_getter: Callable[[Any], str] | None = None,
     ) -> Any:
         started = perf_counter()
         try:
@@ -311,19 +340,102 @@ class AgentService:
                     "name": name,
                     "status": "failed",
                     "duration_ms": _duration_ms(started),
+                    **(
+                        {"input_summary": input_summary}
+                        if input_summary
+                        else {}
+                    ),
                     "detail": AgentService._safe_error(exc),
                 }
             )
             raise
         status = status_getter(result) if status_getter else "completed"
-        trace_tools.append(
-            {
-                "name": name,
-                "status": status,
-                "duration_ms": _duration_ms(started),
-            }
-        )
+        item = {
+            "name": name,
+            "status": status,
+            "duration_ms": _duration_ms(started),
+        }
+        if input_summary:
+            item["input_summary"] = input_summary
+        if output_summary_getter is not None:
+            item["output_summary"] = output_summary_getter(result)
+        trace_tools.append(item)
         return result
+
+    @staticmethod
+    def _report_input_summary(payload: Any) -> str:
+        report = (
+            payload.get("analysis_report")
+            if isinstance(payload, dict)
+            else None
+        )
+        if not isinstance(report, dict):
+            return "analysis_report=invalid"
+        return (
+            f"samples={len(report.get('samples', [])) if isinstance(report.get('samples'), list) else 0}；"
+            f"keyframes={len(report.get('keyframes', [])) if isinstance(report.get('keyframes'), list) else 0}；"
+            f"segments={len(report.get('segments', [])) if isinstance(report.get('segments'), list) else 0}"
+        )
+
+    @staticmethod
+    def _visual_summary(value: Any) -> str:
+        if not isinstance(value, dict):
+            return "visual_summary=invalid"
+        return (
+            f"detected_classes={len(value.get('detected_classes', [])) if isinstance(value.get('detected_classes'), list) else 0}；"
+            f"segments={len(value.get('segments', [])) if isinstance(value.get('segments'), list) else 0}；"
+            f"evidence_refs={len(value.get('evidence_refs', [])) if isinstance(value.get('evidence_refs'), list) else 0}"
+        )
+
+    @staticmethod
+    def _retrieval_summary(value: Any) -> str:
+        if not isinstance(value, dict):
+            return "retrieval=invalid"
+        matches = value.get("results")
+        return (
+            f"status={value.get('status', 'unknown')}；"
+            f"knowledge_hits={len(matches) if isinstance(matches, list) else 0}"
+        )
+
+    @staticmethod
+    def _generation_summary(value: Any) -> str:
+        if not isinstance(value, dict):
+            return "generation=invalid"
+        provider = value.get("provider")
+        provider = provider if isinstance(provider, dict) else {}
+        draft = value.get("draft")
+        draft = draft if isinstance(draft, dict) else {}
+        suggestions = draft.get("suggestions")
+        return (
+            f"status={value.get('status', 'unknown')}；"
+            f"provider={provider.get('type', 'unknown')}；"
+            f"suggestions={len(suggestions) if isinstance(suggestions, list) else 0}"
+        )
+
+    @staticmethod
+    def _validation_input_summary(
+        generation: dict[str, Any],
+        visual_summary: dict[str, Any],
+    ) -> str:
+        draft = generation.get("draft")
+        draft = draft if isinstance(draft, dict) else {}
+        suggestions = draft.get("suggestions")
+        return (
+            f"suggestions={len(suggestions) if isinstance(suggestions, list) else 0}；"
+            f"segments={len(visual_summary.get('segments', [])) if isinstance(visual_summary.get('segments'), list) else 0}"
+        )
+
+    @staticmethod
+    def _business_summary(value: Any) -> str:
+        if not isinstance(value, dict):
+            return "business=invalid"
+        comments = value.get("segment_comments")
+        review = value.get("review")
+        review = review if isinstance(review, dict) else {}
+        return (
+            f"segment_comments={len(comments) if isinstance(comments, list) else 0}；"
+            f"review={review.get('recommendation', 'unknown')}"
+        )
 
     @staticmethod
     def _trace(
@@ -369,6 +481,7 @@ class AgentService:
             "summary": "Agent 无法形成安全输出。",
             "tags": [],
             "suggestions": [],
+            "segment_comments": [],
             "review": {
                 "recommendation": "reject",
                 "confidence": 1.0,
@@ -388,7 +501,13 @@ class AgentService:
 
     @staticmethod
     def _skipped(name: str) -> dict[str, Any]:
-        return {"name": name, "status": "skipped", "duration_ms": 0}
+        return {
+            "name": name,
+            "status": "skipped",
+            "duration_ms": 0,
+            "input_summary": "上游失败，未调用",
+            "output_summary": "无输出",
+        }
 
     @staticmethod
     def _error(

@@ -222,20 +222,78 @@ class ReportParserTool:
         segment_summary = []
         for item in segments:
             ref_id = f"ev:segment:{item['id']}"
+            segment_value = {
+                "start": item["start"],
+                "end": item["end"],
+                "score": item["score"],
+                "source_keyframes": item["source_keyframes"],
+                "reason": item["reason"],
+                "peak_enemy_count": item["peak_enemy_count"],
+            }
             evidence_refs.append(
                 {
                     "ref_id": ref_id,
                     "type": "segment",
                     "source_id": item["id"],
-                    "value": {
-                        "start": item["start"],
-                        "end": item["end"],
-                        "score": item["score"],
-                        "source_keyframes": item["source_keyframes"],
-                    },
+                    "value": segment_value,
                 }
             )
-            segment_summary.append({**item, "evidence_refs": [ref_id]})
+            segment_classes: dict[str, dict[str, Any]] = defaultdict(
+                lambda: {
+                    "detection_count": 0,
+                    "track_ids": set(),
+                    "max_confidence": 0.0,
+                    "evidence_refs": [],
+                }
+            )
+            for frame_index, frame in enumerate(primary_frames):
+                if not item["start"] <= frame["timestamp"] <= item["end"]:
+                    continue
+                source_id = primary_source_ids[frame_index]
+                for detection_index, detected in enumerate(frame["objects"]):
+                    stats = segment_classes[detected["class"]]
+                    stats["detection_count"] += 1
+                    stats["max_confidence"] = max(
+                        stats["max_confidence"],
+                        detected["confidence"],
+                    )
+                    stats["evidence_refs"].append(
+                        f"ev:detection:{source_id}:{detection_index:03d}"
+                    )
+            for detected in item["detections_summary"]:
+                stats = segment_classes[detected["class"]]
+                stats["detection_count"] = max(
+                    stats["detection_count"],
+                    detected["detection_count"],
+                )
+                stats["track_ids"].add(detected["track_id"])
+                stats["max_confidence"] = max(
+                    stats["max_confidence"],
+                    detected["confidence_max"],
+                )
+                stats["evidence_refs"].append(ref_id)
+            for class_name in item["detected_classes"]:
+                segment_classes[class_name]["evidence_refs"].append(ref_id)
+
+            normalized_classes = [
+                {
+                    "name": class_name,
+                    "detection_count": details["detection_count"],
+                    "track_count": len(details["track_ids"]),
+                    "max_confidence": _round(details["max_confidence"]),
+                    "evidence_refs": list(
+                        dict.fromkeys(details["evidence_refs"])
+                    ),
+                }
+                for class_name, details in sorted(segment_classes.items())
+            ]
+            segment_summary.append(
+                {
+                    **item,
+                    "detected_classes": normalized_classes,
+                    "evidence_refs": [ref_id],
+                }
+            )
 
         detected_classes = [
             {
@@ -390,6 +448,7 @@ class ReportParserTool:
     ) -> list[dict[str, Any]]:
         segments = []
         identifiers: set[str] = set()
+        orders: set[int] = set()
         for index, raw in enumerate(raw_segments):
             field = f"analysis_report.segments[{index}]"
             item = _require_dict(raw, field)
@@ -397,6 +456,17 @@ class ReportParserTool:
             if identifier in identifiers:
                 raise ReportValidationError("analysis_report.segments.id 不能重复")
             identifiers.add(identifier)
+            order = item.get("order", index + 1)
+            if (
+                isinstance(order, bool)
+                or not isinstance(order, int)
+                or order < 1
+                or order in orders
+            ):
+                raise ReportValidationError(
+                    "analysis_report.segments.order 必须是唯一正整数"
+                )
+            orders.add(order)
             start = _number(item.get("start"), f"{field}.start", minimum=0)
             end = _number(
                 item.get("end"),
@@ -406,7 +476,11 @@ class ReportParserTool:
             )
             if start >= end:
                 raise ReportValidationError(f"{field} 必须满足 start < end")
-            score = _optional_score(item, "score", field)
+            score = (
+                _round(_optional_score(item, "score", field))
+                if "score" in item and item.get("score") is not None
+                else None
+            )
             source_keyframes = item.get("source_keyframes", [])
             source_keyframes = _require_list(
                 source_keyframes,
@@ -423,16 +497,149 @@ class ReportParserTool:
                         f"{field}.source_keyframes 引用了不存在的关键帧"
                     )
                 normalized_sources.append(source_id)
+            detected_classes = self._string_list(
+                item.get("detected_classes", []),
+                f"{field}.detected_classes",
+            )
+            enemy_classes = self._string_list(
+                item.get("enemy_classes_in_segment", []),
+                f"{field}.enemy_classes_in_segment",
+            )
+            detections_summary = self._validate_detection_summary(
+                item.get("detections_summary", []),
+                field,
+                start,
+                end,
+            )
+            peak_enemy_count = item.get("peak_enemy_count", 0)
+            if (
+                isinstance(peak_enemy_count, bool)
+                or not isinstance(peak_enemy_count, int)
+                or peak_enemy_count < 0
+            ):
+                raise ReportValidationError(
+                    f"{field}.peak_enemy_count 必须是非负整数"
+                )
+            reason = item.get("reason", "")
+            if not isinstance(reason, str):
+                raise ReportValidationError(f"{field}.reason 必须是字符串")
             segments.append(
                 {
                     "id": identifier,
+                    "order": order,
                     "start": _round(start),
                     "end": _round(end),
-                    "score": _round(score),
+                    "score": score,
                     "source_keyframes": normalized_sources,
+                    "detected_classes": detected_classes,
+                    "enemy_classes_in_segment": enemy_classes,
+                    "detections_summary": detections_summary,
+                    "peak_enemy_count": peak_enemy_count,
+                    "reason": reason.strip(),
                 }
             )
-        return segments
+        return sorted(segments, key=lambda item: item["order"])
+
+    @staticmethod
+    def _string_list(value: Any, field: str) -> list[str]:
+        items = _require_list(value, field)
+        normalized = []
+        for index, item in enumerate(items):
+            text = _require_string(item, f"{field}[{index}]")
+            if text not in normalized:
+                normalized.append(text)
+        return normalized
+
+    def _validate_detection_summary(
+        self,
+        value: Any,
+        owner: str,
+        segment_start: float,
+        segment_end: float,
+    ) -> list[dict[str, Any]]:
+        items = _require_list(value, f"{owner}.detections_summary")
+        normalized = []
+        seen_tracks = set()
+        for index, raw in enumerate(items):
+            field = f"{owner}.detections_summary[{index}]"
+            item = _require_dict(raw, field)
+            track_id = item.get("track_id")
+            if isinstance(track_id, bool) or not isinstance(
+                track_id,
+                (str, int),
+            ):
+                raise ReportValidationError(
+                    f"{field}.track_id 必须是字符串或整数"
+                )
+            normalized_track = str(track_id).strip()
+            if not normalized_track or normalized_track in seen_tracks:
+                raise ReportValidationError(
+                    f"{owner}.detections_summary.track_id 不能为空或重复"
+                )
+            seen_tracks.add(normalized_track)
+            first_seen = _number(
+                item.get("first_seen"),
+                f"{field}.first_seen",
+                minimum=segment_start,
+                maximum=segment_end,
+            )
+            last_seen = _number(
+                item.get("last_seen"),
+                f"{field}.last_seen",
+                minimum=segment_start,
+                maximum=segment_end,
+            )
+            if first_seen > last_seen:
+                raise ReportValidationError(
+                    f"{field} 必须满足 first_seen <= last_seen"
+                )
+            detection_count = item.get("detection_count", 0)
+            if (
+                isinstance(detection_count, bool)
+                or not isinstance(detection_count, int)
+                or detection_count < 0
+            ):
+                raise ReportValidationError(
+                    f"{field}.detection_count 必须是非负整数"
+                )
+            confidence = _number(
+                item.get("confidence", 0),
+                f"{field}.confidence",
+                minimum=0,
+                maximum=1,
+            )
+            confidence_max = _number(
+                item.get("confidence_max", confidence),
+                f"{field}.confidence_max",
+                minimum=0,
+                maximum=1,
+            )
+            confidence_min = _number(
+                item.get("confidence_min", confidence),
+                f"{field}.confidence_min",
+                minimum=0,
+                maximum=1,
+            )
+            if confidence_min > confidence_max:
+                raise ReportValidationError(
+                    f"{field} 必须满足 confidence_min <= confidence_max"
+                )
+            normalized.append(
+                {
+                    "track_id": normalized_track,
+                    "class": _require_string(
+                        item.get("class"),
+                        f"{field}.class",
+                    ),
+                    "first_seen": _round(first_seen),
+                    "last_seen": _round(last_seen),
+                    "detection_count": detection_count,
+                    "confidence": _round(confidence),
+                    "confidence_max": _round(confidence_max),
+                    "confidence_min": _round(confidence_min),
+                }
+            )
+        return normalized
 
     @staticmethod
     def _frame_source_id(

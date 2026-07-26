@@ -2,7 +2,12 @@
 
 from agent.integrations.reelfire import (
     build_agent_input,
+    merge_highlight_report,
     to_backend_agent_call,
 )
 
-__all__ = ["build_agent_input", "to_backend_agent_call"]
+__all__ = [
+    "build_agent_input",
+    "merge_highlight_report",
+    "to_backend_agent_call",
+]
