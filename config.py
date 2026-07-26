@@ -47,6 +47,9 @@ class Config:
     DEFAULT_JOB_SETTINGS = {
         "sample_interval": 0.5,
         "target_duration": 30.0,
+        "chunk_duration": 60.0,
+        "keyframes_per_chunk": 4,
+        "yolo_batch_size": 8,
         "max_keyframes": 10,
         "min_keyframe_gap": 5.0,
         "object_weight": 0.45,

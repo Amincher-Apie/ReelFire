@@ -7,7 +7,7 @@ import math
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Callable
 
 from services.job_service import JobService, JobStateConflictError, iso_now
 
@@ -139,12 +139,67 @@ def _save_contact_sheet(
     return bool(cv2.imwrite(str(destination), sheet))
 
 
+def _save_contact_sheet_from_keyframes(
+    keyframes: list[dict[str, Any]],
+    job_dir: Path,
+    destination: Path,
+) -> bool:
+    """Build a bounded contact sheet from already persisted keyframes."""
+
+    import cv2
+    import numpy as np
+
+    if not keyframes:
+        return False
+    visible = keyframes[:24]
+    thumb_width, thumb_height, columns = 320, 180, 3
+    rows = math.ceil(len(visible) / columns)
+    sheet = np.zeros(
+        (rows * thumb_height, columns * thumb_width, 3),
+        dtype=np.uint8,
+    )
+    written = 0
+    for index, item in enumerate(visible):
+        image = cv2.imread(str(job_dir / str(item.get("image", ""))))
+        if image is None:
+            continue
+        thumb = cv2.resize(image, (thumb_width, thumb_height))
+        cv2.putText(
+            thumb,
+            f"{float(item.get('timestamp', 0.0)):.1f}s  "
+            f"score={float(item.get('highlight_score', 0.0)):.3f}",
+            (8, 22),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 255, 255),
+            1,
+            cv2.LINE_AA,
+        )
+        row, column = divmod(index, columns)
+        sheet[
+            row * thumb_height : (row + 1) * thumb_height,
+            column * thumb_width : (column + 1) * thumb_width,
+        ] = thumb
+        written += 1
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    return written > 0 and bool(cv2.imwrite(str(destination), sheet))
+
+
+def _notify_progress(
+    callback: Callable[[dict[str, Any]], None] | None,
+    payload: dict[str, Any],
+) -> None:
+    if callback is not None:
+        callback(payload)
+
+
 def analyze_video(
     video_path: Path,
     job_dir: Path,
     settings: dict[str, Any],
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
-    """Run OpenCV sampling, YOLO detection and explainable scoring."""
+    """Run bounded chunk sampling, YOLO detection and explainable scoring."""
     import cv2
 
     from cv_engine.highlight_extractor import HighlightExtractor
@@ -159,37 +214,112 @@ def analyze_video(
         raise ValueError("无法读取视频信息，文件可能已损坏或不受支持")
 
     sample_interval = float(settings.get("sample_interval", 0.5))
-    frames, timestamps = processor.sample_video(video_path, sample_interval)
-    if not frames:
-        raise ValueError("视频中没有可分析的画面")
+    chunk_duration = max(5.0, float(settings.get("chunk_duration", 60.0)))
+    total_chunks = max(1, math.ceil(duration / chunk_duration))
+    estimated_samples = max(1, math.ceil(duration / sample_interval))
+    keyframes_per_chunk = max(
+        1,
+        int(settings.get("keyframes_per_chunk", 4)),
+    )
 
     model_path = Path(str(settings.get("model_path", "models/yolo11n.pt")))
     detector = YoloDetector(
         model_path,
         confidence_threshold=float(settings.get("confidence_threshold", 0.35)),
+        batch_size=int(settings.get("yolo_batch_size", 8)),
     )
-    detections_list = detector.detect_frames(frames)
     scorer = HighlightScorer()
 
     object_weight = float(settings.get("object_weight", 0.45))
     scene_weight = float(settings.get("scene_change_weight", 0.35))
     motion_weight = float(settings.get("motion_weight", 0.20))
     samples: list[dict[str, Any]] = []
+    keyframes: list[dict[str, Any]] = []
+    analysis_chunks: list[dict[str, Any]] = []
     previous = None
-    for index, (frame, detections, timestamp) in enumerate(
-        zip(frames, detections_list, timestamps)
+    processed_samples = 0
+    keyframe_dir = job_dir / "keyframes"
+    keyframe_dir.mkdir(parents=True, exist_ok=True)
+    minimum_gap = max(
+        0.0,
+        float(settings.get("min_keyframe_gap", 5.0)),
+    )
+
+    _notify_progress(
+        progress_callback,
+        {
+            "stage": "sampling",
+            "message": "正在读取视频并准备分块分析",
+            "percent": 2.0,
+            "total_chunks": total_chunks,
+            "completed_chunks": 0,
+            "processed_frames": 0,
+            "total_frames": estimated_samples,
+            "current_chunk": None,
+            "chunks": [],
+        },
+    )
+
+    for chunk in processor.iter_sample_chunks(
+        video_path,
+        interval=sample_interval,
+        chunk_duration=chunk_duration,
     ):
-        object_score = scorer.calculate_object_score(detections)
-        scene_score = scorer.calculate_scene_change_score(frame, previous)
-        motion_score = scorer.calculate_motion_score(frame, previous)
-        highlight_score = (
-            object_score * object_weight
-            + scene_score * scene_weight
-            + motion_score * motion_weight
-        )
-        samples.append(
+        chunk_index = int(chunk["index"])
+        chunk_number = chunk_index + 1
+        chunk_id = f"chunk_{chunk_number:04d}"
+        frames = list(chunk["frames"])
+        timestamps = list(chunk["timestamps"])
+        if not frames:
+            continue
+
+        _notify_progress(
+            progress_callback,
             {
-                "frame_index": index,
+                "stage": "detecting",
+                "message": (
+                    f"正在分析 {float(chunk['start']):.1f}s–"
+                    f"{float(chunk['end']):.1f}s"
+                ),
+                "percent": round(
+                    5.0 + 85.0 * (chunk_index / total_chunks),
+                    2,
+                ),
+                "total_chunks": total_chunks,
+                "completed_chunks": len(analysis_chunks),
+                "processed_frames": processed_samples,
+                "total_frames": estimated_samples,
+                "current_chunk": {
+                    "id": chunk_id,
+                    "index": chunk_number,
+                    "start": float(chunk["start"]),
+                    "end": float(chunk["end"]),
+                },
+                "chunks": analysis_chunks,
+            },
+        )
+
+        detections_list = detector.detect_frames(frames)
+        if len(detections_list) != len(frames):
+            raise RuntimeError("YOLO 返回的检测批次数量与采样帧不一致")
+
+        chunk_samples: list[dict[str, Any]] = []
+        for local_index, (frame, detections, timestamp) in enumerate(
+            zip(frames, detections_list, timestamps)
+        ):
+            object_score = scorer.calculate_object_score(detections)
+            scene_score = scorer.calculate_scene_change_score(frame, previous)
+            motion_score = scorer.calculate_motion_score(frame, previous)
+            highlight_score = (
+                object_score * object_weight
+                + scene_score * scene_weight
+                + motion_score * motion_weight
+            )
+            sample = {
+                "frame_index": processed_samples,
+                "chunk_frame_index": local_index,
+                "chunk_id": chunk_id,
+                "chunk_index": chunk_number,
                 "timestamp": round(float(timestamp), 3),
                 "object_count": len(detections),
                 "object_score": round(float(object_score), 4),
@@ -198,37 +328,105 @@ def analyze_video(
                 "highlight_score": round(float(highlight_score), 4),
                 "objects": detections,
             }
-        )
-        previous = frame
+            samples.append(sample)
+            chunk_samples.append(sample)
+            processed_samples += 1
+            previous = frame
 
-    selected = _select_keyframes(
-        samples,
-        max(1, int(settings.get("max_keyframes", 10))),
-        max(0.0, float(settings.get("min_keyframe_gap", 5.0))),
-    )
-    keyframe_dir = job_dir / "keyframes"
-    keyframe_dir.mkdir(parents=True, exist_ok=True)
-    keyframes: list[dict[str, Any]] = []
-    for order, sample in enumerate(selected, start=1):
-        keyframe_id = f"kf_{order:03d}"
-        image_name = f"{keyframe_id}.jpg"
-        annotated = _annotate_frame(
-            frames[int(sample["frame_index"])],
-            sample.get("objects", []),
+        selected = _select_keyframes(
+            chunk_samples,
+            keyframes_per_chunk,
+            minimum_gap,
         )
-        if not cv2.imwrite(str(keyframe_dir / image_name), annotated):
-            raise RuntimeError(f"无法保存关键帧 {image_name}")
-        keyframes.append(
-            {
-                **sample,
-                "id": keyframe_id,
-                "image": f"keyframes/{image_name}",
-                "decision": "keep",
-                "label": "",
-                "note": "",
-                "order": order,
+        chunk_keyframes: list[dict[str, Any]] = []
+        for local_order, sample in enumerate(selected, start=1):
+            keyframe_id = f"kf_c{chunk_number:04d}_{local_order:02d}"
+            image_name = f"{keyframe_id}.jpg"
+            annotated = _annotate_frame(
+                frames[int(sample["chunk_frame_index"])],
+                sample.get("objects", []),
+            )
+            if not cv2.imwrite(str(keyframe_dir / image_name), annotated):
+                raise RuntimeError(f"无法保存关键帧 {image_name}")
+            keyframe = {
+                key: value
+                for key, value in sample.items()
+                if key != "chunk_frame_index"
             }
+            keyframe.update(
+                {
+                    "id": keyframe_id,
+                    "image": f"keyframes/{image_name}",
+                    "decision": "keep",
+                    "label": "",
+                    "note": "",
+                    "order": len(keyframes) + 1,
+                }
+            )
+            keyframes.append(keyframe)
+            chunk_keyframes.append(keyframe)
+
+        partial_result = HighlightExtractor().extract(
+            [
+                {
+                    "timestamp": item["timestamp"],
+                    "detections": item.get("objects", []),
+                }
+                for item in chunk_samples
+            ],
+            float(video.get("fps", 24.0)),
+            duration,
         )
+        provisional_segments = []
+        for local_order, segment in enumerate(
+            partial_result.get("segments", []),
+            start=1,
+        ):
+            provisional = dict(segment)
+            provisional.update(
+                {
+                    "id": f"seg_c{chunk_number:04d}_{local_order:02d}",
+                    "chunk_id": chunk_id,
+                    "provisional": True,
+                }
+            )
+            provisional_segments.append(provisional)
+
+        chunk_summary = {
+            "id": chunk_id,
+            "index": chunk_number,
+            "start": round(float(chunk["start"]), 3),
+            "end": round(float(chunk["end"]), 3),
+            "status": "completed",
+            "sample_count": len(chunk_samples),
+            "keyframes": chunk_keyframes,
+            "keyframe_ids": [item["id"] for item in chunk_keyframes],
+            "provisional_segments": provisional_segments,
+            "segment_ids": [],
+        }
+        analysis_chunks.append(chunk_summary)
+        _notify_progress(
+            progress_callback,
+            {
+                "stage": "detecting",
+                "message": (
+                    f"已完成 {len(analysis_chunks)}/{total_chunks} 个分析分块"
+                ),
+                "percent": round(
+                    5.0 + 85.0 * (len(analysis_chunks) / total_chunks),
+                    2,
+                ),
+                "total_chunks": total_chunks,
+                "completed_chunks": len(analysis_chunks),
+                "processed_frames": processed_samples,
+                "total_frames": estimated_samples,
+                "current_chunk": None,
+                "chunks": analysis_chunks,
+            },
+        )
+
+    if not samples or not keyframes:
+        raise ValueError("视频中没有可分析的画面")
 
     best = max(keyframes, key=lambda item: item["highlight_score"])
     start, end = _bounded_clip(
@@ -275,17 +473,48 @@ def analyze_video(
             if seg["start"] <= float(kf["timestamp"]) <= seg["end"]
         ]
         seg["source_keyframes"] = seg_keyframes if seg_keyframes else []
+        seg["provisional"] = False
+
+    for chunk in analysis_chunks:
+        chunk["segment_ids"] = [
+            str(segment["id"])
+            for segment in segments
+            if float(segment["end"]) >= float(chunk["start"])
+            and float(segment["start"]) <= float(chunk["end"])
+        ]
+        chunk.pop("provisional_segments", None)
 
     segment_tags = scorer.calculate_segment_tags(samples, segments)
     ai_cover_prompt = scorer.generate_cover_prompt(best)
 
     contact_sheet = job_dir / "result" / "contact_sheet.jpg"
-    contact_sheet_ready = _save_contact_sheet(selected, frames, contact_sheet)
+    contact_sheet_ready = _save_contact_sheet_from_keyframes(
+        keyframes,
+        job_dir,
+        contact_sheet,
+    )
+    _notify_progress(
+        progress_callback,
+        {
+            "stage": "finalizing",
+            "message": "正在归并跨分块片段并生成最终报告",
+            "percent": 96.0,
+            "total_chunks": total_chunks,
+            "completed_chunks": len(analysis_chunks),
+            "processed_frames": processed_samples,
+            "total_frames": processed_samples,
+            "current_chunk": None,
+            "chunks": analysis_chunks,
+        },
+    )
     return {
         "video": video,
         "duration": duration,
         "settings": {key: value for key, value in settings.items() if key != "model_path"},
         "model": {"path": model_path.name},
+        "analysis_mode": "streaming_chunks",
+        "chunk_duration": chunk_duration,
+        "analysis_chunks": analysis_chunks,
         "sample_interval": sample_interval,
         "total_sampled_frames": len(samples),
         "score_weights": {
@@ -293,7 +522,14 @@ def analyze_video(
             "scene_change": scene_weight,
             "motion": motion_weight,
         },
-        "samples": samples,
+        "samples": [
+            {
+                key: value
+                for key, value in sample.items()
+                if key != "chunk_frame_index"
+            }
+            for sample in samples
+        ],
         "keyframes": keyframes,
         "segments": segments,
         "segment_tags": segment_tags,
@@ -332,6 +568,20 @@ class AnalysisService:
             if job_id in self._active:
                 raise JobStateConflictError("任务已在排队或分析中")
             self.jobs.queue_for_analysis(job_id)
+            self.jobs.write_progress(
+                job_id,
+                {
+                    "stage": "queued",
+                    "message": "任务已创建，正在等待分析线程",
+                    "percent": 0.0,
+                    "total_chunks": 0,
+                    "completed_chunks": 0,
+                    "processed_frames": 0,
+                    "total_frames": 0,
+                    "current_chunk": None,
+                    "chunks": [],
+                },
+            )
             self._active.add(job_id)
         try:
             self._executor.submit(self._run, job_id)
@@ -344,11 +594,33 @@ class AnalysisService:
     def _run(self, job_id: str) -> None:
         try:
             job = self.jobs.mark_running(job_id)
+            self.jobs.write_progress(
+                job_id,
+                {
+                    "stage": "initializing",
+                    "message": "正在读取视频元数据并加载 YOLO 模型",
+                    "percent": 1.0,
+                    "total_chunks": 0,
+                    "completed_chunks": 0,
+                    "processed_frames": 0,
+                    "total_frames": 0,
+                    "current_chunk": None,
+                    "chunks": [],
+                },
+            )
             video_path = self.jobs.get_input_video(job_id)
             job_dir = self.jobs.job_dir(job_id)
             settings = dict(job["settings"])
             settings["model_path"] = str(self.model_path)
-            report = analyze_video(video_path, job_dir, settings)
+            report = analyze_video(
+                video_path,
+                job_dir,
+                settings,
+                lambda value: self.jobs.write_progress(
+                    job_id,
+                    value,
+                ),
+            )
             if not isinstance(report, dict):
                 raise TypeError("analyze_video 必须返回 JSON 对象")
             report.setdefault("job_id", job_id)
@@ -364,10 +636,33 @@ class AnalysisService:
                 has_audio=video.get("has_audio"),
             )
             self.jobs.mark_completed(job_id, "analysis_report.json")
+            chunks = report.get("analysis_chunks", [])
+            self.jobs.write_progress(
+                job_id,
+                {
+                    "stage": "completed",
+                    "message": "视频分块分析和最终报告已完成",
+                    "percent": 100.0,
+                    "total_chunks": len(chunks),
+                    "completed_chunks": len(chunks),
+                    "processed_frames": report.get("total_sampled_frames", 0),
+                    "total_frames": report.get("total_sampled_frames", 0),
+                    "current_chunk": None,
+                    "chunks": chunks,
+                },
+            )
         except Exception as exc:  # Persist every background failure.
             message = str(exc).strip() or exc.__class__.__name__
             try:
                 self.jobs.mark_failed(job_id, message)
+                previous_progress = self.jobs.read_progress(job_id)
+                previous_progress.update(
+                    {
+                        "stage": "failed",
+                        "message": message,
+                    }
+                )
+                self.jobs.write_progress(job_id, previous_progress)
             except Exception:
                 LOGGER.exception("无法把后台分析失败状态写回任务 %s", job_id)
         finally:

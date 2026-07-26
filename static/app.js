@@ -8,6 +8,8 @@ const state = {
   report: null,
   keyframes: [],
   segments: [],
+  analysisChunks: [],
+  activeKeyframeChunkId: null,
   selectedFile: null,
   previewUrl: null,
   pollTimer: null,
@@ -263,17 +265,66 @@ function initAuth() {
 }
 
 function setView(view) {
-  const history = view === "history";
+  const normalized = ["upload", "history", "analysis"].includes(view)
+    ? view
+    : "upload";
+  const history = normalized === "history";
+  const analysis = normalized === "analysis";
   byId("view-analysis").hidden = history;
   byId("view-history").hidden = !history;
   byId("view-analysis").classList.toggle("active", !history);
   byId("view-history").classList.toggle("active", history);
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    const active = button.dataset.view === view;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-current", active ? "page" : "false");
+  byId("upload-panel").hidden = history || analysis;
+  byId("analysis-panel").hidden = history || !analysis;
+  byId("analysis-agent-panel").hidden = history || !analysis;
+  document.body.dataset.workspaceView = normalized;
+
+  const copy = {
+    upload: {
+      eyebrow: "VIDEO UPLOAD",
+      heading: "上传待分析视频",
+      description: "上传 FPS 录屏并设置分析参数，系统仅接受视频输入。",
+    },
+    analysis: {
+      eyebrow: "ANALYSIS WORKBENCH",
+      heading: "视频分析工作台",
+      description: "查看分块进度、关键帧、候选片段和 Agent 结果。",
+    },
+  };
+  if (!history) {
+    byId("workspace-eyebrow").textContent = copy[normalized].eyebrow;
+    byId("analysis-heading").textContent = copy[normalized].heading;
+    byId("workspace-description").textContent = copy[normalized].description;
+  }
+  document.querySelectorAll("[data-view]").forEach((item) => {
+    const active = item.dataset.view === normalized;
+    item.classList.toggle("active", active);
+    if (active) item.setAttribute("aria-current", "page");
+    else item.removeAttribute("aria-current");
   });
   if (history) loadHistory();
+}
+
+function updateJobNavigation(jobId, editorReady = false) {
+  const analysisLink = byId("nav-analysis");
+  const editorLink = byId("nav-editor");
+  if (!jobId) return;
+  analysisLink.href = `/jobs/${encodeURIComponent(jobId)}/analysis`;
+  analysisLink.classList.remove("disabled");
+  analysisLink.removeAttribute("aria-disabled");
+  analysisLink.removeAttribute("tabindex");
+  analysisLink.removeAttribute("title");
+  editorLink.href = `/jobs/${encodeURIComponent(jobId)}/editor`;
+  editorLink.classList.toggle("disabled", !editorReady);
+  if (editorReady) {
+    editorLink.removeAttribute("aria-disabled");
+    editorLink.removeAttribute("tabindex");
+    editorLink.removeAttribute("title");
+  } else {
+    editorLink.setAttribute("aria-disabled", "true");
+    editorLink.setAttribute("tabindex", "-1");
+    editorLink.title = "视频分析完成后可进入剪辑工作台";
+  }
 }
 
 async function loadUser() {
@@ -603,14 +654,146 @@ function renderSegments(segments) {
   });
 }
 
-function renderKeyframes(keyframes) {
+function renderAnalysisProgress(progress) {
+  const value = progress && typeof progress === "object" ? progress : {};
+  const total = Number(value.total_chunks) || 0;
+  const completed = Number(value.completed_chunks) || 0;
+  const percent = Math.max(0, Math.min(100, Number(value.percent) || 0));
+  const chunks = Array.isArray(value.chunks) ? value.chunks : [];
+  byId("analysis-progress-count").textContent = `${completed} / ${total}`;
+  byId("analysis-progress-percent").textContent = `${Math.round(percent)}%`;
+  byId("analysis-progress-bar").value = percent;
+  byId("analysis-progress-bar").textContent = `${Math.round(percent)}%`;
+  byId("analysis-progress-detail").textContent =
+    value.message || "正在等待新的分块结果。";
+
+  const track = byId("analysis-chunk-track");
+  clearChildren(track);
+  if (!total) {
+    track.append(createElement("span", "chunk-empty", "等待计算视频分块"));
+  } else {
+    for (let index = 0; index < total; index += 1) {
+      const chunk = chunks[index];
+      const current =
+        value.current_chunk && Number(value.current_chunk.index) === index + 1;
+      const status = chunk ? "completed" : current ? "running" : "pending";
+      const item = createElement("span", `analysis-chunk ${status}`);
+      item.setAttribute("role", "listitem");
+      item.textContent = chunk
+        ? `${index + 1} 已完成`
+        : current
+          ? `${index + 1} 分析中`
+          : `${index + 1} 等待`;
+      item.title = chunk
+        ? `${formatDuration(chunk.start)} – ${formatDuration(chunk.end)}`
+        : `分析分块 ${index + 1}`;
+      track.append(item);
+    }
+  }
+
+  const partialSegments = chunks
+    .flatMap((chunk) =>
+      Array.isArray(chunk.provisional_segments)
+        ? chunk.provisional_segments
+        : [],
+    )
+    .slice(-12);
+  const partialKeyframes = chunks
+    .flatMap((chunk) => (Array.isArray(chunk.keyframes) ? chunk.keyframes : []))
+    .slice(-12);
+  byId("partial-results").hidden =
+    partialSegments.length === 0 && partialKeyframes.length === 0;
+
+  const segmentList = byId("partial-segment-list");
+  clearChildren(segmentList);
+  partialSegments.forEach((segment) => {
+    const item = createElement("span", "partial-segment");
+    item.textContent =
+      `${formatDuration(segment.start)}–${formatDuration(segment.end)} 暂定`;
+    segmentList.append(item);
+  });
+
+  const keyframeList = byId("partial-keyframe-list");
+  clearChildren(keyframeList);
+  partialKeyframes.forEach((frame) => {
+    const image = document.createElement("img");
+    image.src = outputUrl(state.currentJobId, frame.image);
+    image.alt =
+      `已分析关键帧 ${frame.id}，时间 ${formatDuration(frame.timestamp)}`;
+    image.loading = "lazy";
+    image.width = 160;
+    image.height = 90;
+    keyframeList.append(image);
+  });
+}
+
+function persistVisibleKeyframeReview() {
+  document.querySelectorAll(".keyframe-card").forEach((card) => {
+    const index = Number(card.dataset.frameIndex);
+    const frame = state.keyframes[index];
+    if (!frame) return;
+    const decision = card.querySelector(".review-decision");
+    const note = card.querySelector(".review-note");
+    if (decision) {
+      frame.decision = decision.value;
+      frame.keep = decision.value === "keep";
+    }
+    if (note) frame.note = note.value.trim();
+  });
+}
+
+function keyframeGroups() {
+  if (state.analysisChunks.length) {
+    return state.analysisChunks
+      .map((chunk) => ({
+        id: chunk.id,
+        label: `${formatDuration(chunk.start)}–${formatDuration(chunk.end)}`,
+        start: Number(chunk.start) || 0,
+        end: Number(chunk.end) || 0,
+        frames: state.keyframes
+          .map((frame, index) => ({ frame, index }))
+          .filter(({ frame }) => frame.chunk_id === chunk.id),
+      }))
+      .filter((group) => group.frames.length > 0);
+  }
+  const grouped = new Map();
+  state.keyframes.forEach((frame, index) => {
+    const id = frame.chunk_id || "all";
+    if (!grouped.has(id)) grouped.set(id, []);
+    grouped.get(id).push({ frame, index });
+  });
+  return [...grouped.entries()].map(([id, frames]) => ({
+    id,
+    label: id === "all" ? "全部关键帧" : id,
+    start: Math.min(...frames.map(({ frame }) => Number(frame.timestamp) || 0)),
+    end: Math.max(...frames.map(({ frame }) => Number(frame.timestamp) || 0)),
+    frames,
+  }));
+}
+
+function renderActiveKeyframeGroup(groups) {
   const container = byId("keyframe-list");
   clearChildren(container);
-  if (!keyframes.length) {
+  const active =
+    groups.find((group) => group.id === state.activeKeyframeChunkId) || groups[0];
+  if (!active) {
     container.append(createElement("p", "empty-copy", "报告中没有关键帧。"));
+    byId("keyframe-chunk-summary").textContent = "";
     return;
   }
-  keyframes.forEach((frame, index) => {
+  state.activeKeyframeChunkId = active.id;
+  byId("keyframe-chunk-summary").textContent =
+    `当前时间段 ${active.label}，显示 ${active.frames.length} 张关键帧。`;
+  byId("keyframe-chunk-tabs")
+    .querySelectorAll("[role='tab']")
+    .forEach((tab) => {
+      const selected = tab.dataset.chunkId === active.id;
+      tab.classList.toggle("active", selected);
+      tab.setAttribute("aria-selected", String(selected));
+      tab.tabIndex = selected ? 0 : -1;
+    });
+
+  active.frames.forEach(({ frame, index }) => {
     const card = createElement("article", "keyframe-card");
     card.dataset.frameIndex = String(index);
     const image = document.createElement("img");
@@ -650,6 +833,36 @@ function renderKeyframes(keyframes) {
   });
 }
 
+function renderKeyframes(keyframes) {
+  const tabs = byId("keyframe-chunk-tabs");
+  clearChildren(tabs);
+  if (!keyframes.length) {
+    renderActiveKeyframeGroup([]);
+    return;
+  }
+  const groups = keyframeGroups();
+  if (!groups.some((group) => group.id === state.activeKeyframeChunkId)) {
+    state.activeKeyframeChunkId = groups[0] ? groups[0].id : null;
+  }
+  groups.forEach((group) => {
+    const button = createElement(
+      "button",
+      "keyframe-chunk-tab",
+      `${group.label} · ${group.frames.length}`,
+    );
+    button.type = "button";
+    button.setAttribute("role", "tab");
+    button.dataset.chunkId = group.id;
+    button.addEventListener("click", () => {
+      persistVisibleKeyframeReview();
+      state.activeKeyframeChunkId = group.id;
+      renderActiveKeyframeGroup(groups);
+    });
+    tabs.append(button);
+  });
+  renderActiveKeyframeGroup(groups);
+}
+
 function renderOutputs(report) {
   const output = report.output || {};
   const files = [
@@ -674,6 +887,9 @@ function renderReport(report) {
   state.report = report;
   state.keyframes = Array.isArray(report.keyframes) ? report.keyframes.map((item) => ({ ...item })) : [];
   state.segments = Array.isArray(report.segments) ? report.segments.map((item) => ({ ...item })) : [];
+  state.analysisChunks = Array.isArray(report.analysis_chunks)
+    ? report.analysis_chunks.map((item) => ({ ...item }))
+    : [];
   const scores = state.keyframes.map((frame) => Number(frame.highlight_score)).filter(Number.isFinite);
   const maxScore = scores.length ? Math.max(...scores) : 0;
   const detected = aggregateDetections(report);
@@ -703,6 +919,7 @@ function renderReport(report) {
     editorLink.href = "/jobs/" + encodeURIComponent(state.currentJobId) + "/editor";
     editorLink.hidden = false;
   }
+  updateJobNavigation(state.currentJobId, true);
 }
 
 async function loadReport(jobId) {
@@ -723,6 +940,7 @@ async function pollJob(jobId) {
     const payload = await api.get(`/api/jobs/${encodeURIComponent(jobId)}`);
     const job = payload.job;
     state.currentJob = job;
+    renderAnalysisProgress(job.progress);
     if (job.status === "completed") {
       logTool("GET", `/api/jobs/${jobId}`, "任务已完成");
       await loadReport(jobId);
@@ -817,6 +1035,13 @@ async function submitAnalysis() {
     logTool("POST", "/api/jobs", `上传 ${file.name}`);
     const created = await api.post("/api/jobs", form);
     state.currentJobId = created.job_id;
+    updateJobNavigation(created.job_id, false);
+    window.history.replaceState(
+      {},
+      "",
+      `/jobs/${encodeURIComponent(created.job_id)}/analysis`,
+    );
+    setView("analysis");
     if (created.project_id) state.currentProjectId = created.project_id;
     logTool("POST", `/api/jobs/${created.job_id}/analyze`, "启动真实 CV 分析");
     await api.post(`/api/jobs/${encodeURIComponent(created.job_id)}/analyze`, {});
@@ -830,14 +1055,8 @@ async function submitAnalysis() {
 }
 
 function collectReview() {
-  return [...document.querySelectorAll(".keyframe-card")].map((card) => {
-    const index = Number(card.dataset.frameIndex);
-    const frame = { ...state.keyframes[index] };
-    frame.decision = card.querySelector(".review-decision").value;
-    frame.keep = frame.decision === "keep";
-    frame.note = card.querySelector(".review-note").value.trim();
-    return frame;
-  });
+  persistVisibleKeyframeReview();
+  return state.keyframes.map((frame) => ({ ...frame }));
 }
 
 async function saveReview() {
@@ -955,13 +1174,18 @@ async function loadHistory() {
 }
 
 async function openHistoryJob(jobId) {
+  window.location.assign(`/jobs/${encodeURIComponent(jobId)}/analysis`);
+}
+
+async function hydrateAnalysisJob(jobId) {
   try {
     const payload = await api.get(`/api/jobs/${encodeURIComponent(jobId)}`);
     state.currentJobId = jobId;
     state.currentJob = payload.job;
     state.toolCalls = [];
-    logTool("GET", `/api/jobs/${jobId}`, "从历史记录打开任务");
-    setView("analysis");
+    updateJobNavigation(jobId, payload.job.status === "completed");
+    renderAnalysisProgress(payload.job.progress);
+    logTool("GET", `/api/jobs/${jobId}`, "从任务链接恢复分析工作台");
     if (payload.job.status === "completed") {
       await loadReport(jobId);
     } else if (payload.job.status === "failed") {
@@ -970,6 +1194,7 @@ async function openHistoryJob(jobId) {
       await pollJob(jobId);
     }
   } catch (error) {
+    setResultState("error", "failed", error.message);
     showToast(error.message, "error");
   }
 }
@@ -993,8 +1218,13 @@ async function deleteHistoryJob(jobId) {
 }
 
 function initApp() {
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    button.addEventListener("click", () => setView(button.dataset.view));
+  document.querySelectorAll("[data-view]").forEach((item) => {
+    item.addEventListener("click", (event) => {
+      if (item.getAttribute("aria-disabled") === "true") {
+        event.preventDefault();
+        showToast(item.title || "该工作台当前不可用。", "info");
+      }
+    });
   });
   byId("logout-button").addEventListener("click", logout);
   byId("project-name").addEventListener("input", () => {
@@ -1025,6 +1255,12 @@ function initApp() {
   byId("show-report-button").addEventListener("click", () => showRuleOutput("report"));
   initUpload();
   loadUser();
+  const initialView = document.body.dataset.initialView || "upload";
+  const initialJobId = document.body.dataset.jobId || "";
+  setView(initialView);
+  if (initialView === "analysis" && initialJobId) {
+    hydrateAnalysisJob(initialJobId);
+  }
 }
 
 document.addEventListener("DOMContentLoaded", () => {

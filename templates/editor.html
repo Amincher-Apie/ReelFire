@@ -24,6 +24,25 @@
       </span>
     </a>
 
+    <nav class="header-nav editor-primary-nav" aria-label="主导航">
+      <a class="nav-button" href="/">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M5 14v5h14v-5"/></svg>
+        上传
+      </a>
+      <a class="nav-button" href="/history">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>
+        历史记录
+      </a>
+      <a class="nav-button" href="/jobs/{{ job_id }}/analysis">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        分析工作台
+      </a>
+      <a class="nav-button active" href="/jobs/{{ job_id }}/editor" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 18h16M8 3v6m8 6v6"/><rect x="7" y="9" width="10" height="6" rx="1"/></svg>
+        剪辑工作台
+      </a>
+    </nav>
+
     <div class="editor-task-info" id="task-info">
       <span class="task-job-id" id="header-job-id">—</span>
       <span class="task-meta" id="header-meta"></span>
@@ -39,7 +58,6 @@
 
       <div id="user-info" class="user-menu" hidden>
         <span id="user-name" class="user-badge"></span>
-        <a href="/" class="button ghost small">返回工作台</a>
       </div>
       <a href="/login" id="login-link" class="button primary small">登录</a>
     </div>
@@ -67,7 +85,7 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
       <h3>没有精彩片段</h3>
       <p>该任务未生成精彩片段，请检查分析参数或尝试其他视频。</p>
-      <a href="/" class="button secondary">返回工作台</a>
+      <a href="/jobs/{{ job_id }}/analysis" class="button secondary">返回分析工作台</a>
     </div>
 
     <!-- 主内容区 -->
@@ -263,7 +281,7 @@
         <button id="save-review-button" class="button secondary" type="button">保存审核</button>
         <button id="rough-cut-button" class="button primary" type="button">生成粗剪视频</button>
         <button id="view-report-button" class="button ghost" type="button">查看 JSON 报告</button>
-        <a id="back-workbench-link" href="/" class="button ghost">返回工作台</a>
+        <a id="back-workbench-link" href="/jobs/{{ job_id }}/analysis" class="button ghost">返回分析工作台</a>
       </footer>
     </div>
 

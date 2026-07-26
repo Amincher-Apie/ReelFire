@@ -1024,3 +1024,61 @@ Editor 评论仍只来自 `agent_report.json.segment_comments[]` 或带可验证
 12. 尚未实现或未测试的接口必须明确标注“规划中”。
 13. 不得把规则回退、前端拼接或 Mock 数据写成真实 Agent 结果。
 14. 不得把通用 YOLO 检测结果写成未被模型真实检测到的 FPS 专用事件。
+
+---
+
+## 16. 流式分块分析与进度契约
+
+任务创建参数在原有字段之外支持：
+
+| 字段 | 默认值 | 范围 | 说明 |
+|---|---:|---:|---|
+| `chunk_duration` | `60.0` | 5–1800 秒 | 逻辑分析分块长度，不生成物理切片文件 |
+| `keyframes_per_chunk` | `4` | 1–24 | 每个分块最多保留的审核关键帧 |
+| `yolo_batch_size` | `8` | 1–64 | 单次 YOLO 推理的采样帧微批大小 |
+
+`GET /api/jobs/{job_id}` 的 `job.progress` 返回：
+
+```json
+{
+  "stage": "detecting",
+  "message": "已完成 2/5 个分析分块",
+  "percent": 39.0,
+  "total_chunks": 5,
+  "completed_chunks": 2,
+  "processed_frames": 120,
+  "total_frames": 300,
+  "current_chunk": {
+    "id": "chunk_0003",
+    "index": 3,
+    "start": 120.0,
+    "end": 180.0
+  },
+  "chunks": []
+}
+```
+
+`stage` 依次为：
+
+```text
+queued → initializing → sampling → detecting → finalizing → completed
+                                                    └──────→ failed
+```
+
+每个已完成分块包含时间范围、采样数量、已落盘关键帧和暂定片段。暂定片段带
+`provisional=true`，仅用于分析过程反馈；最终 `analysis_report.json` 中的
+`segments[]` 仍由全部采样元数据统一归并，且 `provisional=false`。
+
+进度单独原子写入 `analysis_progress.json`。最终报告继续写入
+`analysis_report.json`，现有 Editor、Agent 与粗剪接口无需读取中间文件。
+
+最终报告新增：
+
+- `analysis_mode="streaming_chunks"`；
+- `chunk_duration`；
+- `analysis_chunks[]`；
+- 每个关键帧的 `chunk_id` 与 `chunk_index`。
+
+视频帧按分块保存在内存中；已完成分块释放帧数组，只保留检测元数据和落盘
+关键帧。因此帧图像内存上限由单个分块和 YOLO 微批大小决定，不再随整段视频
+时长线性增长。

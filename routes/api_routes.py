@@ -132,6 +132,27 @@ def _parse_job_settings(form: dict[str, Any]) -> dict[str, Any]:
             minimum=0.1,
             maximum=86400.0,
         ),
+        "chunk_duration": _number(
+            form,
+            "chunk_duration",
+            defaults["chunk_duration"],
+            minimum=5.0,
+            maximum=1800.0,
+        ),
+        "keyframes_per_chunk": _integer(
+            form,
+            "keyframes_per_chunk",
+            defaults["keyframes_per_chunk"],
+            minimum=1,
+            maximum=24,
+        ),
+        "yolo_batch_size": _integer(
+            form,
+            "yolo_batch_size",
+            defaults["yolo_batch_size"],
+            minimum=1,
+            maximum=64,
+        ),
         "max_keyframes": _integer(
             form,
             "max_keyframes",

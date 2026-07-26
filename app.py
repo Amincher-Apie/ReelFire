@@ -170,7 +170,29 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.get("/")
     def index():
-        return render_template("index.html")
+        return render_template(
+            "index.html",
+            initial_view="upload",
+            job_id=None,
+        )
+
+    @app.get("/history")
+    def history_page():
+        return render_template(
+            "index.html",
+            initial_view="history",
+            job_id=None,
+        )
+
+    @app.get("/jobs/<job_id>/analysis")
+    def analysis_page(job_id: str):
+        require_job_access(job_id)
+        jobs.get_job(job_id)
+        return render_template(
+            "index.html",
+            initial_view="analysis",
+            job_id=job_id,
+        )
 
     @app.get("/login")
     def login_page():

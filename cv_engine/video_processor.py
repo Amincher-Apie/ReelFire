@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import json
+import math
 import shutil
 import subprocess
 
@@ -9,8 +10,21 @@ class VideoProcessor:
         pass
 
     def sample_video(self, video_path, interval=1):
+        """Compatibility helper that materializes all sampled frames."""
+
         frames = []
         timestamps = []
+        for chunk in self.iter_sample_chunks(
+            video_path,
+            interval=interval,
+            chunk_duration=float("inf"),
+        ):
+            frames.extend(chunk["frames"])
+            timestamps.extend(chunk["timestamps"])
+        return frames, timestamps
+
+    def iter_sample_chunks(self, video_path, interval=1, chunk_duration=60):
+        """Yield bounded logical time chunks without retaining the whole video."""
 
         cap = cv2.VideoCapture(str(video_path))
         if not cap.isOpened():
@@ -26,17 +40,64 @@ class VideoProcessor:
         if interval <= 0:
             cap.release()
             raise ValueError("Sample interval must be greater than zero")
+        if chunk_duration <= 0:
+            cap.release()
+            raise ValueError("Chunk duration must be greater than zero")
+
         sample_interval_frames = max(1, int(round(fps * interval)))
+        duration = frame_count / fps
+        finite_chunk_duration = (
+            duration if not math.isfinite(chunk_duration) else float(chunk_duration)
+        )
+        total_chunks = max(1, int(math.ceil(duration / finite_chunk_duration)))
 
-        for i in range(0, frame_count, sample_interval_frames):
-            cap.set(cv2.CAP_PROP_POS_FRAMES, i)
-            ret, frame = cap.read()
-            if ret:
-                frames.append(frame)
-                timestamps.append(i / fps)
+        try:
+            frames = []
+            timestamps = []
+            chunk_index = 0
+            chunk_start = 0.0
+            chunk_end = min(duration, finite_chunk_duration)
 
-        cap.release()
-        return frames, timestamps
+            for source_frame_index in range(
+                0,
+                frame_count,
+                sample_interval_frames,
+            ):
+                timestamp = source_frame_index / fps
+                while timestamp >= chunk_end and chunk_index < total_chunks - 1:
+                    yield {
+                        "index": chunk_index,
+                        "start": round(chunk_start, 3),
+                        "end": round(chunk_end, 3),
+                        "frames": frames,
+                        "timestamps": timestamps,
+                        "total_chunks": total_chunks,
+                    }
+                    chunk_index += 1
+                    chunk_start = chunk_index * finite_chunk_duration
+                    chunk_end = min(
+                        duration,
+                        (chunk_index + 1) * finite_chunk_duration,
+                    )
+                    frames = []
+                    timestamps = []
+
+                cap.set(cv2.CAP_PROP_POS_FRAMES, source_frame_index)
+                ok, frame = cap.read()
+                if ok:
+                    frames.append(frame)
+                    timestamps.append(timestamp)
+
+            yield {
+                "index": chunk_index,
+                "start": round(chunk_start, 3),
+                "end": round(duration, 3),
+                "frames": frames,
+                "timestamps": timestamps,
+                "total_chunks": total_chunks,
+            }
+        finally:
+            cap.release()
 
     def has_audio_track(self, video_path):
         try:

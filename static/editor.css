@@ -9,9 +9,13 @@
 
 .editor-header {
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto auto minmax(160px, 1fr) auto;
   align-items: center;
   gap: 14px;
+}
+
+.editor-primary-nav {
+  justify-self: start;
 }
 
 .editor-task-info {
@@ -1255,6 +1259,23 @@
 }
 
 @media (max-width: 900px) {
+  .editor-header {
+    grid-template-columns: 1fr auto;
+  }
+
+  .editor-primary-nav {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: 100%;
+  }
+
+  .editor-task-info {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    justify-self: stretch;
+    justify-content: center;
+  }
+
   .editor-content {
     grid-template-columns: 1fr;
     grid-template-areas:

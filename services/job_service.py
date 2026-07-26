@@ -153,6 +153,7 @@ class JobService:
         job = self.get_job(job_id)
         target = self.job_dir(job_id)
         job["report_available"] = (target / "analysis_report.json").is_file()
+        job["progress"] = self.read_progress(job_id)
         result_dir = target / "result"
         job["result_files"] = [
             path.relative_to(target).as_posix()
@@ -239,6 +240,40 @@ class JobService:
 
     def report_path(self, job_id: str) -> Path:
         return self.job_dir(job_id) / "analysis_report.json"
+
+    def progress_path(self, job_id: str) -> Path:
+        return self.job_dir(job_id) / "analysis_progress.json"
+
+    def read_progress(self, job_id: str) -> dict[str, Any]:
+        job = self.get_job(job_id)
+        path = self.progress_path(job_id)
+        if path.is_file():
+            with self._lock:
+                return self._read_json(path, "analysis_progress.json")
+        status = str(job.get("status", "created"))
+        return {
+            "stage": status,
+            "message": "等待分析" if status == "created" else "",
+            "percent": 100.0 if status == "completed" else 0.0,
+            "total_chunks": 0,
+            "completed_chunks": 0,
+            "processed_frames": 0,
+            "total_frames": 0,
+            "current_chunk": None,
+            "chunks": [],
+            "updated_at": job.get("updated_at"),
+        }
+
+    def write_progress(
+        self,
+        job_id: str,
+        progress: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        self.get_job(job_id)
+        value = dict(progress)
+        value["updated_at"] = iso_now()
+        self._write_json(self.progress_path(job_id), value)
+        return value
 
     def read_report(self, job_id: str) -> dict[str, Any]:
         self.get_job(job_id)

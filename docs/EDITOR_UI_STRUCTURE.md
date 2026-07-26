@@ -12,6 +12,16 @@
 /jobs/{job_id}/editor
 ```
 
+全局导航固定包含四个入口：
+
+1. 上传：`/`
+2. 历史记录：`/history`
+3. 分析工作台：`/jobs/{job_id}/analysis`
+4. 剪辑工作台：`/jobs/{job_id}/editor`
+
+Editor 的所有“返回分析工作台”操作必须保留当前 `job_id`，不得返回无任务
+状态的首页。
+
 唯一数据源：
 
 ```text

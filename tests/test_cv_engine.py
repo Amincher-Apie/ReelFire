@@ -14,6 +14,40 @@ from cv_engine.highlight_scorer import HighlightScorer
 from services.analysis_service import analyze_video
 
 class TestVideoProcessor(unittest.TestCase):
+    def test_iter_sample_chunks_bounds_frames_by_time_window(self):
+        import cv2
+        import numpy as np
+
+        with tempfile.TemporaryDirectory() as temporary:
+            video_path = Path(temporary) / "chunks.avi"
+            writer = cv2.VideoWriter(
+                str(video_path),
+                cv2.VideoWriter_fourcc(*"MJPG"),
+                2.0,
+                (16, 16),
+            )
+            self.assertTrue(writer.isOpened())
+            for value in range(12):
+                writer.write(
+                    np.full((16, 16, 3), value * 10, dtype=np.uint8)
+                )
+            writer.release()
+
+            chunks = list(
+                VideoProcessor().iter_sample_chunks(
+                    video_path,
+                    interval=1.0,
+                    chunk_duration=2.0,
+                )
+            )
+
+        self.assertEqual(len(chunks), 3)
+        self.assertTrue(all(len(chunk["frames"]) <= 2 for chunk in chunks))
+        self.assertEqual(
+            [chunk["index"] for chunk in chunks],
+            [0, 1, 2],
+        )
+
     def test_calculate_scene_change(self):
         processor = VideoProcessor()
 
@@ -49,6 +83,28 @@ class TestYoloDetector(unittest.TestCase):
         if test_frame is not None:
             results = detector.detect(test_frame)
             self.assertIsInstance(results, list)
+
+    def test_detect_frames_uses_bounded_micro_batches(self):
+        class FakeModel:
+            names = {0: "object"}
+
+            def __init__(self):
+                self.batch_sizes = []
+
+            def predict(self, *, source, **_kwargs):
+                self.batch_sizes.append(len(source))
+                return list(source)
+
+        detector = YoloDetector.__new__(YoloDetector)
+        detector.model = FakeModel()
+        detector.confidence_threshold = 0.35
+        detector.batch_size = 2
+        detector._parse_result = lambda result: [result]
+
+        results = detector.detect_frames(["a", "b", "c", "d", "e"])
+
+        self.assertEqual(detector.model.batch_sizes, [2, 2, 1])
+        self.assertEqual(results, [["a"], ["b"], ["c"], ["d"], ["e"]])
 
 class TestHighlightScorer(unittest.TestCase):
     def test_calculate_object_score(self):
@@ -204,10 +260,32 @@ class TestAnalysisServiceMultiSegment(unittest.TestCase):
 
         class FakeDetector:
             def __init__(self, *_args, **_kwargs):
-                pass
+                self.offset = 0
 
-            def detect_frames(self, _frames):
-                return detections
+            def detect_frames(self, chunk_frames):
+                start = self.offset
+                self.offset += len(chunk_frames)
+                return detections[start:self.offset]
+
+        chunks = [
+            {
+                'index': 0,
+                'start': 0.0,
+                'end': 15.0,
+                'frames': frames[:15],
+                'timestamps': timestamps[:15],
+                'total_chunks': 2,
+            },
+            {
+                'index': 1,
+                'start': 15.0,
+                'end': 30.0,
+                'frames': frames[15:],
+                'timestamps': timestamps[15:],
+                'total_chunks': 2,
+            },
+        ]
+        progress_updates = []
 
         with tempfile.TemporaryDirectory() as temporary:
             job_dir = Path(temporary)
@@ -222,21 +300,26 @@ class TestAnalysisServiceMultiSegment(unittest.TestCase):
                     },
                 ),
                 patch(
-                    'cv_engine.video_processor.VideoProcessor.sample_video',
-                    return_value=(frames, timestamps),
+                    'cv_engine.video_processor.VideoProcessor.iter_sample_chunks',
+                    return_value=iter(chunks),
                 ),
                 patch('cv_engine.yolo_detector.YoloDetector', FakeDetector),
                 patch('cv2.imwrite', return_value=True),
-                patch('services.analysis_service._save_contact_sheet', return_value=False),
+                patch(
+                    'services.analysis_service._save_contact_sheet_from_keyframes',
+                    return_value=False,
+                ),
             ):
                 report = analyze_video(
                     Path(temporary) / 'input.mp4',
                     job_dir,
                     {
                         'model_path': str(Path(temporary) / 'model.pt'),
-                        'max_keyframes': 6,
+                        'keyframes_per_chunk': 3,
+                        'chunk_duration': 15.0,
                         'min_keyframe_gap': 2.0,
                     },
+                    progress_callback=progress_updates.append,
                 )
 
         segments = report['segments']
@@ -252,6 +335,15 @@ class TestAnalysisServiceMultiSegment(unittest.TestCase):
         self.assertEqual(
             report['recommended_clip']['segment_count'],
             len(segments),
+        )
+        self.assertEqual(report['analysis_mode'], 'streaming_chunks')
+        self.assertEqual(len(report['analysis_chunks']), 2)
+        self.assertEqual(
+            [item['stage'] for item in progress_updates][-1],
+            'finalizing',
+        )
+        self.assertTrue(
+            all('chunk_id' in frame for frame in report['keyframes'])
         )
 
 

@@ -62,12 +62,14 @@ class ApiTestCase(unittest.TestCase):
 
     def test_frontend_and_favicon_are_available(self) -> None:
         page = self.client.get("/")
+        history_page = self.client.get("/history")
         anonymous = self.app.test_client()
         login = anonymous.get("/login")
         favicon = self.client.get("/favicon.ico")
         html = page.get_data(as_text=True)
         login_html = login.get_data(as_text=True)
         self.assertEqual(page.status_code, 200)
+        self.assertEqual(history_page.status_code, 200)
         self.assertEqual(login.status_code, 200)
         self.assertEqual(self.client.get("/login").status_code, 302)
         self.assertEqual(
@@ -84,6 +86,13 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(html.count('id="app"'), 1)
         self.assertEqual(html.count('id="agent-provider-badge"'), 1)
         self.assertEqual(html.count('id="agent-run-note"'), 1)
+        self.assertEqual(html.count('id="nav-upload"'), 1)
+        self.assertEqual(html.count('id="nav-history"'), 1)
+        self.assertEqual(html.count('id="nav-analysis"'), 1)
+        self.assertEqual(html.count('id="nav-editor"'), 1)
+        self.assertEqual(html.count('id="analysis-progress-panel"'), 1)
+        self.assertEqual(html.count('id="keyframe-chunk-tabs"'), 1)
+        self.assertNotIn('class="media-tabs"', html)
         self.assertEqual(html.count("app.js"), 1)
         self.assertNotIn("onclick=", html)
         self.assertEqual(login_html.lower().count("<!doctype html>"), 1)
@@ -113,9 +122,12 @@ class ApiTestCase(unittest.TestCase):
     def test_editor_page_has_one_semantic_document(self) -> None:
         job_id = self.create_job()
         page = self.client.get(f"/jobs/{job_id}/editor")
+        analysis_page = self.client.get(f"/jobs/{job_id}/analysis")
         html = page.get_data(as_text=True)
+        analysis_html = analysis_page.get_data(as_text=True)
 
         self.assertEqual(page.status_code, 200)
+        self.assertEqual(analysis_page.status_code, 200)
         self.assertEqual(html.lower().count("<!doctype html>"), 1)
         self.assertEqual(html.lower().count("<html"), 1)
         self.assertEqual(html.count('id="highlight-list"'), 1)
@@ -132,6 +144,10 @@ class ApiTestCase(unittest.TestCase):
         self.assertIn("YOLO 精彩片段区间", html)
         self.assertIn("剪辑片段顺序", html)
         self.assertIn("左移、右移按钮", html)
+        self.assertIn(f'/jobs/{job_id}/analysis', html)
+        self.assertIn('剪辑工作台', html)
+        self.assertIn(f'data-job-id="{job_id}"', analysis_html)
+        self.assertIn('data-initial-view="analysis"', analysis_html)
         self.assertEqual(html.count("editor.js"), 1)
         self.assertNotIn("onclick=", html)
 
@@ -238,10 +254,14 @@ class ApiTestCase(unittest.TestCase):
         stored = json.loads((job_dir / "job.json").read_text(encoding="utf-8"))
         self.assertEqual(stored["status"], "created")
         self.assertEqual(stored["settings"]["output_ratio"], "16:9")
+        self.assertEqual(stored["settings"]["chunk_duration"], 60.0)
+        self.assertEqual(stored["settings"]["keyframes_per_chunk"], 4)
+        self.assertEqual(stored["settings"]["yolo_batch_size"], 8)
 
         detail = self.client.get(f"/api/jobs/{job_id}")
         listing = self.client.get("/api/jobs")
         self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.get_json()["job"]["progress"]["stage"], "created")
         self.assertEqual(listing.status_code, 200)
         self.assertEqual(listing.get_json()["jobs"], [])
 
