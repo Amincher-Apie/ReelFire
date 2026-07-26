@@ -140,6 +140,8 @@ class DifyProviderTests(unittest.TestCase):
             request.get_header("Authorization"),
             "Bearer test-placeholder-key",
         )
+        self.assertEqual(request.get_header("Accept"), "application/json")
+        self.assertIn("ReelFire/1.0", request.get_header("User-agent"))
         self.assertEqual(result["mode"], "advanced-chat")
 
 

@@ -108,7 +108,14 @@ class DifyChatClient:
             )
         request = Request(
             self.api_endpoint("info"),
-            headers={"Authorization": f"Bearer {self.api_key}"},
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Accept": "application/json",
+                "User-Agent": (
+                    "ReelFire/1.0 "
+                    "(+https://github.com/Amincher-Apie/ReelFire)"
+                ),
+            },
             method="GET",
         )
         try:
