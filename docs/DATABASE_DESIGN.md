@@ -216,7 +216,7 @@ outputs/20260724_160000_ab12cd34/input/demo.mp4
 不得保存：
 
 ```text
-D:\Workspace\ynu_ai_training\ReelFire\outputs\...
+<local-repository>/outputs/...
 ```
 
 所有路径在访问前仍需执行目录边界检查。
