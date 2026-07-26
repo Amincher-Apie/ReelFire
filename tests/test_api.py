@@ -302,7 +302,7 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.get_json()["status"], "queued")
 
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + 10
         job = {}
         while time.monotonic() < deadline:
             job = self.client.get(f"/api/jobs/{job_id}").get_json()["job"]

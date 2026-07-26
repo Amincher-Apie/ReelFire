@@ -420,13 +420,19 @@ source_keyframes
 - 报告尚未生成：`409`；
 - 字段或片段边界错误：`400`。
 
-当前该接口主要完成文件报告写回；内容级三态审核历史落入 SQLite 属于后续规划。
+项目型任务只要提交 `status`，对应 SQLite 审核记录就保存审核完成后的
+完整、严格校验且按 `order` 排序的 `segments` 快照。请求提交
+`segments` 时使用新值；未提交时快照来自当前分析报告。
 
 ### 5.7 `POST /api/jobs/<job_id>/rough-cut`
 
-当前实现为单片段粗剪兼容接口。
+项目型任务使用最新一条 `approved` 审核记录中的完整 `segments` 快照，
+按 `order` 拼接为一个 MP4。不存在审核、最新审核不是 `approved` 或
+审核快照为空时返回 `409`，且不会退回 `recommended_clip`。
 
-请求体可省略，也可覆盖：
+请求体可省略。`output_ratio` 可覆盖输出比例；`start_time` 和
+`end_time` 仅为 legacy 单片段兼容字段，项目型任务不会使用它们绕过
+审核快照：
 
 ```text
 start_time
@@ -436,15 +442,20 @@ output_ratio
 
 只接受 `completed` 且已有报告的任务。
 
-成功生成 MP4 后返回 `200`，并把输出路径写回任务与报告。
+Legacy 任务优先导出报告中的非空 `segments`；没有片段时继续使用
+`recommended_clip` 单片段路径。比例优先级依次为请求、
+`recommended_clip`、任务设置和默认 `16:9`。
+
+成功生成 MP4 后返回 `200`，并把输出路径写回任务与报告。响应和报告
+输出同时包含 `segment_count`、`segment_ids` 和 `review_id`；legacy
+任务的 `review_id` 为 `null`。FFmpeg 先写同目录临时文件，确认非空后
+再原子替换，失败不会破坏已有粗剪。
 
 错误：
 
-- 状态或报告冲突：`409`；
+- 状态、报告或审核门禁冲突：`409`；
 - 参数错误：`400`；
 - FFmpeg 不可用：`501`。
-
-多片段按审核顺序拼接属于后续规划。
 
 ### 5.8 `GET /api/jobs/<job_id>/report`
 
@@ -836,8 +847,9 @@ rejected
 - 内容级三态保存到 SQLite `reviews.status`；
 - `reviews.job_row_id` 指向内部 `jobs.id`，API 路径仍使用公开 `job_id`；
 - 每次携带 `status` 的审核都新增历史记录，不覆盖旧记录；
-- 提交的片段和关键帧分别序列化到 `segments_json` 和
-  `keyframes_json`，未提交时数据库保存 `null`；
+- 每条带 `status` 的项目型审核都把审核完成后的完整片段快照序列化到
+  `segments_json`；请求未提交片段时从当前报告严格校验后保存；
+- 提交的关键帧序列化到 `keyframes_json`，未提交时保存 `null`；
 - `PATCH /review` 继续更新 `analysis_report.json`，成功响应中的
   `report` 字段保持不变；
 - Agent 不得更新或覆盖人工 `reviews` 记录。
@@ -941,19 +953,20 @@ Editor 评论仍只来自 `agent_report.json.segment_comments[]` 或带可验证
 
 ---
 
-## 13. 规划中：编辑结果写回与多片段导出
+## 13. 编辑结果写回与多片段导出
 
-后续能力包括：
+当前已实现：
 
 - 修改片段边界；
 - 修改片段顺序；
 - 内容级三态审核；
 - 刷新和历史重开后恢复编辑结果；
 - 按已审核片段生成多片段粗剪；
+
+后续能力包括：
+
 - 输出统计 JSON；
 - 导出审核包和 HTML/PDF 报告。
-
-这些能力未完成代码和测试前，不得写成当前接口已经可用。
 
 ---
 

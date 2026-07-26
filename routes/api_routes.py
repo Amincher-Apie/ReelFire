@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from flask import Blueprint, current_app, jsonify, request, url_for
 from werkzeug.datastructures import FileStorage
@@ -24,7 +26,11 @@ from services.editor_input_validation import (
     adapt_legacy_segments,
     validate_editor_segments,
 )
-from services.ffmpeg_service import create_rough_cut, is_ffmpeg_available
+from services.ffmpeg_service import (
+    create_multi_segment_rough_cut,
+    create_rough_cut,
+    is_ffmpeg_available,
+)
 from services.file_service import FileService, FileValidationError
 from services.job_access_service import (
     get_job_list_visibility,
@@ -587,17 +593,23 @@ def review_job(job_id: str):
             raise ReviewPersistenceUnavailableError(
                 "旧文件任务无法持久化 SQLite 审核记录"
             )
+        if "segments" in payload:
+            segments_snapshot = changes["segments"]
+        else:
+            try:
+                segments_snapshot = validate_editor_segments(
+                    report.get("segments", []),
+                    duration,
+                )
+            except EditorSegmentValidationError as exc:
+                raise ReviewValidationError(str(exc)) from exc
         _, updated = create_review(
             public_job_id=job_id,
             reviewer_id=int(access["user_id"]),
             status=status,
             labels=labels,
             note=note,
-            segments=(
-                changes.get("segments")
-                if "segments" in payload
-                else None
-            ),
+            segments=segments_snapshot,
             keyframes=(
                 changes.get("keyframes")
                 if "keyframes" in payload
@@ -687,7 +699,7 @@ def get_agent_call_detail(agent_call_id: str):
 @api_bp.post("/jobs/<job_id>/rough-cut")
 def rough_cut(job_id: str):
     jobs, _, _ = _services()
-    require_job_access(job_id)
+    access = require_job_access(job_id)
     job = jobs.get_job(job_id)
     if job.get("status") != "completed":
         raise JobStateConflictError("只有 completed 任务可以生成粗剪视频")
@@ -695,49 +707,149 @@ def rough_cut(job_id: str):
         raise JobStateConflictError("分析报告尚未生成，不能生成粗剪视频")
     report = jobs.read_report(job_id)
     payload = _json_object(optional=True)
+    unexpected = set(payload) - {"start_time", "end_time", "output_ratio"}
+    if unexpected:
+        raise FileValidationError(
+            f"不支持的粗剪字段：{', '.join(sorted(unexpected))}"
+        )
     recommended = report.get("recommended_clip")
-    if not isinstance(recommended, dict):
-        raise FileValidationError("分析报告中缺少 recommended_clip")
-    clip_source = dict(recommended)
-    for field in ("start_time", "end_time", "output_ratio"):
-        if field in payload:
-            clip_source[field] = payload[field]
-    clip = _validate_clip(clip_source, _duration(job, report))
+    recommended = recommended if isinstance(recommended, dict) else {}
+    job_settings = job.get("settings")
+    job_settings = job_settings if isinstance(job_settings, dict) else {}
+    ratio_value = payload.get(
+        "output_ratio",
+        recommended.get(
+            "output_ratio",
+            job_settings.get("output_ratio", "16:9"),
+        ),
+    )
+    ratio = str(ratio_value).strip()
+    if ratio not in current_app.config["ALLOWED_OUTPUT_RATIOS"]:
+        raise FileValidationError("output_ratio 仅支持 16:9、9:16 或 1:1")
+    duration = _duration(job, report)
+    review_id: int | None = None
+    clip: dict[str, Any] | None = None
+    if access["is_legacy"]:
+        raw_segments = report.get("segments", [])
+        if raw_segments:
+            try:
+                segments = adapt_legacy_segments(raw_segments, duration)
+            except EditorSegmentValidationError as exc:
+                raise FileValidationError(str(exc)) from exc
+        else:
+            clip_source = dict(recommended)
+            for field in ("start_time", "end_time"):
+                if field in payload:
+                    clip_source[field] = payload[field]
+            clip_source["output_ratio"] = ratio
+            clip = _validate_clip(clip_source, duration)
+            segments = []
+    else:
+        latest_review = get_latest_review(job_id)
+        if latest_review is None:
+            raise JobStateConflictError("尚无审核记录，不能生成粗剪视频")
+        if latest_review["status"] != "approved":
+            raise JobStateConflictError("最新审核必须为 approved 才能生成粗剪视频")
+        try:
+            segments = validate_editor_segments(
+                latest_review["segments"],
+                duration,
+            )
+        except EditorSegmentValidationError as exc:
+            raise FileValidationError(f"审核片段快照无效：{exc}") from exc
+        if not segments:
+            raise JobStateConflictError("最新审核没有可导出的片段")
+        review_id = int(latest_review["id"])
     if not is_ffmpeg_available():
         return jsonify(ok=False, error="FFmpeg 不可用，无法生成粗剪视频"), 501
 
     job_dir = jobs.job_dir(job_id)
-    ratio_label = clip["output_ratio"].replace(":", "x")
+    ratio_label = ratio.replace(":", "x")
     output_path = job_dir / "result" / f"rough_cut_{ratio_label}.mp4"
+    staging_path = output_path.with_name(
+        f".{output_path.stem}.{uuid4().hex}.staged{output_path.suffix}"
+    )
     try:
-        result_path = create_rough_cut(
-            jobs.get_input_video(job_id),
-            output_path,
-            clip["start_time"],
-            clip["end_time"],
-            clip["output_ratio"],
-        )
+        if segments:
+            result_path = create_multi_segment_rough_cut(
+                jobs.get_input_video(job_id),
+                staging_path,
+                segments,
+                ratio,
+            )
+            segment_ids = [str(segment["id"]) for segment in segments]
+            segment_count = len(segments)
+        else:
+            if clip is None:
+                raise RuntimeError("缺少 legacy 单片段粗剪参数")
+            result_path = create_rough_cut(
+                jobs.get_input_video(job_id),
+                staging_path,
+                clip["start_time"],
+                clip["end_time"],
+                ratio,
+            )
+            segment_ids = ["recommended_clip"]
+            segment_count = 1
+        result_path = Path(result_path).resolve()
+        result_dir = (job_dir / "result").resolve()
+        if (
+            result_path != staging_path.resolve()
+            or result_path.parent != result_dir
+            or not result_path.is_file()
+        ):
+            raise RuntimeError("粗剪服务未生成有效输出文件")
     except NotImplementedError as exc:
+        staging_path.unlink(missing_ok=True)
         return jsonify(ok=False, error=str(exc)), 501
-    result_path = Path(result_path).resolve()
-    result_dir = (job_dir / "result").resolve()
-    if result_path.parent != result_dir or not result_path.is_file():
-        raise RuntimeError("粗剪服务未生成有效输出文件")
-    relative = result_path.relative_to(job_dir).as_posix()
-    jobs.update_job(job_id, rough_cut_file=relative)
+    except Exception:
+        staging_path.unlink(missing_ok=True)
+        raise
+    relative = output_path.relative_to(job_dir).as_posix()
+
     def update_output(current: dict[str, Any]) -> dict[str, Any]:
         output = current.get("output")
         if not isinstance(output, dict):
             output = {}
-        output = {**output, "video": relative, "ratio": clip["output_ratio"]}
-        return {
-            **current,
-            "recommended_clip": clip,
-            "output": output,
+        output = {
+            **output,
+            "video": relative,
+            "ratio": ratio,
+            "segment_count": segment_count,
+            "segment_ids": segment_ids,
+            "review_id": review_id,
         }
+        updated = {**current, "output": output}
+        if clip is not None:
+            updated["recommended_clip"] = clip
+        return updated
 
-    jobs.update_report(job_id, update_output)
-    return jsonify(ok=True, job_id=job_id, rough_cut_file=relative)
+    report_updated = False
+    job_updated = False
+    previous_rough_cut = job.get("rough_cut_file")
+    try:
+        jobs.update_report(job_id, update_output)
+        report_updated = True
+        jobs.update_job(job_id, rough_cut_file=relative)
+        job_updated = True
+        os.replace(result_path, output_path)
+    except Exception:
+        if job_updated:
+            jobs.update_job(job_id, rough_cut_file=previous_rough_cut)
+        if report_updated:
+            jobs.write_report(job_id, report)
+        raise
+    finally:
+        staging_path.unlink(missing_ok=True)
+
+    return jsonify(
+        ok=True,
+        job_id=job_id,
+        rough_cut_file=relative,
+        segment_count=segment_count,
+        segment_ids=segment_ids,
+        review_id=review_id,
+    )
 
 
 @api_bp.get("/jobs/<job_id>/report")
