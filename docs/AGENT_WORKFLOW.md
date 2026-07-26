@@ -91,7 +91,7 @@ Agent 只给出审核建议。最终审核状态由人工或后端审核接口�
 | 提供方 | 建议用途 | 配置方式 | 失败处理 |
 |---|---|---|---|
 | `ollama` | 默认本地推理，使用已安装的 Qwen3 | `OLLAMA_BASE_URL`、`OLLAMA_MODEL` | 超时后进入规则降级 |
-| `dify` | 复用课程中配置的 Dify 应用或工作流 | `DIFY_BASE_URL`、`DIFY_API_KEY`、`DIFY_APP_ID` | 记录平台错误，切换降级 |
+| `dify` | 通过已实现的阻塞式 Chat API 适配器调用课程 Dify 应用 | `DIFY_BASE_URL`、`DIFY_API_KEY`、`DIFY_USER` | 空 Key、超时或非法 JSON 时记录错误并切换降级 |
 | `coze` | 复用课程中配置的 Coze 智能体或工作流 | `COZE_BASE_URL`、`COZE_API_TOKEN`、`COZE_BOT_ID` | 记录平台错误，切换降级 |
 | `rule_only` | 无模型或演示离线模式 | 无密钥 | 只输出规则可证明的内容 |
 
@@ -105,6 +105,11 @@ Agent 只给出审核建议。最终审核状态由人工或后端审核接口�
 ```
 
 不同平台必须复用同一份 Prompt 和输出 Schema。平台返回的会话编号只写入调用轨迹，不得成为业务事实。
+
+公开仓库的 `.env.example` 只保存变量名和非敏感默认值，`DIFY_API_KEY` 必须为空。
+测试人员将其复制为被 Git 忽略的 `.env` 后再填写真实 Key。命令行入口
+`python -m agent.run_agent` 读取该文件并实际调用 Dify；Key 缺失时输出
+`model_generation_failed` 并安全降级。
 
 知识库使用混合检索：
 
@@ -164,6 +169,11 @@ Day 02～Day 03 的代码接入遵循以下原则：
 `AgentService.run_analysis_report()` 可直接运行该真实报告。Agent 结果通过
 `agent.integrations.to_backend_agent_call()` 映射到后端 `agent_calls` 契约；
 内部 `degraded` 对外映射为 `needs_review`，不会伪装成成功。
+
+当前后端的 `POST /api/jobs/<job_id>/agent-calls` 会创建 `queued` 日志并交给
+`AgentExecutionService` 后台运行。执行器把真实工具轨迹和终态写入 SQLite，
+同时在任务目录原子保存 `agent_report.json` 与 `agent_trace.json`。Editor 聚合
+逐片段评论时另行透传 `agent_review_status`，不再丢失 `needs_review`。
 
 当前 CV 跟踪分支的多片段 highlights 导出与 Web
 `analysis_report.json` 仍是两个产物。兼容层可把 highlights 中的真实轨迹、

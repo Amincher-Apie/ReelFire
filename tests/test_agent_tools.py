@@ -166,6 +166,30 @@ class ReportParserToolTests(unittest.TestCase):
         with self.assertRaisesRegex(ReportValidationError, "confidence"):
             self.parser.run(payload)
 
+    def test_parser_accepts_cv_detection_without_track_id(self) -> None:
+        payload = agent_input()
+        payload["analysis_report"]["segments"][0].update(
+            detected_classes=["person"],
+            detections_summary=[
+                {
+                    "track_id": None,
+                    "class": "person",
+                    "confidence": 0.88,
+                    "confidence_max": 0.91,
+                    "confidence_min": 0.82,
+                    "first_seen": 2.5,
+                    "last_seen": 8.0,
+                    "detection_count": 4,
+                }
+            ],
+        )
+
+        result = self.parser.run(payload)
+
+        detection = result["segments"][0]["detections_summary"][0]
+        self.assertIsNone(detection["track_id"])
+        self.assertEqual(result["segments"][0]["detected_classes"][0]["track_count"], 0)
+
     def test_parser_rejects_duplicate_sample_frame_index(self) -> None:
         payload = agent_input()
         payload["analysis_report"]["samples"][1]["frame_index"] = 0

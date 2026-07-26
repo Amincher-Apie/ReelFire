@@ -271,7 +271,8 @@
               "track_id": {
                 "type": [
                   "integer",
-                  "string"
+                  "string",
+                  "null"
                 ]
               },
               "class": {

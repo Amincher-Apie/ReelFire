@@ -221,8 +221,12 @@ def _agent_comments(job_dir: Path) -> tuple[dict[str, dict[str, Any]], str]:
             if not segment_id or not comment:
                 continue
             refs = item.get("evidence_refs", [])
+            review_status = item.get("review_status")
+            if review_status not in {"pass", "needs_review", "reject"}:
+                review_status = None
             comments[segment_id] = {
                 "comment": comment[:1000],
+                "review_status": review_status,
                 "evidence_refs": [
                     str(ref)
                     for ref in refs
@@ -253,6 +257,7 @@ def _agent_comments(job_dir: Path) -> tuple[dict[str, dict[str, Any]], str]:
                     segment_id,
                     {
                         "comment": action[:1000],
+                        "review_status": None,
                         "evidence_refs": normalized_refs[:20],
                     },
                 )
@@ -673,6 +678,11 @@ def create_job_agent_call(job_id: str):
         requested_by=int(access["user_id"]),
         prompt_version=payload.get("prompt_version"),
     )
+    current_app.extensions["agent_execution_service"].enqueue(
+        int(agent_call["id"]),
+        job_id,
+        prompt_version=str(agent_call["prompt_version"]),
+    )
     return jsonify(ok=True, agent_call=agent_call), 202
 
 
@@ -907,6 +917,9 @@ def get_editor_contract(job_id: str):
                 "agent_comment": agent["comment"] if agent else None,
                 "agent_comment_status": (
                     "ready" if agent else missing_comment_status
+                ),
+                "agent_review_status": (
+                    agent["review_status"] if agent else None
                 ),
                 "agent_evidence_refs": (
                     agent["evidence_refs"] if agent else []

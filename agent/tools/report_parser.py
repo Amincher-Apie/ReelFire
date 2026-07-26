@@ -266,7 +266,8 @@ class ReportParserTool:
                     stats["detection_count"],
                     detected["detection_count"],
                 )
-                stats["track_ids"].add(detected["track_id"])
+                if detected["track_id"] is not None:
+                    stats["track_ids"].add(detected["track_id"])
                 stats["max_confidence"] = max(
                     stats["max_confidence"],
                     detected["confidence_max"],
@@ -564,19 +565,21 @@ class ReportParserTool:
             field = f"{owner}.detections_summary[{index}]"
             item = _require_dict(raw, field)
             track_id = item.get("track_id")
-            if isinstance(track_id, bool) or not isinstance(
-                track_id,
-                (str, int),
+            if isinstance(track_id, bool) or (
+                track_id is not None
+                and not isinstance(track_id, (str, int))
             ):
                 raise ReportValidationError(
-                    f"{field}.track_id 必须是字符串或整数"
+                    f"{field}.track_id 必须是字符串、整数或 null"
                 )
-            normalized_track = str(track_id).strip()
-            if not normalized_track or normalized_track in seen_tracks:
-                raise ReportValidationError(
-                    f"{owner}.detections_summary.track_id 不能为空或重复"
-                )
-            seen_tracks.add(normalized_track)
+            normalized_track = None
+            if track_id is not None:
+                normalized_track = str(track_id).strip()
+                if not normalized_track or normalized_track in seen_tracks:
+                    raise ReportValidationError(
+                        f"{owner}.detections_summary.track_id 不能为空或重复"
+                    )
+                seen_tracks.add(normalized_track)
             first_seen = _number(
                 item.get("first_seen"),
                 f"{field}.first_seen",

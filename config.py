@@ -5,8 +5,11 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env", override=False)
 
 
 class Config:
@@ -38,6 +41,8 @@ class Config:
     HOST = "127.0.0.1"
     PORT = 7880
     BACKGROUND_WORKERS = 2
+    AGENT_BACKGROUND_WORKERS = 1
+    AGENT_PROVIDER = os.environ.get("AGENT_PROVIDER", "rule_only")
     DEFAULT_PROJECT_NAME = "智能视频精彩片段提取"
     DEFAULT_JOB_SETTINGS = {
         "sample_interval": 0.5,

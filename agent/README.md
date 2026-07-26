@@ -23,6 +23,48 @@
 每个工具轨迹均包含状态、耗时、输入摘要和输出摘要。摘要只保存数量、状态等
 非敏感信息，不写入原始报告、视频内容、令牌或本机绝对路径。
 
+## 在线 Dify 配置
+
+仓库提供真实的 Dify Chat API 适配器，密钥只从本地环境读取。先复制配置样例：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+然后只在本机 `.env` 中填写：
+
+```dotenv
+AGENT_PROVIDER=dify
+DIFY_BASE_URL=https://api.dify.ai
+DIFY_API_KEY=
+DIFY_USER=reelfire-demo
+DIFY_MODEL_LABEL=dify-chat-app
+```
+
+`DIFY_API_KEY` 在公开仓库中必须保持空值。测试人员填入 Dify 应用的 API Key
+后，可直接运行：
+
+```powershell
+python -m agent.run_agent `
+  --analysis-report outputs/<job_id>/analysis_report.json `
+  --output-dir outputs/<job_id> `
+  --provider dify
+```
+
+Web 端在分析完成后调用 `POST /api/jobs/<job_id>/agent-calls`，后端会使用
+同一配置启动真实后台 Agent 执行。调用状态可通过
+`GET /api/jobs/<job_id>/agent-calls` 查询；完整结果写入任务目录中的
+`agent_report.json` 和 `agent_trace.json`。
+
+若 CV 跟踪结果仍是独立文件，可额外传入：
+
+```powershell
+--highlight-report outputs/<job_id>/<video>_highlights.json
+```
+
+Key 为空、Dify 超时、返回非 JSON 或引用不合法时，工作流会记录错误并切换为
+确定性规则结果，不会把在线调用失败伪装为成功，也不会破坏 CV 报告。
+
 本地 Ollama 调用示例：
 
 ```python

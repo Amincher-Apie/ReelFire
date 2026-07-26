@@ -167,6 +167,7 @@ class ApiTestCase(unittest.TestCase):
         first = without_agent.get_json()
         self.assertEqual(first["contract_version"], "1.0")
         self.assertEqual(first["highlights"][0]["agent_comment_status"], "pending")
+        self.assertIsNone(first["highlights"][0]["agent_review_status"])
         self.assertIsNone(first["highlights"][0]["agent_comment"])
         self.assertEqual(first["highlights"][0]["duration"], 5.5)
         self.assertTrue(first["video"]["url"].endswith("/input/demo.mp4"))
@@ -177,6 +178,7 @@ class ApiTestCase(unittest.TestCase):
                 {
                     "segment_id": "seg_001",
                     "comment": "该片段具有可追溯的高精彩度证据。",
+                    "review_status": "needs_review",
                     "evidence_refs": ["ev:segment:seg_001"],
                 }
             ],
@@ -188,6 +190,7 @@ class ApiTestCase(unittest.TestCase):
         with_agent = self.client.get(f"/api/jobs/{job_id}/editor")
         highlight = with_agent.get_json()["highlights"][0]
         self.assertEqual(highlight["agent_comment_status"], "ready")
+        self.assertEqual(highlight["agent_review_status"], "needs_review")
         self.assertEqual(
             highlight["agent_comment"],
             "该片段具有可追溯的高精彩度证据。",

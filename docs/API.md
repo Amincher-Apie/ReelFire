@@ -883,10 +883,11 @@ Legacy 文件任务不携带 `status` 时继续更新文件报告；携带 `stat
 
 ---
 
-## 12. 已实现：Agent 调用日志
+## 12. 已实现：Agent 执行与调用日志
 
-本阶段只实现真实调用日志的创建、状态服务和查询，不执行模型、RAG、
-Prompt 或工具编排，也不生成虚假的 Agent 成功结果。
+后端已把调用日志与真实 Agent 工作流连接起来。执行器读取任务目录中的
+`analysis_report.json`，依次运行报告解析、知识检索、建议生成和规则校验，
+并分别持久化 `agent_report.json`、`agent_trace.json` 与 SQLite 生命周期日志。
 
 接口：
 
@@ -898,7 +899,7 @@ GET  /api/agent-calls/<agent_call_id>
 
 `POST` 要求任务属于当前用户、任务状态为 `completed` 且
 `analysis_report.json` 已存在。成功返回 `202` 和一条真实 `queued`
-日志，但不会启动 Agent。`force` 是兼容字段，不能绕过活动调用保护。
+日志，同时提交后台 Agent 执行。`force` 是兼容字段，不能绕过活动调用保护。
 
 状态机：
 
@@ -910,8 +911,8 @@ running → failed
 running → needs_review
 ```
 
-终态不能再次运行或互相覆盖。后续 Agent 工作流只能通过
-`services.agent_call_service` 的状态更新函数写入真实执行元数据。
+终态不能再次运行或互相覆盖。`services.agent_execution_service` 负责调用
+Agent；生命周期只能通过 `services.agent_call_service` 的状态更新函数落库。
 
 历史接口按调用 `id` 降序返回摘要；详情接口联表取得公开 `job_id`，
 不会返回 `agent_calls.job_row_id` 或 SQLite `jobs.id`。
@@ -932,24 +933,26 @@ running → needs_review
 Legacy 任务的创建接口返回持久化不可用，历史接口返回空数组，不创建
 隐式 SQLite 任务，也不在文件系统伪造日志。
 
-现有表没有 `result_json`，且本阶段不增加迁移或结果文件。服务使用
+现有表没有 `result_json`。服务使用
 `result_path` 保存带 `inline_json$` 前缀的 JSON 兼容编码，并在 API
-读取时恢复为 `result` 对象；API 不暴露该内部编码。后续若引入真实结果
-文件，应通过正式迁移明确拆分。
+读取时恢复为 `result` 对象；API 不暴露该内部编码。完整结果同时保存在
+任务目录的 `agent_report.json`，Editor 只读取该经过规则校验的文件。
 
 `failed` 必须保存错误码和错误信息。`needs_review` 是 Agent 建议状态，
 不等于人工 `reviews.pending`。Agent 服务不写入 `reviews`，也不修改
-`analysis_report.json` 或 `agent_report.json`。
+`analysis_report.json`；只原子写入独立的 `agent_report.json` 和
+`agent_trace.json`。
 
-`agent_calls.result` 只是调用日志的一部分。阶段 D 不将 Agent 调用日志
-接入 Editor 聚合，也不修改 Editor 1.0 的评论来源或状态映射：
+`agent_calls.result` 只是调用日志的一部分，不作为 Editor 评论的直接来源：
 Editor 评论仍只来自 `agent_report.json.segment_comments[]` 或带可验证
 证据的 `suggestions[]`。调用状态（包括 `completed`）不得直接映射为
 `agent_comment_status`，日志中的 `result`、`result_path` 或
 `inline_json$` 内容也不得直接作为 Editor 评论。
 
-日志不得保存 API Key、完整系统 Prompt 或未经脱敏的原始输入。SQLite
-只作为单机调用日志，不是生产级消息队列。
+`highlights[].agent_review_status` 独立透传逐片段的
+`pass/needs_review/reject`，不得与评论可用状态混淆。日志不得保存 API Key、
+完整系统 Prompt 或未经脱敏的原始输入。SQLite 只作为单机调用日志，不是
+生产级消息队列。
 
 ---
 

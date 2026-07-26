@@ -61,6 +61,22 @@ def _create_analysis_service(
     return AnalysisService(jobs, max_workers, model_path)
 
 
+def _create_agent_execution_service(
+    app: Flask,
+    jobs: JobService,
+    max_workers: int,
+    provider: str,
+):
+    from services.agent_execution_service import AgentExecutionService
+
+    return AgentExecutionService(
+        app,
+        jobs,
+        max_workers=max_workers,
+        provider=provider,
+    )
+
+
 def _safe_local_redirect(value: object, fallback: str) -> str:
     if not isinstance(value, str) or not value.startswith("/"):
         return fallback
@@ -108,6 +124,20 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     with app.app_context():
         init_db()
         import_legacy_users(app.config["LEGACY_USERS_FILE"])
+
+    agent_execution_factory = app.config.get(
+        "AGENT_EXECUTION_SERVICE_FACTORY",
+        _create_agent_execution_service,
+    )
+    agent_execution = agent_execution_factory(
+        app,
+        jobs,
+        app.config["AGENT_BACKGROUND_WORKERS"],
+        app.config["AGENT_PROVIDER"],
+    )
+    app.extensions["agent_execution_service"] = agent_execution
+    if not app.testing:
+        atexit.register(agent_execution.shutdown, False)
 
     app.register_blueprint(api_bp)
     app.register_blueprint(auth_bp)
