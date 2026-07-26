@@ -278,7 +278,7 @@ class ProjectUploadPersistenceTestCase(unittest.TestCase):
         self.assertEqual(self.table_count("assets"), 0)
         self.assertEqual(self.table_count("jobs"), 0)
 
-    def test_project_name_only_upload_requires_login_and_remains_file_backed(self) -> None:
+    def test_project_name_only_upload_requires_login_and_is_owned(self) -> None:
         anonymous = self.client.post(
             "/api/jobs",
             data={
@@ -303,8 +303,14 @@ class ProjectUploadPersistenceTestCase(unittest.TestCase):
         job_id = response.get_json()["job_id"]
         self.assertRegex(job_id, JOB_ID_PATTERN)
         self.assertTrue((self.outputs_dir / job_id / "job.json").is_file())
-        self.assertEqual(self.table_count("assets"), 0)
-        self.assertEqual(self.table_count("jobs"), 0)
+        self.assertEqual(self.table_count("projects"), 1)
+        self.assertEqual(self.table_count("assets"), 1)
+        self.assertEqual(self.table_count("jobs"), 1)
+        listed_ids = {
+            job["job_id"]
+            for job in self.client.get("/api/jobs").get_json()["jobs"]
+        }
+        self.assertEqual(listed_ids, {job_id})
 
 
 if __name__ == "__main__":

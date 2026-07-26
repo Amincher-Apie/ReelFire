@@ -77,7 +77,7 @@ class ReviewPersistenceTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.get_json())
         return response.get_json()["job_id"]
 
-    def _upload_legacy_job(self) -> str:
+    def _upload_implicit_project_job(self) -> str:
         response = self.owner.post(
             "/api/jobs",
             data={
@@ -308,8 +308,8 @@ class ReviewPersistenceTestCase(unittest.TestCase):
             report_before,
         )
 
-    def test_legacy_file_review_remains_compatible_without_status(self) -> None:
-        job_id = self._upload_legacy_job()
+    def test_implicit_project_review_without_status_updates_report(self) -> None:
+        job_id = self._upload_implicit_project_job()
         update = self.owner.patch(
             f"/api/jobs/{job_id}/review",
             json={
@@ -338,8 +338,8 @@ class ReviewPersistenceTestCase(unittest.TestCase):
             ).get_json()["review"]
         )
 
-    def test_legacy_status_is_rejected_before_report_update(self) -> None:
-        job_id = self._upload_legacy_job()
+    def test_implicit_project_status_persists_review_and_report(self) -> None:
+        job_id = self._upload_implicit_project_job()
         report_before = self.jobs.report_path(job_id).read_bytes()
 
         response = self.owner.patch(
@@ -354,15 +354,12 @@ class ReviewPersistenceTestCase(unittest.TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 409)
-        self.assertEqual(
-            response.get_json()["error_code"],
-            "REVIEW_PERSISTENCE_UNAVAILABLE",
-        )
-        self.assertEqual(
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertNotEqual(
             self.jobs.report_path(job_id).read_bytes(),
             report_before,
         )
+        self.assertEqual(self._review_count(), 1)
 
     def test_sqlite_insert_failure_leaves_report_unchanged(self) -> None:
         report_before = self.jobs.report_path(self.job_id).read_bytes()

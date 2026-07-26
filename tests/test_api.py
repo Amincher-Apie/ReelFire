@@ -119,6 +119,9 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(html.count('id="highlight-list"'), 1)
         self.assertEqual(html.count('id="editor-video"'), 1)
         self.assertEqual(html.count('id="timeline-scrubber"'), 1)
+        self.assertIn("时间片段（start:end）", html)
+        self.assertIn("Agent 评论", html)
+        self.assertIn("YOLO 精彩片段区间", html)
         self.assertEqual(html.count("editor.js"), 1)
         self.assertNotIn("onclick=", html)
 
@@ -227,7 +230,7 @@ class ApiTestCase(unittest.TestCase):
         listing = self.client.get("/api/jobs")
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(listing.status_code, 200)
-        self.assertEqual(listing.get_json()["jobs"][0]["job_id"], job_id)
+        self.assertEqual(listing.get_json()["jobs"], [])
 
     def test_create_job_without_file_returns_400(self) -> None:
         response = self.client.post("/api/jobs", data={})
@@ -368,7 +371,14 @@ class ApiTestCase(unittest.TestCase):
             f"/api/jobs/{job_id}/review",
             json={
                 "segments": [
-                    {"id": "seg_001", "start": 1, "end": 7, "order": 1}
+                    {
+                        "id": "seg_001",
+                        "start": 1,
+                        "end": 7,
+                        "order": 1,
+                        "score": 0.8,
+                        "source_keyframes": [],
+                    }
                 ],
                 "keyframes": [
                     {

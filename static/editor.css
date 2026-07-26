@@ -53,7 +53,12 @@
 
 .editor-content {
   display: grid;
+  grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
+  grid-template-areas:
+    "media preview"
+    "toolbar toolbar";
   gap: 18px;
+  align-items: start;
 }
 
 .editor-section-title {
@@ -65,6 +70,7 @@
 /* ---- 视频区 ---- */
 
 .editor-video-section {
+  grid-area: preview;
   min-width: 0;
 }
 
@@ -167,7 +173,7 @@
 
 .timeline-track {
   position: relative;
-  height: 40px;
+  height: 48px;
   border-radius: 8px;
   background: var(--panel);
   cursor: pointer;
@@ -206,10 +212,9 @@
 }
 
 .timeline-segments-bar {
-  position: relative;
-  height: 18px;
-  border-radius: 7px;
-  background: var(--panel);
+  position: absolute;
+  inset: 7px 0;
+  border-radius: 6px;
   overflow: hidden;
 }
 
@@ -217,6 +222,8 @@
   position: absolute;
   top: 0;
   bottom: 0;
+  min-width: 4px;
+  border: 1px solid color-mix(in srgb, white 35%, transparent);
   border-radius: 3px;
   opacity: 0.82;
   transition: opacity 150ms ease;
@@ -224,27 +231,53 @@
 }
 
 .timeline-segment-marker:hover,
+.timeline-segment-marker:focus-visible,
 .timeline-segment-marker.active {
   opacity: 1;
   z-index: 1;
+}
+
+.timeline-segment-marker:focus-visible {
+  outline: 2px solid white;
+  outline-offset: -3px;
 }
 
 .timeline-segment-marker.seg-0 { background: var(--accent); }
 .timeline-segment-marker.seg-1 { background: var(--primary); }
 .timeline-segment-marker.seg-2 { background: var(--success); }
 .timeline-segment-marker.seg-3 { background: var(--warning); }
+.timeline-segment-marker:nth-child(4n + 1) { background: var(--accent); }
+.timeline-segment-marker:nth-child(4n + 2) { background: var(--primary); }
+.timeline-segment-marker:nth-child(4n + 3) { background: var(--success); }
+.timeline-segment-marker:nth-child(4n + 4) { background: var(--warning); }
+
+.timeline-hint {
+  margin: 8px 0 0;
+  color: var(--text-faint);
+  font-size: 11px;
+}
 
 /* ---- 片段区 ---- */
 
 .editor-segments-section {
+  grid-area: media;
   min-width: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel-soft);
 }
 
 .segments-header {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 12px;
   margin-bottom: 12px;
+}
+
+.segments-header .editor-section-title {
+  margin-bottom: 0;
 }
 
 .segments-badge {
@@ -262,15 +295,110 @@
 /* 两列 + 详情面板布局 */
 .segments-layout {
   display: grid;
-  grid-template-columns: 1fr 380px;
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
 
-.segment-card-grid {
+.segment-table {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel);
+}
+
+.segment-table-head,
+.segment-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(132px, 0.8fr) minmax(0, 1.2fr);
   gap: 10px;
+  align-items: start;
+}
+
+.segment-table-head {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-faint);
+  background: var(--panel-strong);
+  font-size: 10px;
+  font-weight: 750;
+}
+
+.segment-table-body {
+  max-height: min(48vh, 520px);
+  overflow-y: auto;
+}
+
+.segment-row {
+  width: 100%;
+  min-height: 64px;
+  padding: 11px 12px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  cursor: pointer;
+  transition: background 150ms ease, box-shadow 150ms ease;
+}
+
+.segment-row:last-child {
+  border-bottom: 0;
+}
+
+.segment-row:hover {
+  background: var(--panel-strong);
+}
+
+.segment-row:focus-visible {
+  position: relative;
+  z-index: 1;
+  outline: 3px solid color-mix(in srgb, var(--primary) 65%, white);
+  outline-offset: -3px;
+}
+
+.segment-row.selected {
+  background: var(--primary-soft);
+  box-shadow: inset 3px 0 0 var(--primary);
+}
+
+.segment-time-cell {
+  display: grid;
+  gap: 4px;
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.segment-time-cell small {
+  color: var(--text-faint);
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.segment-comment-cell {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.segment-comment-cell.ready {
+  color: var(--text);
+}
+
+.segment-comment-cell.pending {
+  color: var(--warning);
+}
+
+.segment-comment-cell.unavailable,
+.segment-table-empty {
+  color: var(--text-faint);
+}
+
+.segment-table-empty {
+  margin: 0;
+  padding: 18px 12px;
+  font-size: 11px;
+  text-align: center;
 }
 
 /* ---- 片段卡片 ---- */
@@ -411,9 +539,7 @@
 /* ---- 详情面板 ---- */
 
 .segment-detail-panel {
-  position: sticky;
-  top: calc(var(--header-height) + 16px);
-  min-height: 400px;
+  min-height: 280px;
   padding: 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -779,6 +905,7 @@
 /* ---- 底部工具栏 ---- */
 
 .editor-toolbar {
+  grid-area: toolbar;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -795,20 +922,24 @@
    =================================================================== */
 
 @media (max-width: 1250px) {
-  .segments-layout {
-    grid-template-columns: 1fr;
+  .editor-content {
+    grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
   }
 
   .segment-detail-panel {
     position: static;
   }
-
-  .segment-card-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 @media (max-width: 900px) {
+  .editor-content {
+    grid-template-columns: 1fr;
+    grid-template-areas:
+      "preview"
+      "media"
+      "toolbar";
+  }
+
   .editor-header {
     grid-template-columns: 1fr auto;
     gap: 8px;
@@ -855,8 +986,9 @@
     gap: 6px;
   }
 
-  .segment-card-grid {
-    grid-template-columns: 1fr;
+  .segment-table-head,
+  .segment-row {
+    grid-template-columns: minmax(120px, 0.7fr) minmax(0, 1.3fr);
   }
 
   .timeline-section {

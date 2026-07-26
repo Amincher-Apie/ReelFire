@@ -31,12 +31,15 @@ def _utc_now() -> str:
 
 
 def _public_user(row: sqlite3.Row) -> dict[str, Any]:
+    username = str(row["username"])
+    display_name = row["display_name"]
     return {
         "id": row["id"],
-        "username": row["username"],
-        "display_name": row["display_name"],
+        "username": username,
+        "display_name": display_name,
         "role": row["role"],
         "created_at": row["created_at"],
+        "is_guest": username.startswith("guest_") and display_name == "游客",
     }
 
 
@@ -147,9 +150,7 @@ def create_guest_user() -> dict[str, Any]:
             """,
             (cursor.lastrowid,),
         ).fetchone()
-        user = _public_user(row)
-        user["is_guest"] = True
-        return user
+        return _public_user(row)
     raise RuntimeError("无法分配唯一的游客身份")
 
 

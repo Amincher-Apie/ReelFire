@@ -27,7 +27,7 @@ from services.editor_input_validation import (
 from services.ffmpeg_service import create_rough_cut, is_ffmpeg_available
 from services.file_service import FileService, FileValidationError
 from services.job_access_service import (
-    get_job_list_visibility,
+    get_visible_job_ids,
     require_job_access,
 )
 from services.job_index_service import create_asset_and_job_index
@@ -393,13 +393,20 @@ def list_projects_route():
 @api_bp.post("/jobs")
 def create_job():
     jobs, files, _ = _services()
-    uses_project_index = "project_id" in request.form
-    owner_id: int | None = None
+    owner_id = require_authenticated_user_id()
     project: dict[str, Any] | None = None
-    if uses_project_index:
-        owner_id = require_authenticated_user_id()
+    requested_name: str | None = None
+    if "project_id" in request.form:
         project_id = _positive_project_id(request.form.get("project_id"))
         project = get_owned_project(project_id, owner_id)
+    else:
+        requested_name = request.form.get(
+            "project_name", current_app.config["DEFAULT_PROJECT_NAME"]
+        ).strip()
+        if not requested_name:
+            requested_name = current_app.config["DEFAULT_PROJECT_NAME"]
+        if len(requested_name) > 100:
+            raise FileValidationError("project_name 长度不能超过 100")
 
     upload = request.files.get("file")
     if not isinstance(upload, FileStorage):
@@ -407,23 +414,16 @@ def create_job():
 
     original_name, _ = files.validate_filename(upload)
     settings = _parse_job_settings(request.form.to_dict(flat=True))
-    if project is None:
-        project_name = request.form.get(
-            "project_name", current_app.config["DEFAULT_PROJECT_NAME"]
-        ).strip()
-        if not project_name:
-            project_name = current_app.config["DEFAULT_PROJECT_NAME"]
-        if len(project_name) > 100:
-            raise FileValidationError("project_name 长度不能超过 100")
-    else:
-        project_name = project["name"]
     game_type = str(request.form.get("game_type", "other")).strip().lower()
     if game_type not in {"csgo", "valorant", "other"}:
         raise FileValidationError("game_type 仅支持 csgo、valorant 或 other")
+    project_name = project["name"] if project is not None else requested_name
 
     job_id, job_dir = jobs.reserve_workspace()
     try:
         saved_path = files.save_upload(upload, job_dir / "input")
+        if project is None:
+            project = create_project(owner_id, requested_name)
         job = jobs.create_job_record(
             job_id,
             project_name,
@@ -433,27 +433,26 @@ def create_job():
         if original_name != saved_path.name:
             job = jobs.update_job(job_id, original_asset_name=original_name)
         job = jobs.update_job(job_id, game_type=game_type)
-        if project is not None and owner_id is not None:
-            job = jobs.update_job(job_id, project_id=project["id"])
-            relative_base = Path(current_app.config["OUTPUTS_DIR"]).resolve().parent
-            stored_path = saved_path.resolve().relative_to(relative_base).as_posix()
-            job_json_path = (
-                (job_dir / "job.json")
-                .resolve()
-                .relative_to(relative_base)
-                .as_posix()
-            )
-            create_asset_and_job_index(
-                project_id=int(project["id"]),
-                created_by=owner_id,
-                public_job_id=job_id,
-                original_name=original_name,
-                stored_path=stored_path,
-                mime_type=upload.mimetype or None,
-                size_bytes=saved_path.stat().st_size,
-                job_json_path=job_json_path,
-                status=str(job["status"]),
-            )
+        job = jobs.update_job(job_id, project_id=project["id"])
+        relative_base = Path(current_app.config["OUTPUTS_DIR"]).resolve().parent
+        stored_path = saved_path.resolve().relative_to(relative_base).as_posix()
+        job_json_path = (
+            (job_dir / "job.json")
+            .resolve()
+            .relative_to(relative_base)
+            .as_posix()
+        )
+        create_asset_and_job_index(
+            project_id=int(project["id"]),
+            created_by=owner_id,
+            public_job_id=job_id,
+            original_name=original_name,
+            stored_path=stored_path,
+            mime_type=upload.mimetype or None,
+            size_bytes=saved_path.stat().st_size,
+            job_json_path=job_json_path,
+            status=str(job["status"]),
+        )
     except Exception:
         jobs.discard_workspace(job_id)
         raise
@@ -463,12 +462,11 @@ def create_job():
 @api_bp.get("/jobs")
 def list_jobs():
     jobs, _, _ = _services()
-    indexed_ids, owned_ids = get_job_list_visibility()
+    visible_ids = get_visible_job_ids()
     visible_jobs = [
         job
         for job in jobs.list_jobs()
-        if job.get("job_id") not in indexed_ids
-        or job.get("job_id") in owned_ids
+        if job.get("job_id") in visible_ids
     ]
     return jsonify(ok=True, jobs=visible_jobs)
 

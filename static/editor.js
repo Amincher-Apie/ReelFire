@@ -152,16 +152,31 @@ function setView(view) {
 function renderVideo() {
   var videoEl = byId("editor-video");
   var placeholder = byId("video-placeholder");
+  var status = byId("video-status");
   var video = state.video;
 
   if (video && video.path) {
     videoEl.src = video.path;
     videoEl.hidden = false;
     placeholder.hidden = true;
+    videoEl.onloadedmetadata = function () {
+      var actualDuration = Number(videoEl.duration);
+      if (Number.isFinite(actualDuration) && actualDuration > 0) {
+        state.video.duration = actualDuration;
+        byId("timeline-duration").textContent = formatTime(actualDuration);
+        renderTimeline();
+      }
+    };
+    videoEl.onerror = function () {
+      videoEl.hidden = true;
+      placeholder.hidden = false;
+      status.textContent = "当前视频加载失败，请检查源文件格式或任务输出是否完整。";
+    };
+    videoEl.load();
   } else {
-    // 后端未提供可访问的视频地址时显示明确占位。
     videoEl.hidden = true;
     placeholder.hidden = false;
+    status.textContent = "当前任务没有可预览的视频源。";
   }
 
   if (video) {
@@ -174,17 +189,23 @@ function renderVideo() {
 // ── 时间轴 ───────────────────────────────────────────────────────────
 function renderTimeline() {
   if (!state.video) return;
-  var duration = state.video.duration;
+  var duration = Number(state.video.duration);
+  if (!Number.isFinite(duration) || duration <= 0) duration = 0;
   var scrubber = byId("timeline-scrubber");
+  var track = byId("timeline-track");
   scrubber.max = String(duration);
   scrubber.value = "0";
+  track.setAttribute("aria-valuemax", String(duration));
 
   // 片段标记条
   var segmentsBar = byId("timeline-segments-bar");
   clearChildren(segmentsBar);
   state.segments.forEach(function (seg, idx) {
-    var left = (seg.start / duration) * 100;
-    var width = Math.max(((seg.end - seg.start) / duration) * 100, 0.5);
+    var left = duration > 0 ? (seg.start / duration) * 100 : 0;
+    var width =
+      duration > 0
+        ? Math.max(((seg.end - seg.start) / duration) * 100, 0.5)
+        : 0;
     var marker = createElement("div", "timeline-segment-marker seg-" + idx);
     marker.style.left = left + "%";
     marker.style.width = width + "%";
@@ -237,10 +258,14 @@ function updatePlayhead(currentTime) {
 }
 
 function seekTo(time) {
+  var duration = state.video ? Number(state.video.duration) : 0;
+  var target = Number(time);
+  if (!Number.isFinite(target)) return;
+  target = Math.max(0, duration > 0 ? Math.min(target, duration) : target);
   if (state.videoElement && state.videoElement.src) {
-    state.videoElement.currentTime = time;
+    state.videoElement.currentTime = target;
   }
-  updatePlayhead(time);
+  updatePlayhead(target);
 }
 
 function highlightSegmentAtTime(time) {
@@ -333,6 +358,7 @@ function bindTimelineEvents() {
   });
 
   scrubber.addEventListener("input", function () {
+    if (videoEl && !videoEl.paused) videoEl.pause();
     seekTo(Number(scrubber.value));
   });
 
@@ -350,12 +376,11 @@ function bindTimelineEvents() {
 function selectSegment(segmentId) {
   state.selectedSegmentId = segmentId;
 
-  // 卡片高亮
-  var cards = document.querySelectorAll(".segment-card");
-  cards.forEach(function (card) {
-    var selected = card.dataset.segmentId === segmentId;
-    card.classList.toggle("selected", selected);
-    card.setAttribute("aria-current", selected ? "true" : "false");
+  var rows = document.querySelectorAll(".segment-row");
+  rows.forEach(function (row) {
+    var selected = row.dataset.segmentId === segmentId;
+    row.classList.toggle("selected", selected);
+    row.setAttribute("aria-current", selected ? "true" : "false");
   });
 
   // 片段标记高亮
@@ -375,68 +400,63 @@ function renderSegmentList() {
   clearChildren(container);
   byId("segments-count").textContent = state.segments.length + " 个片段";
 
-  if (!state.segments.length) return;
+  if (!state.segments.length) {
+    container.append(
+      createElement("p", "segment-table-empty", "YOLO 未产出精彩片段。")
+    );
+    return;
+  }
 
   state.segments.forEach(function (seg, idx) {
     var comment = findAgentComment(seg.id);
-    var agentStatus = comment ? comment.status : "pending";
-
-    var card = createElement("article", "segment-card");
-    card.dataset.segmentId = seg.id;
-    card.setAttribute("role", "listitem");
-    card.setAttribute("tabindex", "0");
-    card.setAttribute("aria-label", "片段 " + (idx + 1) + "，" + formatTime(seg.start) + " 到 " + formatTime(seg.end));
-
-    // 顶部
-    var top = createElement("div", "segment-card-top");
-    top.append(
-      createElement("span", "segment-card-order", String(idx + 1).padStart(2, "0"))
+    var status = comment ? comment.status : "pending";
+    var displayStatus = status === "completed" ? "ready" : status;
+    var row = createElement("div", "segment-row");
+    row.dataset.segmentId = seg.id;
+    row.setAttribute("role", "row");
+    row.setAttribute("tabindex", "0");
+    row.setAttribute(
+      "aria-label",
+      "片段 " + (idx + 1) + "，" + formatTime(seg.start) + " 到 " + formatTime(seg.end)
     );
-    var timeDiv = createElement("div", "segment-card-time");
-    timeDiv.append(
-      createElement("strong", "", formatTime(seg.start) + " – " + formatTime(seg.end)),
+
+    var timeCell = createElement(
+      "span",
+      "segment-time-cell",
+      formatTime(seg.start) + " : " + formatTime(seg.end)
+    );
+    timeCell.setAttribute("role", "cell");
+    timeCell.append(
       createElement("small", "", formatNumber(seg.end - seg.start, 1) + " 秒")
     );
-    top.append(timeDiv);
-    top.append(
-      createElement("span", "segment-card-score", formatNumber(Number(seg.score) * 100, 0))
+
+    var commentText =
+      displayStatus === "ready" && comment && comment.summary
+        ? comment.summary
+        : displayStatus === "pending"
+        ? "Agent 分析尚未完成"
+        : "Agent 最终评论不可用";
+    var commentCell = createElement(
+      "span",
+      "segment-comment-cell " + displayStatus,
+      commentText
     );
+    commentCell.setAttribute("role", "cell");
+    row.append(timeCell, commentCell);
 
-    // 底部
-    var bottom = createElement("div", "segment-card-bottom");
-    bottom.append(
-      createElement(
-        "span",
-        "segment-card-keyframes",
-        "关键帧 " + (seg.source_keyframes || []).join("、")
-      )
-    );
-
-    var agentBadge = createElement("span", "segment-card-agent " + agentStatus);
-    var dot = createElement("span", "agent-status-dot");
-    var labelText =
-      agentStatus === "completed"
-        ? "Agent 已完成"
-        : agentStatus === "pending"
-        ? "待分析"
-        : "不可用";
-    agentBadge.append(dot, document.createTextNode(labelText));
-    bottom.append(agentBadge);
-
-    card.append(top, bottom);
-
-    // 事件
-    card.addEventListener("click", function () {
+    row.addEventListener("click", function () {
       selectSegment(seg.id);
+      seekTo(seg.start);
     });
-    card.addEventListener("keydown", function (e) {
+    row.addEventListener("keydown", function (e) {
       if (e.key === "Enter" || e.key === " ") {
         e.preventDefault();
         selectSegment(seg.id);
+        seekTo(seg.start);
       }
     });
 
-    container.append(card);
+    container.append(row);
   });
 }
 
@@ -699,11 +719,6 @@ function applyEditorData(payload) {
 
   setView("content");
 
-  if (!state.segments.length) {
-    setView("empty");
-    return;
-  }
-
   renderVideo();
   renderTimeline();
   renderSegmentList();
@@ -775,7 +790,14 @@ function saveReview() {
   setButtonLoading(button, true, "保存中…");
   var body = {
     segments: state.segments.map(function (seg) {
-      return { id: seg.id, start: seg.start, end: seg.end, order: seg.order };
+      return {
+        id: seg.id,
+        start: seg.start,
+        end: seg.end,
+        order: seg.order,
+        score: seg.score,
+        source_keyframes: seg.source_keyframes || [],
+      };
     }),
   };
   api.patch("/api/jobs/" + encodeURIComponent(state.jobId) + "/review", body).then(
@@ -786,6 +808,7 @@ function saveReview() {
           ? payload.report.segments.map(function (s) { return Object.assign({}, s); })
           : state.segments;
         renderSegmentList();
+        if (state.selectedSegmentId) selectSegment(state.selectedSegmentId);
       }
       setButtonLoading(button, false);
     },
@@ -804,7 +827,14 @@ function createRoughCut() {
   // 先保存审核再生成粗剪
   api.patch("/api/jobs/" + encodeURIComponent(state.jobId) + "/review", {
     segments: state.segments.map(function (seg) {
-      return { id: seg.id, start: seg.start, end: seg.end, order: seg.order };
+      return {
+        id: seg.id,
+        start: seg.start,
+        end: seg.end,
+        order: seg.order,
+        score: seg.score,
+        source_keyframes: seg.source_keyframes || [],
+      };
     }),
   }).then(
     function () {

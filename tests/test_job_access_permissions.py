@@ -73,16 +73,16 @@ class JobAccessPermissionsTestCase(unittest.TestCase):
         return response.get_json()["job_id"]
 
     def _upload_legacy_job(self) -> str:
-        response = self.client_a.post(
-            "/api/jobs",
-            data={
-                "file": (io.BytesIO(self.MINIMAL_MP4), "legacy.mp4"),
-                "project_name": "Legacy",
-            },
-            content_type="multipart/form-data",
+        jobs = self.app.extensions["job_service"]
+        job_id, job_dir = jobs.reserve_workspace()
+        (job_dir / "input" / "legacy.mp4").write_bytes(self.MINIMAL_MP4)
+        jobs.create_job_record(
+            job_id,
+            "Legacy",
+            "legacy.mp4",
+            {},
         )
-        self.assertEqual(response.status_code, 201, response.get_json())
-        return response.get_json()["job_id"]
+        return job_id
 
     def _complete_job(self, job_id: str) -> None:
         jobs = self.app.extensions["job_service"]
@@ -204,17 +204,24 @@ class JobAccessPermissionsTestCase(unittest.TestCase):
 
         page = self.client_a.get(f"/jobs/{job_id}/editor")
         video = self.client_a.get(f"/outputs/{job_id}/input/demo.mp4")
+        partial_video = self.client_a.get(
+            f"/outputs/{job_id}/input/demo.mp4",
+            headers={"Range": "bytes=0-9"},
+        )
         self.assertEqual(page.status_code, 200)
         self.assertEqual(video.status_code, 200)
         self.assertEqual(video.data, self.MINIMAL_MP4)
+        self.assertEqual(partial_video.status_code, 206)
+        self.assertEqual(partial_video.data, self.MINIMAL_MP4[:10])
         video.close()
+        partial_video.close()
 
         traversal = self.client_a.get(
             f"/outputs/{job_id}/%2e%2e%2fjob.json"
         )
         self.assertEqual(traversal.status_code, 404)
 
-    def test_legacy_file_job_requires_login_but_remains_compatible(self) -> None:
+    def test_unowned_legacy_file_job_is_not_exposed_to_accounts(self) -> None:
         job_id = self._upload_legacy_job()
 
         anonymous_detail = self.anonymous.get(f"/api/jobs/{job_id}")
@@ -225,12 +232,15 @@ class JobAccessPermissionsTestCase(unittest.TestCase):
 
         self.assertEqual(anonymous_detail.status_code, 401)
         self.assertEqual(anonymous_page.status_code, 302)
-        self.assertEqual(detail.status_code, 200)
-        self.assertEqual(page.status_code, 200)
-        self.assertEqual(video.status_code, 200)
+        for response in (detail, page, video):
+            self.assertEqual(response.status_code, 403, response.get_json())
+            self.assertEqual(
+                response.get_json()["error_code"],
+                "JOB_ACCESS_DENIED",
+            )
         video.close()
 
-    def test_job_lists_include_legacy_and_only_owned_indexed_jobs(self) -> None:
+    def test_job_lists_hide_legacy_and_only_include_owned_indexed_jobs(self) -> None:
         legacy_id = self._upload_legacy_job()
         job_a = self._upload_project_job(self.client_a, self.project_a["id"])
         job_b = self._upload_project_job(self.client_b, self.project_b["id"])
@@ -250,8 +260,32 @@ class JobAccessPermissionsTestCase(unittest.TestCase):
             anonymous_response.get_json()["error_code"],
             "AUTH_REQUIRED",
         )
-        self.assertEqual(ids_a, {legacy_id, job_a})
-        self.assertEqual(ids_b, {legacy_id, job_b})
+        self.assertNotIn(legacy_id, ids_a | ids_b)
+        self.assertEqual(ids_a, {job_a})
+        self.assertEqual(ids_b, {job_b})
+
+    def test_guest_can_use_current_job_but_has_no_history(self) -> None:
+        guest = self.app.test_client()
+        login = guest.post("/api/auth/guest", json={})
+        self.assertEqual(login.status_code, 201, login.get_json())
+        upload = guest.post(
+            "/api/jobs",
+            data={
+                "file": (io.BytesIO(self.MINIMAL_MP4), "guest.mp4"),
+                "project_name": "Guest current task",
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(upload.status_code, 201, upload.get_json())
+        job_id = upload.get_json()["job_id"]
+
+        self.assertEqual(guest.get("/api/jobs").get_json()["jobs"], [])
+        self.assertEqual(guest.get(f"/api/jobs/{job_id}").status_code, 200)
+
+        next_guest = self.app.test_client()
+        next_guest.post("/api/auth/guest", json={})
+        denied = next_guest.get(f"/api/jobs/{job_id}")
+        self.assertEqual(denied.status_code, 403, denied.get_json())
 
 
 if __name__ == "__main__":

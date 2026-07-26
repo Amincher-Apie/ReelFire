@@ -88,7 +88,7 @@ class AgentCallPersistenceTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 201, response.get_json())
         return response.get_json()["job_id"]
 
-    def _upload_legacy_job(self) -> str:
+    def _upload_implicit_project_job(self) -> str:
         response = self.owner.post(
             "/api/jobs",
             data={
@@ -484,7 +484,7 @@ class AgentCallPersistenceTestCase(unittest.TestCase):
                     expected_code,
                 )
 
-    def test_anonymous_create_and_authenticated_legacy_behavior(self) -> None:
+    def test_anonymous_denial_and_implicit_project_persistence(self) -> None:
         anonymous_create = self.anonymous.post(
             f"/api/jobs/{self.job_id}/agent-calls",
             json={"prompt_version": "v1"},
@@ -493,13 +493,14 @@ class AgentCallPersistenceTestCase(unittest.TestCase):
             f"/api/jobs/{self.job_id}/agent-calls",
             json={"prompt_version": "v1"},
         )
-        legacy_id = self._upload_legacy_job()
-        legacy_create = self.owner.post(
-            f"/api/jobs/{legacy_id}/agent-calls",
+        implicit_job_id = self._upload_implicit_project_job()
+        self._make_report_ready(implicit_job_id)
+        implicit_create = self.owner.post(
+            f"/api/jobs/{implicit_job_id}/agent-calls",
             json={"prompt_version": "v1"},
         )
-        legacy_history = self.owner.get(
-            f"/api/jobs/{legacy_id}/agent-calls"
+        implicit_history = self.owner.get(
+            f"/api/jobs/{implicit_job_id}/agent-calls"
         )
 
         self.assertEqual(anonymous_create.status_code, 401)
@@ -512,16 +513,10 @@ class AgentCallPersistenceTestCase(unittest.TestCase):
             other_create.get_json()["error_code"],
             "JOB_ACCESS_DENIED",
         )
-        self.assertEqual(legacy_create.status_code, 409)
-        self.assertEqual(
-            legacy_create.get_json()["error_code"],
-            "AGENT_CALL_PERSISTENCE_UNAVAILABLE",
-        )
-        self.assertEqual(
-            legacy_history.get_json(),
-            {"ok": True, "agent_calls": []},
-        )
-        self.assertEqual(self._call_count(), 0)
+        self.assertEqual(implicit_create.status_code, 202, implicit_create.get_json())
+        self.assertEqual(implicit_history.status_code, 200)
+        self.assertEqual(len(implicit_history.get_json()["agent_calls"]), 1)
+        self.assertEqual(self._call_count(), 1)
 
     def test_database_failures_rollback_without_touching_reports_or_reviews(self) -> None:
         review_response = self.owner.patch(
