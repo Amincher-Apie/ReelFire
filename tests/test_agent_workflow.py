@@ -157,6 +157,7 @@ class AgentWorkflowTests(unittest.TestCase):
                 "summary",
                 "tags",
                 "suggestions",
+                "segment_comments",
                 "review",
                 "evidence_refs",
                 "knowledge_refs",
@@ -404,6 +405,8 @@ class AgentWorkflowTests(unittest.TestCase):
         for suggestion in result["suggestions"]:
             self.assertTrue(set(suggestion["evidence_refs"]) <= evidence_ids)
             self.assertTrue(set(suggestion["knowledge_refs"]) <= knowledge_ids)
+        for comment in result["segment_comments"]:
+            self.assertTrue(set(comment["evidence_refs"]) <= evidence_ids)
 
 
 if __name__ == "__main__":
