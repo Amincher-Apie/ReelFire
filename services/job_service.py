@@ -252,6 +252,21 @@ class JobService:
         self.get_job(job_id)
         self._write_json(self.report_path(job_id), report)
 
+    def agent_report_path(self, job_id: str) -> Path:
+        return self.job_dir(job_id) / "agent_report.json"
+
+    def read_agent_report(self, job_id: str) -> dict[str, Any]:
+        self.get_job(job_id)
+        path = self.agent_report_path(job_id)
+        if not path.is_file():
+            raise JobNotFoundError("Agent 报告不存在")
+        with self._lock:
+            return self._read_json(path, "agent_report.json")
+
+    def write_agent_report(self, job_id: str, report: Mapping[str, Any]) -> None:
+        self.get_job(job_id)
+        self._write_json(self.agent_report_path(job_id), report)
+
     def update_report(
         self,
         job_id: str,

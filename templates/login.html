@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="color-scheme" content="dark light">
+  <title>ReelFire - 登录</title>
+  <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script defer src="{{ url_for('static', filename='app.js') }}"></script>
+</head>
+<body class="auth-page" data-page="auth" data-theme="dark">
+<main class="auth-layout">
+  <section class="auth-visual" aria-labelledby="auth-brand-title">
+    <a class="brand auth-brand" href="/" aria-label="ReelFire 首页">
+      <span class="brand-mark" aria-hidden="true">RF</span>
+      <span>
+        <span class="brand-name">Reel<span>Fire</span></span>
+        <span class="brand-subtitle">AI 内容理解平台</span>
+      </span>
+    </a>
+    <div class="auth-intro">
+      <p class="eyebrow">VIDEO INTELLIGENCE</p>
+      <h1 id="auth-brand-title">从每一帧中<br>找到可解释的精彩。</h1>
+      <p>统一管理视频分析、关键帧复核、候选片段与交付报告。</p>
+    </div>
+    <ul class="auth-features">
+      <li><span>01</span> OpenCV + YOLO 真实检测</li>
+      <li><span>02</span> 可追溯的评分与证据</li>
+      <li><span>03</span> 人工复核与粗剪输出</li>
+    </ul>
+  </section>
+
+  <section class="auth-panel">
+    <div class="auth-card">
+      <div class="auth-heading">
+        <p class="eyebrow">WELCOME BACK</p>
+        <h2 id="auth-title">登录 ReelFire</h2>
+        <p id="auth-description">使用项目账号进入分析工作台。</p>
+      </div>
+
+      <div class="auth-tabs" role="tablist" aria-label="账户操作">
+        <button id="login-tab" class="active" type="button" role="tab" aria-selected="true" data-auth-view="login">登录</button>
+        <button id="register-tab" type="button" role="tab" aria-selected="false" data-auth-view="register">注册</button>
+      </div>
+
+      <form id="login-form" class="auth-form" novalidate>
+        <div class="form-field">
+          <label for="login-username">用户名</label>
+          <input id="login-username" type="text" autocomplete="username" minlength="2" maxlength="32" required>
+        </div>
+        <div class="form-field">
+          <label for="login-password">密码</label>
+          <input id="login-password" type="password" autocomplete="current-password" minlength="6" required>
+        </div>
+        <p id="login-error" class="field-error auth-error" role="alert"></p>
+        <button id="login-submit" class="button primary full" type="submit">
+          <span class="button-label">登录</span>
+        </button>
+      </form>
+
+      <form id="register-form" class="auth-form" novalidate hidden>
+        <div class="form-field">
+          <label for="register-username">用户名</label>
+          <input id="register-username" type="text" autocomplete="username" minlength="2" maxlength="32" required>
+          <small>长度为 2–32 个字符。</small>
+        </div>
+        <div class="form-field">
+          <label for="register-password">密码</label>
+          <input id="register-password" type="password" autocomplete="new-password" minlength="6" required>
+          <small>至少 6 个字符。</small>
+        </div>
+        <div class="form-field">
+          <label for="register-confirm">确认密码</label>
+          <input id="register-confirm" type="password" autocomplete="new-password" minlength="6" required>
+        </div>
+        <p id="register-error" class="field-error auth-error" role="alert"></p>
+        <button id="register-submit" class="button primary full" type="submit">
+          <span class="button-label">创建账号</span>
+        </button>
+      </form>
+
+      <div class="auth-divider" role="separator"><span>或</span></div>
+      <p id="guest-error" class="field-error auth-error" role="alert"></p>
+      <button id="guest-submit" class="button secondary full" type="button">
+        <span class="button-label">以游客身份继续</span>
+      </button>
+      <p class="auth-footnote">游客也拥有独立项目空间；退出后无法恢复该游客身份。</p>
+    </div>
+  </section>
+</main>
+
+<div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

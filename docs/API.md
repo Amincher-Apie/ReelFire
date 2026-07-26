@@ -1,81 +1,1009 @@
-# API 文档
+# ReelFire API 文档
 
-所有成功响应包含 `ok: true`；所有失败响应包含 `ok: false` 与 `error`。请求和响应均使用 UTF-8。
+> 更新日期：2026-07-25
+> 适用范围：当前可运行代码、当前自动化测试、剪辑预览 1.0 契约，以及明确标注的后续规划。
 
-## 与团队指导书的阶段性字段差异
+## 1. 文档口径与优先级
 
-本文件记录当前第一阶段后端的实际契约，并以 Day08 任务书为基础。`docs/TEAM_GUIDE.md` 中有三处面向最终联调的建议字段与当前实现不同，整合时未删除或改写团队指导书：
+本文件用于统一 ReelFire 当前接口事实、前端消费方式和后续兼容边界。
 
-- 创建任务当前返回 `status: created`，调用方再显式请求 `/analyze`；指导书建议创建后直接返回 `queued`；
-- 当前任务设置使用 `output_ratio`；指导书示例使用 `output_aspect`；
-- 当前人工片段字段为 `recommended_clip.start_time/end_time`；指导书示例使用 `segments[].start/end`。
+发生表述不一致时，按以下顺序判断：
 
-前端和算法在本阶段应以本 API 文档为准。若团队决定改用最终指导书字段，应通过一次兼容性变更同时更新路由、测试和本文档，不能只改单方字段。当前时间使用任务书要求的 ISO 8601 秒级字符串，尚未强制附加时区偏移。
+1. **当前可运行代码与自动化测试**：决定接口是否已经实现、当前实际状态码和当前可用字段。
+2. **`docs/EDITOR_API_CONTRACT.md`**：决定 `GET /api/jobs/{job_id}/editor` 的 1.0 成功响应字段、类型和兼容规则。
+3. **`docs/EDITOR_UI_STRUCTURE.md`**：决定剪辑预览页的页面职责、数据绑定、状态和交互。
+4. **本文件**：汇总通用接口、认证、任务接口、编辑页入口和后续规划。
 
-## 公共接口
+公共字段发生变化时，必须同时更新：
+
+- 生产接口；
+- 后端测试；
+- 前端消费代码或前端契约测试；
+- `docs/API.md`；
+- 涉及剪辑预览时，还必须同步更新 `docs/EDITOR_API_CONTRACT.md`。
+
+本文使用两种状态：
+
+- **已实现**：当前代码和测试已经存在，可作为验收事实。
+- **规划中**：尚未完整接入或测试，不得写成已经完成。
+
+---
+
+## 2. 通用约定
+
+### 2.1 数据格式
+
+除文件上传外，请求与响应使用：
+
+```http
+Content-Type: application/json; charset=utf-8
+```
+
+视频上传使用：
+
+```http
+multipart/form-data
+```
+
+### 2.2 成功响应
+
+成功响应保留：
+
+```json
+{
+  "ok": true
+}
+```
+
+业务数据使用语义字段，例如：
+
+```json
+{
+  "ok": true,
+  "job": {}
+}
+```
+
+### 2.3 失败响应
+
+失败响应至少包含：
+
+```json
+{
+  "ok": false,
+  "error": "用户可读错误信息"
+}
+```
+
+已接入稳定错误码的接口同时返回：
+
+```json
+{
+  "ok": false,
+  "error": "请先登录",
+  "error_code": "AUTH_REQUIRED"
+}
+```
+
+兼容原则：
+
+- 前端可显示 `error`；
+- 新逻辑应优先依据 `error_code`；
+- 不得要求前端通过匹配中文错误文本判断业务状态；
+- 旧接口尚未统一 `error_code` 时，不得仅为格式统一破坏现有前端。
+
+### 2.4 时间格式
+
+新增 SQLite 记录使用 ISO 8601 UTC 时间，例如：
+
+```text
+2026-07-25T06:30:00+00:00
+```
+
+现有文件任务可能仍使用无时区 ISO 字符串。兼容期间不得仅为统一时间格式破坏旧任务读取。
+
+### 2.5 存储边界
+
+当前系统采用混合存储：
+
+- SQLite：用户、项目归属、项目型任务索引、人工审核历史和 Agent 调用日志；
+- 文件系统：源视频、`job.json`、`analysis_report.json`、`agent_report.json`、关键帧和导出文件。
+
+任务运行链仍以 `JobService` 和任务目录中的 JSON 文件为事实来源；项目型上传同时在 SQLite 建立归属索引。
+
+---
+
+## 3. 已实现：健康检查
 
 ### `GET /api/health`
 
-无需参数。返回 `200`，包含 `status`、`model_ready`、`ffmpeg_ready`、服务名和版本。模型不存在时服务仍正常运行。
+无需登录。
 
-### `POST /api/jobs`
+成功返回 `200`，包含服务状态、版本、模型就绪状态和 FFmpeg 就绪状态。模型不存在时，服务仍可启动并返回健康信息。
 
-使用 `multipart/form-data`。`file` 必填，仅支持 `.mp4/.avi/.mov/.mkv`。可选字段：`project_name`、`sample_interval`、`target_duration`、`max_keyframes`、`min_keyframe_gap`、`object_weight`、`scene_change_weight`、`motion_weight`、`output_ratio`。三个权重范围为 0～1 且总和必须为 1；画幅支持 `16:9/9:16/1:1`。
+---
+
+## 4. 已实现：SQLite 认证
+
+认证使用 Flask Session Cookie。
+
+当前实现：
+
+- 用户写入 SQLite `users` 表；
+- 新密码使用 Werkzeug 密码哈希；
+- Session 只保存 `user_id`；
+- `/me` 根据 `user_id` 重新查询 SQLite；
+- 原 `users.db` JSON 用户可在启动时幂等导入；
+- 旧 SHA-256 密码使用 `legacy_sha256$` 前缀保存；
+- 旧用户首次成功登录后升级为 Werkzeug 哈希；
+- 正式运行应配置 `REELFIRE_SECRET_KEY`。
+
+接口不得返回：
+
+```text
+password
+password_hash
+session_secret
+```
+
+### 4.1 `POST /api/auth/register`
+
+请求：
+
+```json
+{
+  "username": "demo_user",
+  "password": "example-password"
+}
+```
+
+约束：
+
+| 字段 | 必填 | 约束 |
+| --- | --- | --- |
+| `username` | 是 | 去除首尾空白后 2～32 个字符；大小写不敏感唯一 |
+| `password` | 是 | 至少 6 个字符 |
 
 成功返回 `201`：
 
 ```json
-{"ok": true, "job_id": "20260718_103015_a1b2c3d4", "status": "created"}
+{
+  "ok": true,
+  "user": {
+    "id": 1,
+    "username": "demo_user",
+    "display_name": null,
+    "role": "user"
+  }
+}
 ```
 
-缺字段、空文件、格式或参数错误返回 `400`，超出大小上限返回 `413`。
+允许后端在不删除上述字段的前提下新增 `created_at` 等兼容字段。
 
-### `GET /api/jobs`
+错误：
 
-返回 `200` 与按 `created_at` 倒序排列的 `jobs`。损坏的 `job.json` 被跳过，不影响其他任务。
+| 状态 | `error_code` | 场景 |
+| ---: | --- | --- |
+| 400 | `AUTH_INPUT_REQUIRED` | 缺少用户名或密码 |
+| 400 | `AUTH_USERNAME_INVALID` | 用户名长度不合法 |
+| 400 | `AUTH_PASSWORD_WEAK` | 密码过短 |
+| 409 | `AUTH_USERNAME_EXISTS` | 用户名已存在 |
 
-### `GET /api/jobs/<job_id>`
+注册成功后建立登录会话。
 
-返回 `200` 与完整 `job`，附带 `report_available` 和相对 `result_files`。非法编号返回 `400`，不存在返回 `404`，损坏 JSON 返回 `500`。
+### 4.2 `POST /api/auth/login`
 
-### `DELETE /api/jobs/<job_id>`
-
-成功返回 `200` 和 `deleted_job_id`。不存在返回 `404`；`queued/running` 返回 `409`；非法编号返回 `400`。
-
-## 题目 1 现有内容理解接口
-
-### `POST /api/jobs/<job_id>/analyze`
-
-把 `created` 或 `failed` 任务放入后台队列并立即返回 `202`：
+请求：
 
 ```json
-{"ok": true, "job_id": "...", "status": "queued"}
+{
+  "username": "demo_user",
+  "password": "example-password"
+}
 ```
 
-不存在返回 `404`；已在队列/运行中或已完成返回 `409`。后台执行真实 OpenCV 采样、YOLO11n 推理、评分和关键帧生成；解码、模型或推理异常会进入 `failed` 并写入可读 `error`。
+成功返回 `200`：
 
-### `PATCH /api/jobs/<job_id>/review`
+```json
+{
+  "ok": true,
+  "user": {
+    "id": 1,
+    "username": "demo_user",
+    "display_name": null,
+    "role": "user"
+  }
+}
+```
 
-请求为 JSON 对象，可包含 `keyframes`、`segments` 和/或 `recommended_clip`。推荐片段至少包含 `start_time/end_time`，并满足 `0 <= start < end <= duration`（报告存在 duration 时）。片段使用 `start/end/order`；关键帧支持校验 `timestamp/keep/decision/order/label/note`。
+用户不存在、密码错误或账号停用统一返回：
 
-成功返回 `200` 与更新后的 `report`。任务不存在返回 `404`；报告尚未生成返回 `409`；字段或边界错误返回 `400`。
+```text
+401 AUTH_INVALID_CREDENTIALS
+```
 
-### `POST /api/jobs/<job_id>/rough-cut`
+登录成功后更新 `last_login_at`，并将 `user_id` 写入 Session。
 
-只接受 `completed` 且已有报告的任务。请求体可省略，也可用 JSON 覆盖报告中的 `start_time/end_time/output_ratio`。成功调用 FFmpeg 生成 MP4，返回 `200` 与 `rough_cut_file`，并同步写回任务和报告；FFmpeg 不可用时返回 `501`。任务状态/报告冲突返回 `409`，参数错误返回 `400`。
+### 4.3 `POST /api/auth/logout`
 
-### `GET /api/jobs/<job_id>/report`
+清除当前和遗留认证 Session 字段。
 
-成功返回 `200` 与可重读的 `report`。除视频、采样、分数、关键帧、片段和输出字段外，报告还包含：
+成功返回 `200`：
 
-- `segment_tags`：候选片段内真实 YOLO 类别的次数、最高置信度和所属片段；
-- `ai_cover_prompt`：只基于选中关键帧真实检测结果生成的封面描述，不虚构击杀或残局事件。
+```json
+{
+  "ok": true,
+  "message": "已退出登录"
+}
+```
 
-任务或报告不存在返回 `404`；报告 JSON 损坏返回 `500`。
+重复退出保持幂等。
 
-## 全局错误
+### 4.4 `GET /api/auth/me`
 
-- `404`：未知路由也返回 JSON；
-- `405`：不支持的 HTTP 方法；
-- `413`：请求体超过 `MAX_CONTENT_LENGTH`；
-- `500`：隐藏绝对路径和堆栈，仅在服务日志记录详情。
+从 Session 读取 `user_id`，再查询 SQLite。
+
+成功返回 `200`：
+
+```json
+{
+  "ok": true,
+  "user": {
+    "id": 1,
+    "username": "demo_user",
+    "display_name": null,
+    "role": "user"
+  }
+}
+```
+
+未登录、用户已删除或账号已停用时清除无效 Session，并返回：
+
+```text
+401 AUTH_REQUIRED
+```
+
+---
+
+## 5. 已实现：任务与视频分析接口
+
+> 上传接口同时支持项目型和旧文件型流程。API、URL 和 JSON 对外仍使用公开字段名 `job_id`。
+
+### 5.1 `POST /api/jobs`
+
+使用 `multipart/form-data`。
+
+必填字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `file` | 视频文件；支持 `.mp4`、`.avi`、`.mov`、`.mkv` |
+
+当前可选字段：
+
+```text
+project_id
+project_name
+sample_interval
+target_duration
+max_keyframes
+min_keyframe_gap
+object_weight
+scene_change_weight
+motion_weight
+output_ratio
+```
+
+约束：
+
+- 空文件、扩展名不支持或文件内容伪装返回 `400`；
+- 三个权重范围为 `0..1`，且总和必须为 `1`；
+- `output_ratio` 支持 `16:9`、`9:16`、`1:1`；
+- 超过 `MAX_CONTENT_LENGTH` 返回 `413`。
+
+兼容流程：
+
+- 表单中没有 `project_id` 时，不要求登录，继续按 `project_name` 创建仅由文件系统管理的任务，不写入 SQLite `assets` 和 `jobs`；
+- 表单中存在 `project_id` 时（包括空值），必须登录且该项目必须属于当前用户；空值或非正整数返回 `400 PROJECT_INPUT_INVALID`；
+- 项目型上传以 SQLite 项目的 `name` 作为 `job.json` 中可信的 `project_name`，请求中的冲突值不能改变项目归属；
+- 项目型上传在同一事务中先写入 `assets`、再写入 `jobs`，数据库失败时回滚并清理本次尚未成功返回的任务目录；
+- `jobs.public_job_id` 与响应中的字符串 `job_id` 完全相同。
+
+成功返回 `201`：
+
+```json
+{
+  "ok": true,
+  "job_id": "20260725_120000_1a2b3c4d",
+  "status": "created"
+}
+```
+
+当前前端会先创建任务，再显式调用 `/analyze`。
+
+### 5.2 `GET /api/jobs`
+
+返回 `200` 和按 `created_at` 倒序排列的任务列表。
+
+匿名用户只看到没有 SQLite 索引的旧文件任务。已登录用户看到自己的
+SQLite 项目任务和旧文件任务，不会看到其他用户的项目任务。
+
+损坏的单个 `job.json` 会被跳过，不阻塞其他任务列表。
+
+### 5.3 `GET /api/jobs/<job_id>`
+
+返回 `200` 和完整任务：
+
+```json
+{
+  "ok": true,
+  "job": {},
+  "report_available": false,
+  "result_files": []
+}
+```
+
+错误：
+
+- 非法 `job_id`：`400`；
+- 任务不存在：`404`；
+- 任务 JSON 损坏：`500`。
+
+### 5.4 `DELETE /api/jobs/<job_id>`
+
+成功返回 `200` 和 `deleted_job_id`。
+
+错误：
+
+- 任务不存在：`404`；
+- `queued` 或 `running` 状态不允许删除：`409`；
+- 非法 `job_id`：`400`。
+
+### 5.5 `POST /api/jobs/<job_id>/analyze`
+
+将 `created` 或 `failed` 任务加入后台队列。
+
+成功返回 `202`：
+
+```json
+{
+  "ok": true,
+  "job_id": "20260725_120000_1a2b3c4d",
+  "status": "queued"
+}
+```
+
+不存在返回 `404`；重复排队、运行中或已完成返回 `409`。
+
+后台执行 OpenCV 采样、YOLO 推理、评分和关键帧生成。解码、模型或推理异常会将任务标记为 `failed`，并保存可读错误。
+
+### 5.6 `PATCH /api/jobs/<job_id>/review`
+
+当前接口可更新分析报告中的：
+
+```text
+keyframes
+segments
+recommended_clip
+```
+
+片段约束：
+
+```text
+0 <= start < end <= duration
+```
+
+`recommended_clip` 使用：
+
+```text
+start_time
+end_time
+output_ratio
+```
+
+`segments[]` 使用：
+
+```text
+id
+start
+end
+order
+score
+source_keyframes
+```
+
+成功返回 `200` 和更新后的 `report`。
+
+错误：
+
+- 任务不存在：`404`；
+- 报告尚未生成：`409`；
+- 字段或片段边界错误：`400`。
+
+项目型任务只要提交 `status`，对应 SQLite 审核记录就保存审核完成后的
+完整、严格校验且按 `order` 排序的 `segments` 快照。请求提交
+`segments` 时使用新值；未提交时快照来自当前分析报告。
+
+### 5.7 `POST /api/jobs/<job_id>/rough-cut`
+
+项目型任务使用最新一条 `approved` 审核记录中的完整 `segments` 快照，
+按 `order` 拼接为一个 MP4。不存在审核、最新审核不是 `approved` 或
+审核快照为空时返回 `409`，且不会退回 `recommended_clip`。
+
+请求体可省略。`output_ratio` 可覆盖输出比例；`start_time` 和
+`end_time` 仅为 legacy 单片段兼容字段，项目型任务不会使用它们绕过
+审核快照：
+
+```text
+start_time
+end_time
+output_ratio
+```
+
+只接受 `completed` 且已有报告的任务。
+
+Legacy 任务优先导出报告中的非空 `segments`；没有片段时继续使用
+`recommended_clip` 单片段路径。比例优先级依次为请求、
+`recommended_clip`、任务设置和默认 `16:9`。
+
+成功生成 MP4 后返回 `200`，并把输出路径写回任务与报告。响应和报告
+输出同时包含 `segment_count`、`segment_ids` 和 `review_id`；legacy
+任务的 `review_id` 为 `null`。FFmpeg 先写同目录临时文件，确认非空后
+再原子替换，失败不会破坏已有粗剪。
+
+错误：
+
+- 状态、报告或审核门禁冲突：`409`；
+- 参数错误：`400`；
+- FFmpeg 不可用：`501`。
+
+### 5.8 `GET /api/jobs/<job_id>/report`
+
+成功返回：
+
+```json
+{
+  "ok": true,
+  "report": {}
+}
+```
+
+报告可能包含：
+
+```text
+duration
+samples
+keyframes
+recommended_clip
+segments
+segment_tags
+ai_cover_prompt
+output
+```
+
+事实边界：
+
+- `segment_tags` 来自真实 YOLO 检测结果；
+- `ai_cover_prompt` 只能依据真实检测内容生成；
+- 不得把规则文案冒充 Agent 最终结论。
+
+错误：
+
+- 任务或报告不存在：`404`；
+- 报告 JSON 损坏：`500`。
+
+---
+
+## 6. 已实现：剪辑预览 1.0
+
+### 6.1 页面入口
+
+```text
+/jobs/{job_id}/editor
+```
+
+页面唯一数据源：
+
+```http
+GET /api/jobs/{job_id}/editor
+```
+
+页面负责播放、时间轴定位、精彩片段列表和 Agent 评论状态展示，不运行 YOLO，不在浏览器中生成 Agent 评论。
+
+页面结构、DOM 身份和交互规则以：
+
+```text
+docs/EDITOR_UI_STRUCTURE.md
+```
+
+为准。
+
+### 6.2 聚合接口
+
+```http
+GET /api/jobs/{job_id}/editor
+Accept: application/json
+```
+
+成功响应字段与类型以：
+
+```text
+docs/EDITOR_API_CONTRACT.md
+```
+
+的 `1.0` 契约为准。
+
+核心结构：
+
+```json
+{
+  "ok": true,
+  "contract_version": "1.0",
+  "job": {
+    "job_id": "20260725_120000_1a2b3c4d",
+    "project_name": "FPS 视频内容理解",
+    "status": "completed",
+    "created_at": "2026-07-25T12:00:00",
+    "completed_at": "2026-07-25T12:03:10"
+  },
+  "video": {
+    "url": "/outputs/20260725_120000_1a2b3c4d/input/demo.mp4",
+    "filename": "demo.mp4",
+    "duration": 687.4
+  },
+  "highlights": [
+    {
+      "id": "seg_001",
+      "order": 1,
+      "start": 14.2,
+      "end": 21.8,
+      "duration": 7.6,
+      "score": 0.86,
+      "source_keyframes": ["kf_001"],
+      "agent_comment": null,
+      "agent_comment_status": "pending",
+      "agent_evidence_refs": []
+    }
+  ],
+  "output": {
+    "rough_cut_url": null,
+    "contact_sheet_url": null,
+    "ratio": "16:9"
+  }
+}
+```
+
+片段必须满足：
+
+```text
+0 <= start < end <= video.duration
+duration = end - start
+id 唯一
+order 唯一
+```
+
+Agent 评论状态：
+
+| 状态 | `agent_comment` | 页面行为 |
+| --- | --- | --- |
+| `ready` | 非空字符串 | 显示最终评论 |
+| `pending` | `null` | 显示“Agent 评论尚未生成” |
+| `unavailable` | `null` | 显示“Agent 评论不可用” |
+
+评论读取优先级：
+
+1. `agent_report.json.segment_comments[]` 中相同 `segment_id`；
+2. 带有 `ev:segment:{segment_id}` 证据引用的建议；
+3. 没有可验证结果时返回 `pending`。
+
+后端不得把前端拼接文案或未经 Agent 验证的规则文案标记为 `ready`。
+
+### 6.3 当前错误
+
+当前编辑契约定义：
+
+| 状态 | 场景 |
+| ---: | --- |
+| 400 | `job_id` 或报告字段不合法 |
+| 404 | 任务或源视频不存在 |
+| 409 | 任务未完成或报告尚未生成 |
+| 500 | 持久化数据损坏或内部错误 |
+
+任务权限接入后的 `401 AUTH_REQUIRED` 和 `403 JOB_ACCESS_DENIED` 属于后续规划；在实现和测试完成前，不写成当前已具备能力。
+
+### 6.4 兼容要求
+
+编辑页 1.0 允许新增字段，但不允许：
+
+- 删除已有字段；
+- 改变已有字段类型；
+- 改变 `contract_version` 含义；
+- 让前端根据 `samples` 自行生成评论；
+- 让前端根据 `score` 伪造自然语言结论。
+
+前端必须忽略未知新增字段。
+
+---
+
+## 7. 当前报告字段兼容关系
+
+当前系统同时保留两种片段结构：
+
+### 7.1 `recommended_clip`
+
+用途：
+
+- 兼容旧版单片段粗剪；
+- 保存单个推荐区间；
+- 当前 `/rough-cut` 可直接使用。
+
+字段：
+
+```text
+start_time
+end_time
+output_ratio
+```
+
+### 7.2 `segments[]`
+
+用途：
+
+- 保存多个精彩片段；
+- 作为剪辑预览聚合接口的主要片段来源；
+- 后续与 Agent `segment_comments[]` 按稳定 ID 关联；
+- 后续用于多片段审核、排序和导出。
+
+字段至少包含：
+
+```text
+id
+order
+start
+end
+score
+source_keyframes
+```
+
+两者在兼容期可以同时存在。不得把 `recommended_clip` 误写成当前唯一片段格式，也不得在多片段链路稳定前删除它。
+
+---
+
+## 8. 当前前端消费约束
+
+### 8.1 认证页面
+
+当前前端只发送：
+
+```json
+{
+  "username": "...",
+  "password": "..."
+}
+```
+
+当前前端只依赖成功响应中的：
+
+```text
+user.username
+```
+
+后端新增 `id`、`display_name`、`role`、`created_at` 等字段不会破坏前端，但不得删除 `username`。
+
+### 8.2 上传工作台
+
+当前前端上传仍发送：
+
+```text
+file
+project_name
+game_type
+sample_interval
+target_duration
+output_ratio
+```
+
+其中当前后端契约仍以 `project_name` 为兼容字段。
+
+在前端完成项目创建和项目选择之前，后端不得突然强制要求 `project_id`，否则当前可运行上传流程会失效。
+
+### 8.3 剪辑预览页
+
+当前前端只请求：
+
+```text
+GET /api/jobs/{job_id}/editor
+```
+
+并依赖：
+
+```text
+contract_version
+job.project_name
+video.url
+video.duration
+highlights[]
+output.rough_cut_url
+```
+
+前端对未知新增字段应保持容忍。
+
+---
+
+## 9. 已实现：SQLite 项目与上传任务归属
+
+已实现接口：
+
+```http
+POST /api/projects
+GET  /api/projects
+```
+
+两个接口均要求登录。`owner_id` 只来自当前 Session，客户端不得指定。
+
+`POST /api/projects` 接收：
+
+```json
+{
+  "name": "CS2 教学素材",
+  "description": "课程演示项目",
+  "game_type": "cs2"
+}
+```
+
+成功返回 `201`，其中 `status` 固定为 `active`。`GET /api/projects`
+仅返回当前登录用户自己的项目。
+
+当前数据关系：
+
+```text
+当前用户
+→ projects.owner_id
+→ assets.project_id
+→ jobs.project_id
+```
+
+项目型上传会校验项目归属、创建文件任务，再在同一事务中创建素材和任务
+索引，同时保留任务目录中的 `job.json`。数据库写入失败时清理本次尚未
+成功返回的任务目录。
+
+稳定错误：
+
+| HTTP | `error_code` | 场景 |
+| ---: | --- | --- |
+| 400 | `PROJECT_INPUT_INVALID` | 项目输入或 `project_id` 非法 |
+| 400 | `PROJECT_OWNER_FORBIDDEN` | 请求体尝试指定 `owner_id` |
+| 401 | `AUTH_REQUIRED` | 项目接口或项目型上传未登录 |
+| 403 | `PROJECT_ACCESS_DENIED` | 项目属于其他用户 |
+| 404 | `PROJECT_NOT_FOUND` | 项目不存在 |
+
+旧文件型任务可能没有 SQLite `jobs` 索引，并继续保留兼容访问。
+
+---
+
+## 10. 已实现：任务归属权限
+
+每个具体 `job_id` 先查询 SQLite `jobs.public_job_id`。存在索引时，
+必须登录并通过对应 `projects.owner_id` 校验；没有索引时视为旧文件
+任务，保持原有兼容行为。不能依据 `job.json` 中的名称或项目字段判断
+所有权。
+
+```text
+当前用户
+→ SQLite jobs 记录
+→ 所属 project
+→ project.owner_id
+```
+
+不能只根据公开 `job_id` 判断权限。
+
+权限错误：
+
+| 状态 | `error_code` | 场景 |
+| ---: | --- | --- |
+| 401 | `AUTH_REQUIRED` | 未登录访问 SQLite 项目任务 |
+| 403 | `JOB_ACCESS_DENIED` | 无权访问任务 |
+
+统一受保护入口包括：
+
+```text
+GET    /api/jobs/<job_id>
+DELETE /api/jobs/<job_id>
+POST   /api/jobs/<job_id>/analyze
+PATCH  /api/jobs/<job_id>/review
+POST   /api/jobs/<job_id>/rough-cut
+GET    /api/jobs/<job_id>/report
+GET    /api/jobs/<job_id>/editor
+GET    /jobs/<job_id>/editor
+GET    /outputs/<job_id>/<path:filename>
+```
+
+权限检查发生在排队、删除、审核文件写回、粗剪生成和文件发送之前。
+编辑页聚合接口成功响应继续遵守 `EDITOR_API_CONTRACT` 1.0。
+
+---
+
+## 11. 已实现：内容级三态审核
+
+固定三态：
+
+```text
+approved
+pending
+rejected
+```
+
+对应：
+
+| API 值 | 中文 |
+| --- | --- |
+| `approved` | 通过 |
+| `pending` | 待复核 |
+| `rejected` | 不通过 |
+
+说明：
+
+- `keep/skip` 仍表示单个关键帧决策；
+- 内容级三态保存到 SQLite `reviews.status`；
+- `reviews.job_row_id` 指向内部 `jobs.id`，API 路径仍使用公开 `job_id`；
+- 每次携带 `status` 的审核都新增历史记录，不覆盖旧记录；
+- 每条带 `status` 的项目型审核都把审核完成后的完整片段快照序列化到
+  `segments_json`；请求未提交片段时从当前报告严格校验后保存；
+- 提交的关键帧序列化到 `keyframes_json`，未提交时保存 `null`；
+- `PATCH /review` 继续更新 `analysis_report.json`，成功响应中的
+  `report` 字段保持不变；
+- Agent 不得更新或覆盖人工 `reviews` 记录。
+
+查询接口：
+
+```http
+GET /api/jobs/<job_id>/reviews
+GET /api/jobs/<job_id>/review/latest
+```
+
+历史按最新记录优先返回；没有记录时分别返回空数组或 `review: null`。
+两个接口使用与任务详情相同的归属权限。
+
+写回接口：
+
+```http
+PATCH /api/jobs/<job_id>/review
+```
+
+除原有 `keyframes`、`segments` 和 `recommended_clip` 外，可提交
+`status`、`labels` 和 `note`。只有出现 `status` 时才新增 SQLite
+审核历史。
+
+Legacy 文件任务不携带 `status` 时继续更新文件报告；携带 `status`
+时因没有可关联的内部任务行，返回
+`409 REVIEW_PERSISTENCE_UNAVAILABLE`，并且不修改报告。
+
+输入错误返回 `400 REVIEW_INPUT_INVALID`。项目任务仍使用
+`401 AUTH_REQUIRED` 和 `403 JOB_ACCESS_DENIED`。
+
+---
+
+## 12. 已实现：Agent 调用日志
+
+本阶段只实现真实调用日志的创建、状态服务和查询，不执行模型、RAG、
+Prompt 或工具编排，也不生成虚假的 Agent 成功结果。
+
+接口：
+
+```http
+POST /api/jobs/<job_id>/agent-calls
+GET  /api/jobs/<job_id>/agent-calls
+GET  /api/agent-calls/<agent_call_id>
+```
+
+`POST` 要求任务属于当前用户、任务状态为 `completed` 且
+`analysis_report.json` 已存在。成功返回 `202` 和一条真实 `queued`
+日志，但不会启动 Agent。`force` 是兼容字段，不能绕过活动调用保护。
+
+状态机：
+
+```text
+queued → running
+queued → failed
+running → completed
+running → failed
+running → needs_review
+```
+
+终态不能再次运行或互相覆盖。后续 Agent 工作流只能通过
+`services.agent_call_service` 的状态更新函数写入真实执行元数据。
+
+历史接口按调用 `id` 降序返回摘要；详情接口联表取得公开 `job_id`，
+不会返回 `agent_calls.job_row_id` 或 SQLite `jobs.id`。
+
+主要错误：
+
+| HTTP | `error_code` | 场景 |
+| ---: | --- | --- |
+| 400 | `AGENT_CALL_INPUT_INVALID` | 创建输入或调用 ID 不合法 |
+| 401 | `AUTH_REQUIRED` | 未登录访问项目任务 |
+| 403 | `JOB_ACCESS_DENIED` | 当前用户不是任务所有者 |
+| 404 | `AGENT_CALL_NOT_FOUND` | 调用记录不存在 |
+| 409 | `AGENT_CALL_PERSISTENCE_UNAVAILABLE` | Legacy 任务无法持久化日志 |
+| 409 | `AGENT_ALREADY_RUNNING` | 已存在活动调用 |
+| 409 | `REPORT_NOT_READY` | 任务或报告尚未就绪 |
+| 409 | `AGENT_CALL_STATE_CONFLICT` | 状态流转非法 |
+
+Legacy 任务的创建接口返回持久化不可用，历史接口返回空数组，不创建
+隐式 SQLite 任务，也不在文件系统伪造日志。
+
+现有表没有 `result_json`，且本阶段不增加迁移或结果文件。服务使用
+`result_path` 保存带 `inline_json$` 前缀的 JSON 兼容编码，并在 API
+读取时恢复为 `result` 对象；API 不暴露该内部编码。后续若引入真实结果
+文件，应通过正式迁移明确拆分。
+
+`failed` 必须保存错误码和错误信息。`needs_review` 是 Agent 建议状态，
+不等于人工 `reviews.pending`。Agent 服务不写入 `reviews`，也不修改
+`analysis_report.json` 或 `agent_report.json`。
+
+`agent_calls.result` 只是调用日志的一部分。阶段 D 不将 Agent 调用日志
+接入 Editor 聚合，也不修改 Editor 1.0 的评论来源或状态映射：
+Editor 评论仍只来自 `agent_report.json.segment_comments[]` 或带可验证
+证据的 `suggestions[]`。调用状态（包括 `completed`）不得直接映射为
+`agent_comment_status`，日志中的 `result`、`result_path` 或
+`inline_json$` 内容也不得直接作为 Editor 评论。
+
+日志不得保存 API Key、完整系统 Prompt 或未经脱敏的原始输入。SQLite
+只作为单机调用日志，不是生产级消息队列。
+
+---
+
+## 13. 编辑结果写回与多片段导出
+
+当前已实现：
+
+- 修改片段边界；
+- 修改片段顺序；
+- 内容级三态审核；
+- 刷新和历史重开后恢复编辑结果；
+- 按已审核片段生成多片段粗剪；
+
+后续能力包括：
+
+- 输出统计 JSON；
+- 导出审核包和 HTML/PDF 报告。
+
+---
+
+## 14. 全局错误处理
+
+当前全局行为：
+
+| 状态 | 场景 |
+| ---: | --- |
+| 404 | 未知路由或资源不存在 |
+| 405 | HTTP 方法不支持 |
+| 413 | 请求体超过 `MAX_CONTENT_LENGTH` |
+| 500 | 服务内部错误或持久化数据损坏 |
+
+要求：
+
+- JSON 响应不泄露绝对路径；
+- JSON 响应不返回堆栈；
+- 详细异常只写服务日志；
+- 文件损坏不得导致无关任务全部不可用；
+- Agent 不可用不得破坏已有 CV 报告。
+
+---
+
+## 15. 兼容与实施规则
+
+1. 不删除或改名当前任务接口。
+2. 不把 Flask 迁移为第二套 API 服务。
+3. 不删除 `job.json`、`analysis_report.json` 或任务目录。
+4. SQLite 用于认证、归属、审核和调用日志，不用于保存视频二进制内容。
+5. 当前上传继续兼容 `project_name`，直到前端完成 `project_id` 切换。
+6. 当前单片段粗剪继续兼容 `recommended_clip`。
+7. 多片段链路以 `segments[].id` 和 Agent `segment_id` 精确匹配。
+8. 编辑页成功响应以 `EDITOR_API_CONTRACT` 1.0 为准。
+9. 编辑页结构与交互以 `EDITOR_UI_STRUCTURE` 为准。
+10. 新增 `error_code` 时继续保留 `error`。
+11. 公共字段变化必须同步代码、测试、前端和文档。
+12. 尚未实现或未测试的接口必须明确标注“规划中”。
+13. 不得把规则回退、前端拼接或 Mock 数据写成真实 Agent 结果。
+14. 不得把通用 YOLO 检测结果写成未被模型真实检测到的 FPS 专用事件。

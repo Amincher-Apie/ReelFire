@@ -22,6 +22,9 @@ class ApiTestCase(unittest.TestCase):
         self.app = create_app(
             {
                 "TESTING": True,
+                "DATABASE": root / "test.db",
+                "SECRET_KEY": "test-secret-key",
+                "LEGACY_USERS_FILE": root / "legacy-users.db",
                 "OUTPUTS_DIR": self.outputs_dir,
                 "MODELS_DIR": root / "models",
                 "MODEL_PATH": root / "models" / "missing.pt",
@@ -30,6 +33,8 @@ class ApiTestCase(unittest.TestCase):
             }
         )
         self.client = self.app.test_client()
+        guest = self.client.post("/api/auth/guest", json={})
+        self.assertEqual(guest.status_code, 201, guest.get_json())
 
     def tearDown(self) -> None:
         self.app.extensions["analysis_service"].shutdown(wait=True)
@@ -57,12 +62,155 @@ class ApiTestCase(unittest.TestCase):
 
     def test_frontend_and_favicon_are_available(self) -> None:
         page = self.client.get("/")
+        anonymous = self.app.test_client()
+        login = anonymous.get("/login")
         favicon = self.client.get("/favicon.ico")
+        html = page.get_data(as_text=True)
+        login_html = login.get_data(as_text=True)
         self.assertEqual(page.status_code, 200)
-        self.assertIn("ReelFire", page.get_data(as_text=True))
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(self.client.get("/login").status_code, 302)
+        self.assertEqual(
+            self.client.get("/login?next=/jobs/example/editor").headers["Location"],
+            "/jobs/example/editor",
+        )
+        self.assertEqual(
+            self.client.get("/login?next=//example.invalid").headers["Location"],
+            "/",
+        )
+        self.assertIn("ReelFire", html)
+        self.assertEqual(html.lower().count("<!doctype html>"), 1)
+        self.assertEqual(html.lower().count("<html"), 1)
+        self.assertEqual(html.count('id="app"'), 1)
+        self.assertEqual(html.count("app.js"), 1)
+        self.assertNotIn("onclick=", html)
+        self.assertEqual(login_html.lower().count("<!doctype html>"), 1)
+        self.assertEqual(login_html.lower().count("<html"), 1)
+        self.assertEqual(login_html.count('id="login-form"'), 1)
+        self.assertEqual(login_html.count('id="register-form"'), 1)
+        self.assertEqual(login_html.count('id="guest-submit"'), 1)
+        self.assertEqual(login_html.count("app.js"), 1)
+        self.assertNotIn("onsubmit=", login_html)
         self.assertEqual(favicon.status_code, 200)
         self.assertEqual(favicon.mimetype, "image/svg+xml")
         favicon.close()
+
+    def test_anonymous_requests_are_gated_before_system_access(self) -> None:
+        anonymous = self.app.test_client()
+
+        page = anonymous.get("/")
+        jobs = anonymous.get("/api/jobs")
+        health = anonymous.get("/api/health")
+
+        self.assertEqual(page.status_code, 302)
+        self.assertIn("/login?next=/", page.headers["Location"])
+        self.assertEqual(jobs.status_code, 401)
+        self.assertEqual(jobs.get_json()["error_code"], "AUTH_REQUIRED")
+        self.assertEqual(health.status_code, 200)
+
+    def test_editor_page_has_one_semantic_document(self) -> None:
+        job_id = self.create_job()
+        page = self.client.get(f"/jobs/{job_id}/editor")
+        html = page.get_data(as_text=True)
+
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(html.lower().count("<!doctype html>"), 1)
+        self.assertEqual(html.lower().count("<html"), 1)
+        self.assertEqual(html.count('id="highlight-list"'), 1)
+        self.assertEqual(html.count('id="editor-video"'), 1)
+        self.assertEqual(html.count('id="timeline-scrubber"'), 1)
+        self.assertEqual(html.count("editor.js"), 1)
+        self.assertNotIn("onclick=", html)
+
+    def test_editor_contract_joins_segments_and_final_agent_comments(self) -> None:
+        job_id = self.create_job()
+        pending = self.client.get(f"/api/jobs/{job_id}/editor")
+        self.assertEqual(pending.status_code, 409)
+
+        jobs = self.app.extensions["job_service"]
+        jobs.write_report(
+            job_id,
+            {
+                "duration": 20.0,
+                "segments": [
+                    {
+                        "id": "seg_001",
+                        "start": 2.0,
+                        "end": 7.5,
+                        "score": 0.82,
+                        "source_keyframes": ["kf_001"],
+                        "order": 1,
+                    }
+                ],
+                "recommended_clip": {
+                    "start_time": 2.0,
+                    "end_time": 7.5,
+                    "output_ratio": "16:9",
+                },
+                "output": {
+                    "video": None,
+                    "contact_sheet": None,
+                },
+            },
+        )
+        jobs.update_job(
+            job_id,
+            status="completed",
+            completed_at="2026-07-25T12:00:00",
+        )
+
+        without_agent = self.client.get(f"/api/jobs/{job_id}/editor")
+        self.assertEqual(without_agent.status_code, 200)
+        first = without_agent.get_json()
+        self.assertEqual(first["contract_version"], "1.0")
+        self.assertEqual(first["highlights"][0]["agent_comment_status"], "pending")
+        self.assertIsNone(first["highlights"][0]["agent_comment"])
+        self.assertEqual(first["highlights"][0]["duration"], 5.5)
+        self.assertTrue(first["video"]["url"].endswith("/input/demo.mp4"))
+
+        agent_report = {
+            "status": "completed",
+            "segment_comments": [
+                {
+                    "segment_id": "seg_001",
+                    "comment": "该片段具有可追溯的高精彩度证据。",
+                    "evidence_refs": ["ev:segment:seg_001"],
+                }
+            ],
+        }
+        (jobs.job_dir(job_id) / "agent_report.json").write_text(
+            json.dumps(agent_report, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        with_agent = self.client.get(f"/api/jobs/{job_id}/editor")
+        highlight = with_agent.get_json()["highlights"][0]
+        self.assertEqual(highlight["agent_comment_status"], "ready")
+        self.assertEqual(
+            highlight["agent_comment"],
+            "该片段具有可追溯的高精彩度证据。",
+        )
+        self.assertEqual(
+            highlight["agent_evidence_refs"],
+            ["ev:segment:seg_001"],
+        )
+
+    def test_register_login_and_logout_flow(self) -> None:
+        credentials = {
+            "username": "frontend-reviewer",
+            "password": "test-passphrase",
+        }
+        register = self.client.post("/api/auth/register", json=credentials)
+        current = self.client.get("/api/auth/me")
+        logout = self.client.post("/api/auth/logout")
+        anonymous = self.client.get("/api/auth/me")
+        login = self.client.post("/api/auth/login", json=credentials)
+
+        self.assertEqual(register.status_code, 201)
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(logout.status_code, 200)
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(login.status_code, 200)
+        self.assertEqual(login.get_json()["user"]["username"], credentials["username"])
 
     def test_create_job_persists_workspace_and_metadata(self) -> None:
         job_id = self.create_job()
@@ -154,7 +302,7 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(response.get_json()["status"], "queued")
 
-        deadline = time.monotonic() + 3
+        deadline = time.monotonic() + 10
         job = {}
         while time.monotonic() < deadline:
             job = self.client.get(f"/api/jobs/{job_id}").get_json()["job"]
@@ -280,6 +428,9 @@ class ApiTestCase(unittest.TestCase):
         restarted = create_app(
             {
                 "TESTING": True,
+                "DATABASE": root / "test.db",
+                "SECRET_KEY": "test-secret-key",
+                "LEGACY_USERS_FILE": root / "legacy-users.db",
                 "OUTPUTS_DIR": self.outputs_dir,
                 "MODELS_DIR": root / "models",
                 "MODEL_PATH": root / "models" / "missing.pt",

@@ -4,16 +4,30 @@ from __future__ import annotations
 
 import argparse
 import atexit
+import secrets
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
-from flask import Flask, jsonify, render_template, send_file
+from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 from werkzeug.exceptions import MethodNotAllowed, NotFound, RequestEntityTooLarge
 
 from config import Config
+from database import init_app as init_database_app
+from database import init_db
 from routes.api_routes import api_bp
-from services.analysis_service import AnalysisService
+from routes.auth_routes import auth_bp
+from services.agent_call_service import (
+    AgentAlreadyRunningError,
+    AgentCallNotFoundError,
+    AgentCallPersistenceUnavailableError,
+    AgentCallStateConflictError,
+    AgentCallValidationError,
+    AgentReportNotReadyError,
+)
+from services.auth_service import import_legacy_users
 from services.file_service import FileService, FileValidationError
+from services.job_access_service import JobAccessDeniedError, require_job_access
 from services.job_service import (
     CorruptDataError,
     InvalidJobIdError,
@@ -21,6 +35,41 @@ from services.job_service import (
     JobService,
     JobStateConflictError,
 )
+from services.project_service import (
+    ProjectAccessDeniedError,
+    ProjectNotFoundError,
+    ProjectOwnerForbiddenError,
+    ProjectValidationError,
+)
+from services.review_service import (
+    ReviewPersistenceUnavailableError,
+    ReviewValidationError,
+)
+from services.session_service import (
+    AuthenticationRequiredError,
+    require_authenticated_user_id,
+)
+
+
+def _create_analysis_service(
+    jobs: JobService,
+    max_workers: int,
+    model_path: Path,
+):
+    from services.analysis_service import AnalysisService
+
+    return AnalysisService(jobs, max_workers, model_path)
+
+
+def _safe_local_redirect(value: object, fallback: str) -> str:
+    if not isinstance(value, str) or not value.startswith("/"):
+        return fallback
+    if value.startswith("//") or "\\" in value:
+        return fallback
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        return fallback
+    return value
 
 
 def create_app(test_config: dict[str, Any] | None = None) -> Flask:
@@ -30,6 +79,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         app.config.update(test_config)
     app.json.ensure_ascii = False
     app.json.sort_keys = False
+    app.secret_key = app.config.get("SECRET_KEY") or secrets.token_hex(32)
 
     outputs_dir = Path(app.config["OUTPUTS_DIR"])
     models_dir = Path(app.config["MODELS_DIR"])
@@ -38,7 +88,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     jobs = JobService(outputs_dir)
     files = FileService(app.config["ALLOWED_VIDEO_EXTENSIONS"])
-    analysis = AnalysisService(
+    analysis_factory = app.config.get(
+        "ANALYSIS_SERVICE_FACTORY",
+        _create_analysis_service,
+    )
+    analysis = analysis_factory(
         jobs,
         app.config["BACKGROUND_WORKERS"],
         Path(app.config["MODEL_PATH"]),
@@ -50,11 +104,60 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     if not app.testing:
         atexit.register(analysis.shutdown, False)
 
+    init_database_app(app)
+    with app.app_context():
+        init_db()
+        import_legacy_users(app.config["LEGACY_USERS_FILE"])
+
     app.register_blueprint(api_bp)
+    app.register_blueprint(auth_bp)
+
+    public_endpoints = {
+        "api.health",
+        "auth.guest_login",
+        "auth.login",
+        "auth.register",
+        "favicon",
+        "login_page",
+        "static",
+    }
+
+    @app.before_request
+    def require_application_login():
+        if request.endpoint in public_endpoints:
+            return None
+        try:
+            require_authenticated_user_id()
+        except AuthenticationRequiredError:
+            if request.path.startswith("/api/"):
+                raise
+            next_url = request.full_path.rstrip("?")
+            return redirect(url_for("login_page", next=next_url))
+        return None
 
     @app.get("/")
     def index():
         return render_template("index.html")
+
+    @app.get("/login")
+    def login_page():
+        try:
+            require_authenticated_user_id()
+        except AuthenticationRequiredError:
+            return render_template("login.html")
+        next_url = _safe_local_redirect(
+            request.args.get("next"),
+            url_for("index"),
+        )
+        return redirect(next_url)
+
+        return render_template("login.html")
+
+    @app.get("/jobs/<job_id>/editor")
+    def editor_page(job_id: str):
+        require_job_access(job_id)
+        jobs.get_job(job_id)
+        return render_template("editor.html", job_id=job_id)
 
     @app.get("/favicon.ico")
     def favicon():
@@ -62,6 +165,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.get("/outputs/<job_id>/<path:filename>")
     def serve_job_output(job_id: str, filename: str):
+        require_job_access(job_id)
         root = jobs.job_dir(job_id).resolve()
         candidate = (root / filename).resolve()
         if root not in candidate.parents or not candidate.is_file():
@@ -72,6 +176,124 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @app.errorhandler(InvalidJobIdError)
     def handle_bad_request(exc: Exception):
         return jsonify(ok=False, error=str(exc)), 400
+
+    @app.errorhandler(AuthenticationRequiredError)
+    def handle_authentication_required(exc: AuthenticationRequiredError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AUTH_REQUIRED",
+        ), 401
+
+    @app.errorhandler(ProjectOwnerForbiddenError)
+    def handle_project_owner_forbidden(exc: ProjectOwnerForbiddenError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="PROJECT_OWNER_FORBIDDEN",
+        ), 400
+
+    @app.errorhandler(ProjectValidationError)
+    def handle_project_input_invalid(exc: ProjectValidationError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="PROJECT_INPUT_INVALID",
+        ), 400
+
+    @app.errorhandler(ProjectNotFoundError)
+    def handle_project_not_found(exc: ProjectNotFoundError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="PROJECT_NOT_FOUND",
+        ), 404
+
+    @app.errorhandler(ProjectAccessDeniedError)
+    def handle_project_access_denied(exc: ProjectAccessDeniedError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="PROJECT_ACCESS_DENIED",
+        ), 403
+
+    @app.errorhandler(JobAccessDeniedError)
+    def handle_job_access_denied(exc: JobAccessDeniedError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="JOB_ACCESS_DENIED",
+        ), 403
+
+    @app.errorhandler(ReviewValidationError)
+    def handle_review_input_invalid(exc: ReviewValidationError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="REVIEW_INPUT_INVALID",
+        ), 400
+
+    @app.errorhandler(ReviewPersistenceUnavailableError)
+    def handle_review_persistence_unavailable(
+        exc: ReviewPersistenceUnavailableError,
+    ):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="REVIEW_PERSISTENCE_UNAVAILABLE",
+        ), 409
+
+    @app.errorhandler(AgentCallValidationError)
+    def handle_agent_call_input_invalid(exc: AgentCallValidationError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AGENT_CALL_INPUT_INVALID",
+        ), 400
+
+    @app.errorhandler(AgentCallPersistenceUnavailableError)
+    def handle_agent_call_persistence_unavailable(
+        exc: AgentCallPersistenceUnavailableError,
+    ):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AGENT_CALL_PERSISTENCE_UNAVAILABLE",
+        ), 409
+
+    @app.errorhandler(AgentAlreadyRunningError)
+    def handle_agent_already_running(exc: AgentAlreadyRunningError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AGENT_ALREADY_RUNNING",
+        ), 409
+
+    @app.errorhandler(AgentReportNotReadyError)
+    def handle_agent_report_not_ready(exc: AgentReportNotReadyError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="REPORT_NOT_READY",
+        ), 409
+
+    @app.errorhandler(AgentCallStateConflictError)
+    def handle_agent_call_state_conflict(
+        exc: AgentCallStateConflictError,
+    ):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AGENT_CALL_STATE_CONFLICT",
+        ), 409
+
+    @app.errorhandler(AgentCallNotFoundError)
+    def handle_agent_call_not_found(exc: AgentCallNotFoundError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AGENT_CALL_NOT_FOUND",
+        ), 404
 
     @app.errorhandler(JobNotFoundError)
     def handle_not_found(exc: JobNotFoundError):

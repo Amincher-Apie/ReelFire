@@ -62,7 +62,9 @@ highlight_score =
 - [`docs/REQUIREMENTS_BOARD.md`](docs/REQUIREMENTS_BOARD.md)：按角色划分的 P0/P1 需求看板；
 - [`docs/ACCEPTANCE_CHECKLIST.md`](docs/ACCEPTANCE_CHECKLIST.md)：硬性条件、正常/异常和边界验收；
 - [`docs/DEMO_FLOW.md`](docs/DEMO_FLOW.md)：8 分钟演示流程和现场兜底方案；
-- [`docs/TEAM_GUIDE.md`](docs/TEAM_GUIDE.md)：模块契约、四天时间表和协作规范。
+- [`docs/TEAM_GUIDE.md`](docs/TEAM_GUIDE.md)：模块契约、四天时间表和协作规范；
+- [`docs/EDITOR_API_CONTRACT.md`](docs/EDITOR_API_CONTRACT.md)：剪辑预览聚合接口和逐片段 Agent 评论契约；
+- [`docs/EDITOR_UI_STRUCTURE.md`](docs/EDITOR_UI_STRUCTURE.md)：不依赖视觉输入的剪辑预览页语义结构、状态与交互说明。
 
 ## 获取项目
 
@@ -274,6 +276,7 @@ POST   /api/jobs/<job_id>/analyze
 PATCH  /api/jobs/<job_id>/review
 POST   /api/jobs/<job_id>/rough-cut
 GET    /api/jobs/<job_id>/report
+GET    /api/jobs/<job_id>/editor
 ```
 
 当前已接入真实 OpenCV 采样、YOLO11n 推理、带检测框关键帧、三项评分、联系表和 FFmpeg 粗剪。分析异常会进入 `failed` 并保存可读错误；FFmpeg 缺失时粗剪接口返回 `501`。系统不会生成假关键帧、假分数、假报告或假视频。完整请求字段和状态码见 [`docs/API.md`](docs/API.md)。
