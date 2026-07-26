@@ -41,8 +41,8 @@
     },
     "trajectory_output": "outputs\\video_detect_track_v2\\test_06_trajectory.json"
   },
-  "processing_time_seconds": 63.13,
-  "avg_fps": 31.63,
+  "processing_time_seconds": 63.76,
+  "avg_fps": 31.32,
   "frames": [
     {
       "frame_id": 0,

@@ -86,7 +86,11 @@
           "confidence_min": 0.4019
         }
       ],
-      "reason": "enemy_engagement"
+      "reason": "enemy_engagement",
+      "id": "seg_001",
+      "order": 1,
+      "source_keyframes": [],
+      "score": 0.65
     },
     {
       "start": 50.767,
@@ -204,7 +208,11 @@
           "confidence_min": 0.368
         }
       ],
-      "reason": "enemy_engagement"
+      "reason": "enemy_engagement",
+      "id": "seg_002",
+      "order": 2,
+      "source_keyframes": [],
+      "score": 1.0
     },
     {
       "start": 63.533,
@@ -252,7 +260,11 @@
           "confidence_min": 0.6403
         }
       ],
-      "reason": "enemy_engagement"
+      "reason": "enemy_engagement",
+      "id": "seg_003",
+      "order": 3,
+      "source_keyframes": [],
+      "score": 0.65
     }
   ],
   "stats": {

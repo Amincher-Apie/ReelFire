@@ -270,6 +270,15 @@ class HighlightExtractor:
             seg["detected_classes"] = sorted(classes_set)
             seg["enemy_classes_in_segment"] = sorted(enemy_classes_set)
 
+        # 补充统一字段（id/order/score/source_keyframes）
+        max_peak = max((s["peak_enemy_count"] for s in segments), default=1) or 1
+        for idx, seg in enumerate(segments, start=1):
+            seg["id"] = f"seg_{idx:03d}"
+            seg["order"] = idx
+            seg["source_keyframes"] = []
+            peak = seg.get("peak_enemy_count", 1)
+            seg["score"] = round(0.3 + 0.7 * (peak / max_peak), 4)
+
         total_seg_duration = sum(s["duration"] for s in segments)
         stats = {
             "total_segments": len(segments),
