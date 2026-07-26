@@ -2,7 +2,7 @@
 
 `agent/` 独立负责把 CV 流程生成的 `analysis_report.json` 转换为有证据引用的内容摘要、知识规则和审核建议。模型或向量服务失败不能修改原始 CV 报告。
 
-## Day 02 工具节点
+## Day 02～Day 03 工具与逐片段输出
 
 当前已实现四个工具：
 
@@ -17,7 +17,11 @@
 2. `knowledge_retriever` 返回 Top-K 知识引用；
 3. `advice_generator` 调用本地模型或确定性规则；
 4. `rule_validator` 检查结构、引用、三态审核和禁止虚构项；
-5. 原子写入 `agent_report.json` 和脱敏后的 `agent_trace.json`。
+5. 按 CV `segments[].id` 生成 `segment_comments[]`；
+6. 原子写入 `agent_report.json` 和脱敏后的 `agent_trace.json`。
+
+每个工具轨迹均包含状态、耗时、输入摘要和输出摘要。摘要只保存数量、状态等
+非敏感信息，不写入原始报告、视频内容、令牌或本机绝对路径。
 
 本地 Ollama 调用示例：
 
@@ -71,11 +75,31 @@ agent_report = service.run_analysis_report(
     provider={"type": "ollama", "model": "qwen3:0.6b"},
     output_dir=Path("outputs/job_id"),
 )
-backend_record = to_backend_agent_call(agent_report, prompt_version="v1")
+backend_record = to_backend_agent_call(agent_report, prompt_version="v2")
 ```
 
 适配器不会修改原始 CV 报告。Agent 的 `degraded` 状态会映射为后端
 `agent_calls` 契约中的 `needs_review`。
+
+当 CV 跟踪模块暂时把多片段输出保存为单独的 highlights JSON 时，可通过
+`highlight_report` 参数做兼容接入：
+
+```python
+highlights = json.loads(
+    Path("outputs/job_id/video_highlights.json").read_text(encoding="utf-8")
+)
+agent_report = service.run_analysis_report(
+    cv_report,
+    highlight_report=highlights,
+    provider={"type": "ollama", "model": "qwen3:0.6b"},
+    output_dir=Path("outputs/job_id"),
+)
+```
+
+适配器会按源数组顺序为缺少 ID 的片段稳定生成 `seg_001`、`seg_002` 等编号，
+但不会补造缺失的评分。最终编辑页评论至少包含
+`segment_id/comment/evidence_refs`，并始终引用
+`ev:segment:<segment_id>`；无评分或证据不足时状态为 `needs_review`。
 
 模型返回无效引用、虚构事件或示例占位文本时，校验工具会拒绝模型草稿，记录错误并改用确定性输出。输入损坏时返回 `failed`；模型、Embedding 或落盘服务可恢复失败时返回 `degraded`。
 

@@ -16,7 +16,7 @@ OLLAMA_ACCEPTANCE_PATH = (
 OLLAMA_RESULTS_PATH = ROOT / "docs" / "evidence" / "ollama_topk_results.json"
 INPUT_SCHEMA_PATH = ROOT / "agent" / "schemas" / "agent_input.schema.json"
 OUTPUT_SCHEMA_PATH = ROOT / "agent" / "schemas" / "agent_output.schema.json"
-PROMPT_PATH = ROOT / "agent" / "prompts" / "review_agent_v1.md"
+PROMPT_PATH = ROOT / "agent" / "prompts" / "review_agent_v2.md"
 WORKFLOW_PATH = ROOT / "docs" / "AGENT_WORKFLOW.md"
 
 
@@ -182,6 +182,7 @@ class AgentSchemaAndPromptTests(unittest.TestCase):
                 "summary",
                 "tags",
                 "suggestions",
+                "segment_comments",
                 "review",
                 "evidence_refs",
                 "knowledge_refs",
@@ -215,6 +216,8 @@ class AgentSchemaAndPromptTests(unittest.TestCase):
         self.assertIn("{{knowledge_context_json}}", prompt)
         self.assertIn("evidence_refs", prompt)
         self.assertIn("knowledge_refs", prompt)
+        self.assertIn("segment_comments", prompt)
+        self.assertIn("segment_id", prompt)
         self.assertIn("needs_review", prompt)
         self.assertRegex(prompt, re.compile(r"禁止生成.*击杀.*爆头"))
 

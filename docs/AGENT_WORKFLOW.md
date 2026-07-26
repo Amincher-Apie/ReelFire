@@ -165,6 +165,12 @@ Day 02～Day 03 的代码接入遵循以下原则：
 `agent.integrations.to_backend_agent_call()` 映射到后端 `agent_calls` 契约；
 内部 `degraded` 对外映射为 `needs_review`，不会伪装成成功。
 
+当前 CV 跟踪分支的多片段 highlights 导出与 Web
+`analysis_report.json` 仍是两个产物。兼容层可把 highlights 中的真实轨迹、
+类别和时间边界合并到 Agent 输入，并按源顺序补充稳定片段 ID；缺失评分保持
+为空，不能用常量或模型猜测补齐。最终生产链仍应由 CV/后端把多片段
+`segments[]` 写入任务目录中的 `analysis_report.json`。
+
 ## 10. Day 01 验收
 
 - [x] 规则基线与独立 Agent 的边界明确；
@@ -175,7 +181,7 @@ Day 02～Day 03 的代码接入遵循以下原则：
 - [x] 三态审核建议口径明确；
 - [x] 事实引用和禁止虚构规则明确；
 - [x] 密钥与调用日志安全边界明确；
-- [x] 知识库、输入输出 Schema 和 Prompt v1 通过本地资产测试。
+- [x] 知识库、输入输出 Schema 和 Prompt v2 通过本地资产测试。
 - [x] 本地 Ollama 已完成真实 Embedding，并保存两组 Top-K=5 检索结果。
 
 ## 11. Day 02 验收
@@ -192,3 +198,16 @@ Day 02～Day 03 的代码接入遵循以下原则：
 - [x] 已检查 CV、后端和前端远端分支，保存跨成员契约对接记录；
 - [x] 当前主干真实 `analysis_report.json` 结构已通过契约夹具测试；
 - [x] Agent 状态、工具轨迹、引用和错误已映射到后端 `agent_calls` 字段。
+
+## 12. Day 03 逐片段联调口径
+
+- `segment_comments[].segment_id` 必须与 CV `segments[].id` 精确一致；
+- 每条评论必须包含对应的 `ev:segment:<segment_id>`，可附加真实检测或关键帧引用；
+- 评论只描述报告中存在的时间、类别、置信度、评分和知识条目；
+- CV 未提供评分时明确写“未提供可验证的片段评分”，状态进入 `needs_review`；
+- `agent_report.json` 与 `agent_trace.json` 使用同目录原子替换写入；
+- 工具轨迹记录输入摘要、输出摘要、耗时、状态和错误，可由后端按 `job_id`
+  写入或查询 `agent_calls`；
+- `tests/fixtures/cv_highlights_v2.json` 仅用于冻结跨分支契约，不是实际运行数据；
+- 只有拿到 CV 实际生成的多片段 JSON 并完成整链运行后，才可把“真实多片段联调”
+  标记为完成。

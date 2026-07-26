@@ -3,8 +3,11 @@ import json
 import unittest
 from pathlib import Path
 
+from jsonschema import Draft202012Validator
+
 from agent.integrations.reelfire import (
     build_agent_input,
+    merge_highlight_report,
     to_backend_agent_call,
 )
 from agent.service import AgentService
@@ -15,10 +18,23 @@ from tests.test_agent_tools import KeywordAwareEmbedder
 FIXTURE = (
     Path(__file__).parent / "fixtures" / "cv_analysis_report_v1.json"
 )
+HIGHLIGHT_FIXTURE = (
+    Path(__file__).parent / "fixtures" / "cv_highlights_v2.json"
+)
+OUTPUT_SCHEMA = (
+    Path(__file__).parents[1]
+    / "agent"
+    / "schemas"
+    / "agent_output.schema.json"
+)
 
 
 def cv_analysis_report() -> dict:
     return json.loads(FIXTURE.read_text(encoding="utf-8"))
+
+
+def cv_highlight_report() -> dict:
+    return json.loads(HIGHLIGHT_FIXTURE.read_text(encoding="utf-8"))
 
 
 class ReelFireContractTests(unittest.TestCase):
@@ -56,15 +72,22 @@ class ReelFireContractTests(unittest.TestCase):
         self.assertIn("person(2)", result["summary"])
         self.assertEqual(len(result["evidence_refs"]), 8)
         self.assertEqual(result["trace"]["tools"][0]["status"], "completed")
+        self.assertEqual(
+            result["segment_comments"][0]["segment_id"],
+            "seg_001",
+        )
+        self.assertIn("0.735", result["segment_comments"][0]["comment"])
 
     def test_backend_mapping_uses_backend_status_and_tool_fields(self) -> None:
         result = self.service.run_analysis_report(
             cv_analysis_report(),
             provider={"type": "rule_only"},
         )
-        backend = to_backend_agent_call(result, prompt_version="v1")
+        backend = to_backend_agent_call(result)
 
         self.assertEqual(backend["job_id"], "job_contract_001")
+        self.assertEqual(backend["prompt_version"], "v2")
+        self.assertEqual(backend["result_path"], "agent_report.json")
         self.assertEqual(backend["status"], "needs_review")
         self.assertEqual(
             backend["input_summary"],
@@ -80,7 +103,17 @@ class ReelFireContractTests(unittest.TestCase):
             ],
         )
         self.assertEqual(backend["result"]["review_status"], "pending")
+        self.assertTrue(
+            all(item["input_summary"] for item in backend["tool_trace"])
+        )
+        self.assertTrue(
+            all(item["output_summary"] for item in backend["tool_trace"])
+        )
         self.assertTrue(backend["references"])
+        self.assertEqual(
+            backend["result"]["segment_comments"],
+            result["segment_comments"],
+        )
 
     def test_failed_agent_result_maps_to_failed_backend_call(self) -> None:
         report = cv_analysis_report()
@@ -111,6 +144,120 @@ class ReelFireContractTests(unittest.TestCase):
                 report,
                 provider={"type": "unknown"},
             )
+
+    def test_cv_multi_segment_export_is_assigned_stable_editor_ids(self) -> None:
+        analysis = cv_analysis_report()
+        highlights = cv_highlight_report()
+        original_analysis = copy.deepcopy(analysis)
+        original_highlights = copy.deepcopy(highlights)
+
+        merged = merge_highlight_report(analysis, highlights)
+
+        self.assertEqual(analysis, original_analysis)
+        self.assertEqual(highlights, original_highlights)
+        self.assertEqual(
+            [item["id"] for item in merged["segments"]],
+            ["seg_001", "seg_002"],
+        )
+        self.assertEqual(
+            [item["order"] for item in merged["segments"]],
+            [1, 2],
+        )
+        self.assertNotIn("score", merged["segments"][0])
+        self.assertEqual(
+            merged["segments"][0]["detections_summary"][0]["track_id"],
+            11,
+        )
+
+    def test_segment_comments_match_editor_contract_without_fake_score(self) -> None:
+        result = self.service.run_analysis_report(
+            cv_analysis_report(),
+            provider={"type": "rule_only"},
+            highlight_report=cv_highlight_report(),
+        )
+
+        self.assertEqual(result["status"], "completed")
+        comments = result["segment_comments"]
+        self.assertEqual(
+            [item["segment_id"] for item in comments],
+            ["seg_001", "seg_002"],
+        )
+        self.assertIn("敌方角色", comments[0]["comment"])
+        self.assertIn("CT角色", comments[1]["comment"])
+        self.assertIn("步枪", comments[1]["comment"])
+        self.assertTrue(
+            all(
+                "未提供可验证的片段评分" in item["comment"]
+                for item in comments
+            )
+        )
+        serialized = json.dumps(comments, ensure_ascii=False)
+        self.assertNotIn("击杀", serialized)
+        self.assertNotIn("爆头", serialized)
+        self.assertNotIn("获胜", serialized)
+        for comment in comments:
+            self.assertEqual(
+                comment["evidence_refs"][0],
+                f"ev:segment:{comment['segment_id']}",
+            )
+            self.assertEqual(comment["review_status"], "needs_review")
+
+    def test_highlight_export_rejects_invalid_track_boundaries(self) -> None:
+        highlights = cv_highlight_report()
+        highlights["segments"][0]["detections_summary"][0][
+            "first_seen"
+        ] = 6.5
+        result = self.service.run_analysis_report(
+            cv_analysis_report(),
+            provider={"type": "rule_only"},
+            highlight_report=highlights,
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["errors"][0]["code"], "invalid_agent_input")
+
+    def test_duplicate_segment_order_is_rejected(self) -> None:
+        highlights = cv_highlight_report()
+        highlights["segments"][0]["id"] = "seg_001"
+        highlights["segments"][1]["id"] = "seg_002"
+        highlights["segments"][0]["order"] = 1
+        highlights["segments"][1]["order"] = 1
+        analysis = cv_analysis_report()
+        analysis["segments"] = highlights["segments"]
+
+        result = self.service.run_analysis_report(
+            analysis,
+            provider={"type": "rule_only"},
+        )
+
+        self.assertEqual(result["status"], "failed")
+        self.assertIn("order", result["errors"][0]["message"])
+
+    def test_multi_segment_result_validates_against_output_schema(self) -> None:
+        result = self.service.run_analysis_report(
+            cv_analysis_report(),
+            provider={"type": "rule_only"},
+            highlight_report=cv_highlight_report(),
+        )
+        schema = json.loads(OUTPUT_SCHEMA.read_text(encoding="utf-8"))
+
+        Draft202012Validator(schema).validate(result)
+
+    def test_multi_segment_comments_are_repeatable(self) -> None:
+        first = self.service.run_analysis_report(
+            cv_analysis_report(),
+            provider={"type": "rule_only"},
+            highlight_report=cv_highlight_report(),
+        )
+        second = self.service.run_analysis_report(
+            cv_analysis_report(),
+            provider={"type": "rule_only"},
+            highlight_report=cv_highlight_report(),
+        )
+
+        self.assertEqual(first["segment_comments"], second["segment_comments"])
+        self.assertEqual(first["summary"], second["summary"])
+        self.assertEqual(first["review"], second["review"])
 
 
 if __name__ == "__main__":
