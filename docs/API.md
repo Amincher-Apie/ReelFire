@@ -492,6 +492,106 @@ output
 - 任务或报告不存在：`404`；
 - 报告 JSON 损坏：`500`。
 
+### 5.9 `GET /api/jobs/<job_id>/statistics`
+
+只读聚合当前正式 `analysis_report.json`、SQLite 审核历史和 Agent 调用
+历史。要求任务属于当前登录用户、状态为 `completed` 且报告存在。接口不写
+统计文件，不修改报告、审核、Agent 正式文件或调用日志，也不会运行 CV、
+Provider 或 FFmpeg。
+
+成功响应：
+
+```json
+{
+  "ok": true,
+  "contract_version": "1.0",
+  "statistics": {
+    "job_id": "job_xxx",
+    "timeline": {
+      "video_duration_seconds": 120.0,
+      "sampled_frame_count": 24,
+      "keyframe_count": 10
+    },
+    "detections": {
+      "count_semantics": "sampled_detection_occurrences",
+      "total_occurrences": 12,
+      "confidence_observation_count": 12,
+      "confidence": {
+        "minimum": 0.61,
+        "maximum": 0.94,
+        "average": 0.81
+      },
+      "categories": [
+        {
+          "name": "person",
+          "count": 8,
+          "confidence_observation_count": 8,
+          "confidence": {
+            "minimum": 0.65,
+            "maximum": 0.94,
+            "average": 0.84
+          }
+        }
+      ]
+    },
+    "segments": {
+      "count": 3,
+      "sum_duration_seconds": 35.0,
+      "covered_duration_seconds": 31.5,
+      "coverage_ratio": 0.2625
+    },
+    "reviews": {
+      "history_count": 4,
+      "status_counts": {
+        "pending": 2,
+        "approved": 1,
+        "rejected": 1
+      },
+      "latest_status": "approved"
+    },
+    "agent_calls": {
+      "history_count": 3,
+      "status_counts": {
+        "queued": 0,
+        "running": 0,
+        "completed": 1,
+        "needs_review": 1,
+        "failed": 1
+      },
+      "latest_status": "completed"
+    }
+  }
+}
+```
+
+统计口径：
+
+- `sampled_frame_count` 是真实 `samples[]` 长度；检测来自
+  `samples[].objects[]`，类别字段为 `class`，置信度字段为
+  `confidence`。
+- `total_occurrences` 是所有采样帧中检测对象出现次数。同一对象跨五帧出现
+  计五次，不能解释为唯一目标数、人数或事件数。
+- 非对象检测项不计数；检测对象缺少非空类别时仍计入总出现次数，但不进入
+  `categories`。类别按 count 降序、同 count 时按 name 升序。
+- confidence 只接受非 bool、有限且位于 `[0, 1]` 的数字。没有合法观察值时
+  minimum、maximum、average 均为 `null`，不会用 0 伪造平均值。
+- `sum_duration_seconds` 简单累加每个合法片段的 `end-start`，允许重复计算
+  重叠；`covered_duration_seconds` 合并重叠和相邻区间后计算真实时间轴
+  覆盖。视频时长为 0 或缺失时 `coverage_ratio` 为 `null`。
+- 片段统计只读取当前 CV 报告，不使用审核快照。reviews 固定返回三态计数，
+  agent_calls 固定返回五态计数；无历史时计数为 0、latest_status 为
+  `null`。
+- samples、keyframes、segments 或历史为空是正常的 `200` 零值响应。
+- 响应不包含绝对路径、数据库内部 Job ID、owner/reviewer/requested_by、
+  Agent 完整 result 或审核备注历史。
+
+错误：
+
+- 未登录：`401 AUTH_REQUIRED`；
+- 非任务所有者：`403 JOB_ACCESS_DENIED`；
+- 任务未 completed 或报告不存在：`409 REPORT_NOT_READY`；
+- 报告 JSON 损坏或统计结构包含非法数据：复用现有 `500` 损坏数据响应。
+
 ---
 
 ## 6. 已实现：剪辑预览 1.0

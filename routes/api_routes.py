@@ -40,7 +40,11 @@ from services.job_access_service import (
     require_job_access,
 )
 from services.job_index_service import create_asset_and_job_index
-from services.job_service import JobService, JobStateConflictError
+from services.job_service import (
+    CorruptDataError,
+    JobService,
+    JobStateConflictError,
+)
 from services.project_service import (
     ProjectOwnerForbiddenError,
     ProjectValidationError,
@@ -59,6 +63,10 @@ from services.review_service import (
     validate_review_status,
 )
 from services.session_service import require_authenticated_user_id
+from services.statistics_service import (
+    StatisticsValidationError,
+    build_job_statistics,
+)
 
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -920,6 +928,48 @@ def get_report(job_id: str):
     jobs, _, _ = _services()
     require_job_access(job_id)
     return jsonify(ok=True, report=jobs.read_report(job_id))
+
+
+@api_bp.get("/jobs/<job_id>/statistics")
+def get_job_statistics(job_id: str):
+    jobs, _, _ = _services()
+    access = require_job_access(job_id)
+    job = jobs.get_job(job_id)
+    if (
+        job.get("status") != "completed"
+        or not jobs.report_path(job_id).is_file()
+    ):
+        raise AgentReportNotReadyError(
+            "任务必须 completed 且分析报告已生成"
+        )
+
+    report = jobs.read_report(job_id)
+    reviews = (
+        []
+        if access["is_legacy"]
+        else list_review_history(job_id)
+    )
+    agent_calls = (
+        []
+        if access["is_legacy"]
+        else list_agent_calls(job_id)
+    )
+    try:
+        statistics = build_job_statistics(
+            job_id=job_id,
+            report=report,
+            reviews=reviews,
+            agent_calls=agent_calls,
+        )
+    except StatisticsValidationError as exc:
+        raise CorruptDataError(
+            "analysis_report.json 包含无效的统计字段"
+        ) from exc
+    return jsonify(
+        ok=True,
+        contract_version="1.0",
+        statistics=statistics,
+    )
 
 
 @api_bp.get("/jobs/<job_id>/editor")
