@@ -49,7 +49,10 @@ class DifyProviderTests(unittest.TestCase):
         self,
     ) -> None:
         payload = agent_input()
-        payload["provider"] = {"type": "dify", "model": "dify-chat-app"}
+        payload["provider"] = {
+            "type": "dify",
+            "model": "reelfire-chatflow-v1.0.0",
+        }
         result = AgentService(
             knowledge_retriever=KnowledgeRetrieverTool(
                 embedder=KeywordAwareEmbedder()
@@ -109,6 +112,35 @@ class DifyProviderTests(unittest.TestCase):
         self.assertIn("ev:segment:seg_001", request_payload["query"])
         self.assertIn("KB-SEGMENT-001", request_payload["query"])
         self.assertEqual(result, {"summary": "ok"})
+
+    def test_app_info_verifies_chatflow_mode_without_exposing_key(self) -> None:
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+        with patch(
+            "agent.providers.dify.urlopen",
+            return_value=FakeResponse(),
+        ) as mocked_urlopen, patch(
+            "agent.providers.dify.json.load",
+            return_value={"name": "ReelFire", "mode": "advanced-chat"},
+        ):
+            result = DifyChatClient(
+                base_url="https://api.dify.test",
+                api_key="test-placeholder-key",
+            ).get_app_info()
+
+        request = mocked_urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://api.dify.test/v1/info")
+        self.assertEqual(request.get_method(), "GET")
+        self.assertEqual(
+            request.get_header("Authorization"),
+            "Bearer test-placeholder-key",
+        )
+        self.assertEqual(result["mode"], "advanced-chat")
 
 
 if __name__ == "__main__":

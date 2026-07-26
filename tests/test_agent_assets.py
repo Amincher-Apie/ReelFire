@@ -19,6 +19,7 @@ OUTPUT_SCHEMA_PATH = ROOT / "agent" / "schemas" / "agent_output.schema.json"
 PROMPT_PATH = ROOT / "agent" / "prompts" / "review_agent_v2.md"
 WORKFLOW_PATH = ROOT / "docs" / "AGENT_WORKFLOW.md"
 ENV_EXAMPLE_PATH = ROOT / ".env.example"
+DIFY_HANDOFF_PATH = ROOT / "docs" / "DIFY_CONFIGURATION_HANDOFF.md"
 
 
 def load_json(path: Path) -> dict:
@@ -162,6 +163,7 @@ class AgentSchemaAndPromptTests(unittest.TestCase):
         self.assertIn("AGENT_PROVIDER=dify", lines)
         self.assertIn("DIFY_BASE_URL=https://api.dify.ai", lines)
         self.assertIn("DIFY_API_KEY=", lines)
+        self.assertIn("DIFY_MODEL_LABEL=reelfire-chatflow-v1.0.0", lines)
         self.assertFalse(
             any(
                 line.startswith("DIFY_API_KEY=")
@@ -169,6 +171,23 @@ class AgentSchemaAndPromptTests(unittest.TestCase):
                 for line in lines
             )
         )
+
+    def test_dify_handoff_freezes_portable_chatflow_contract(self) -> None:
+        handoff = DIFY_HANDOFF_PATH.read_text(encoding="utf-8")
+        for expected in (
+            "Dify Cloud",
+            "Chatflow",
+            "advanced-chat",
+            "https://api.dify.ai/v1/chat-messages",
+            "reelfire-chatflow-v1.0.0",
+            "python -m agent.check_dify",
+            '"inputs": {}',
+            '"response_mode": "blocking"',
+        ):
+            self.assertIn(expected, handoff)
+        for line in handoff.splitlines():
+            if line.startswith("DIFY_API_KEY="):
+                self.assertEqual(line, "DIFY_API_KEY=")
 
     def test_input_schema_matches_current_report_contract(self) -> None:
         schema = load_json(INPUT_SCHEMA_PATH)

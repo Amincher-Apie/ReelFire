@@ -25,7 +25,10 @@
 
 ## 在线 Dify 配置
 
-仓库提供真实的 Dify Chat API 适配器，密钥只从本地环境读取。先复制配置样例：
+仓库提供真实的 Dify Cloud Chatflow API 适配器，固定使用
+`advanced-chat` 应用的阻塞式 `/v1/chat-messages` 接口。密钥只从本地环境
+读取。完整的跨电脑交接步骤见 `docs/DIFY_CONFIGURATION_HANDOFF.md`。
+先复制配置样例：
 
 ```powershell
 Copy-Item .env.example .env
@@ -38,11 +41,17 @@ AGENT_PROVIDER=dify
 DIFY_BASE_URL=https://api.dify.ai
 DIFY_API_KEY=
 DIFY_USER=reelfire-demo
-DIFY_MODEL_LABEL=dify-chat-app
+DIFY_MODEL_LABEL=reelfire-chatflow-v1.0.0
 ```
 
-`DIFY_API_KEY` 在公开仓库中必须保持空值。测试人员填入 Dify 应用的 API Key
-后，可直接运行：
+`DIFY_API_KEY` 必须是该已发布 Chatflow 的应用 API Key，不是知识库 Key 或
+模型供应商 Key；在公开仓库中必须保持空值。接收方填写后先运行配置自检：
+
+```powershell
+python -m agent.check_dify
+```
+
+只有 `ok=true` 且 `mode=advanced-chat` 才符合当前适配器契约。随后运行：
 
 ```powershell
 python -m agent.run_agent `
