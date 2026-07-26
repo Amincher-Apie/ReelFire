@@ -52,7 +52,8 @@ Accept: application/json
   "video": {
     "url": "/outputs/20260725_120000_1a2b3c4d/input/demo.mp4",
     "filename": "demo.mp4",
-    "duration": 687.4
+    "duration": 687.4,
+    "preview_status": "source"
   },
   "highlights": [
     {
@@ -96,6 +97,7 @@ Accept: application/json
 | `url` | string | 否 | 同源视频访问地址，应支持 HTTP Range 请求 |
 | `filename` | string | 否 | 展示用文件名 |
 | `duration` | number | 否 | 秒，必须大于等于零 |
+| `preview_status` | string | 否 | `source`、`transcoded` 或 `source_unverified`；HEVC 等编码会生成 H.264 预览代理 |
 
 #### `highlights[]`
 
@@ -193,6 +195,10 @@ Editor 1.0 仍只按照上述 `agent_report.json.segment_comments[]` 和带可�
 ## 6. 前端消费约束
 
 - 页面只请求聚合接口，不直接读取 `samples` 推导评论。
+- 页面通过 Agent 调用接口创建并轮询真实生命周期：
+  `queued → running → completed/needs_review/failed`。
+- `needs_review` 携带 `model_generation_failed` 风险标记时，页面必须明确显示
+  “规则降级结果”，不得显示为在线 Dify 成功。
 - 时间显示可在前端格式化，但不得改变原始秒数。
 - 时间轴片段位置以 `start / video.duration` 和 `(end - start) / video.duration` 计算。
 - 源时间轴位置只由 `start/end` 决定；调整 `order` 不改变片段在源视频中的位置。

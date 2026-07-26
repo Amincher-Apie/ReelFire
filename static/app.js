@@ -11,6 +11,8 @@ const state = {
   selectedFile: null,
   previewUrl: null,
   pollTimer: null,
+  agentPollTimer: null,
+  agentCallId: null,
   toolCalls: [],
 };
 
@@ -397,14 +399,141 @@ function renderToolCalls() {
 function updateAgentFlow(hasReport = false) {
   const nodes = [...document.querySelectorAll(".agent-node")];
   nodes.forEach((node) => node.classList.remove("complete", "blocked"));
-  if (!hasReport) return;
+  if (!hasReport) {
+    stopAgentPolling();
+    state.agentCallId = null;
+    byId("agent-provider-badge").textContent = "等待 Agent";
+    byId("agent-run-note").textContent =
+      "YOLO 完成后会自动启动 Agent，并在这里显示排队、运行、完成或降级状态。";
+    if (nodes.length >= 4) {
+      nodes[0].querySelector("small").textContent = "等待任务完成";
+      nodes[1].querySelector("small").textContent = "等待真实检测";
+      nodes[2].querySelector("small").textContent = "等待 Agent 调用";
+      nodes[3].querySelector("small").textContent = "等待复核";
+    }
+    return;
+  }
   nodes[0].classList.add("complete");
   nodes[0].querySelector("small").textContent = "真实分析报告已读取";
   nodes[1].classList.add("complete");
   nodes[1].querySelector("small").textContent = "真实检测标签已汇总";
-  nodes[2].classList.add("blocked");
-  nodes[2].querySelector("small").textContent = "独立 Agent 服务待接入";
-  nodes[3].querySelector("small").textContent = "可修改关键帧决策并保存";
+  nodes[2].querySelector("small").textContent = "准备启动 Agent";
+  nodes[3].querySelector("small").textContent = "等待 Agent 结果与人工复核";
+}
+
+function stopAgentPolling() {
+  if (state.agentPollTimer) window.clearTimeout(state.agentPollTimer);
+  state.agentPollTimer = null;
+}
+
+function renderAgentCall(call) {
+  const nodes = [...document.querySelectorAll(".agent-node")];
+  if (nodes.length < 4 || !call) return;
+  const badge = byId("agent-provider-badge");
+  const note = byId("agent-run-note");
+  nodes[0].classList.add("complete");
+  nodes[1].classList.add("complete");
+  nodes[2].classList.remove("complete", "blocked");
+  nodes[3].classList.remove("complete", "blocked");
+
+  const provider = call.model_name || "已配置的 Agent";
+  const status = call.status;
+  if (status === "queued") {
+    badge.textContent = "Agent 排队中";
+    note.textContent = "Agent 调用已创建，正在等待后台执行器。";
+    nodes[2].querySelector("small").textContent = "调用已排队";
+    nodes[3].querySelector("small").textContent = "等待 Agent 结果";
+  } else if (status === "running") {
+    badge.textContent = provider;
+    note.textContent = "Agent 正在执行报告解析、知识检索、建议生成和规则校验。";
+    nodes[2].querySelector("small").textContent = "Agent 正在运行";
+    nodes[3].querySelector("small").textContent = "等待 Agent 结果";
+  } else if (status === "completed") {
+    badge.textContent = provider;
+    note.textContent = "Agent 已完成，结果和工具轨迹已经保存。";
+    nodes[2].classList.add("complete");
+    nodes[2].querySelector("small").textContent = "Agent 结果已保存";
+    nodes[3].classList.add("complete");
+    nodes[3].querySelector("small").textContent = "可进入 Editor 复核";
+  } else if (status === "needs_review") {
+    const riskFlags = call.result?.risk_flags || [];
+    const degraded = riskFlags.includes("model_generation_failed")
+      || riskFlags.includes("model_provider_not_configured");
+    badge.textContent = degraded ? "规则降级结果" : provider;
+    note.textContent = degraded
+      ? "在线模型调用失败，系统已保留规则结果；请检查 Agent 调用详情和 Dify 配置。"
+      : "Agent 已完成，但结果需要人工复核。";
+    nodes[2].classList.add(degraded ? "blocked" : "complete");
+    nodes[2].querySelector("small").textContent = degraded
+      ? "在线模型失败，已规则降级"
+      : "Agent 结果待复核";
+    nodes[3].classList.add("complete");
+    nodes[3].querySelector("small").textContent = "请进入 Editor 复核";
+  } else {
+    badge.textContent = "Agent 失败";
+    note.textContent = call.error_message || "Agent 执行失败，请检查服务配置。";
+    nodes[2].classList.add("blocked");
+    nodes[2].querySelector("small").textContent =
+      call.error_code || "Agent 执行失败";
+    nodes[3].classList.add("blocked");
+    nodes[3].querySelector("small").textContent = "没有可复核的 Agent 结果";
+  }
+}
+
+async function pollAgentCall(jobId, callId) {
+  stopAgentPolling();
+  try {
+    const payload = await api.get(
+      `/api/agent-calls/${encodeURIComponent(callId)}`,
+    );
+    const call = payload.agent_call;
+    renderAgentCall(call);
+    if (call.status === "queued" || call.status === "running") {
+      state.agentPollTimer = window.setTimeout(
+        () => pollAgentCall(jobId, callId),
+        1400,
+      );
+      return;
+    }
+    logTool(
+      "GET",
+      `/api/agent-calls/${callId}`,
+      `Agent 终态：${call.status}`,
+    );
+  } catch (error) {
+    byId("agent-provider-badge").textContent = "Agent 状态异常";
+    byId("agent-run-note").textContent = error.message;
+  }
+}
+
+async function ensureAgentRun(jobId) {
+  stopAgentPolling();
+  try {
+    const history = await api.get(
+      `/api/jobs/${encodeURIComponent(jobId)}/agent-calls`,
+    );
+    let call = Array.isArray(history.agent_calls)
+      ? history.agent_calls[0]
+      : null;
+    if (!call) {
+      logTool(
+        "POST",
+        `/api/jobs/${jobId}/agent-calls`,
+        "启动 Agent 分析",
+      );
+      const created = await api.post(
+        `/api/jobs/${encodeURIComponent(jobId)}/agent-calls`,
+        { prompt_version: "v2", force: false },
+      );
+      call = created.agent_call;
+    }
+    state.agentCallId = call.id;
+    renderAgentCall(call);
+    await pollAgentCall(jobId, call.id);
+  } catch (error) {
+    byId("agent-provider-badge").textContent = "Agent 未启动";
+    byId("agent-run-note").textContent = error.message;
+  }
 }
 
 function aggregateDetections(report) {
@@ -580,6 +709,7 @@ async function loadReport(jobId) {
   logTool("GET", `/api/jobs/${jobId}/report`, "读取真实分析报告");
   const payload = await api.get(`/api/jobs/${encodeURIComponent(jobId)}/report`);
   renderReport(payload.report);
+  await ensureAgentRun(jobId);
 }
 
 function stopPolling() {
@@ -905,5 +1035,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
 window.addEventListener("beforeunload", () => {
   stopPolling();
+  stopAgentPolling();
   if (state.previewUrl) URL.revokeObjectURL(state.previewUrl);
 });

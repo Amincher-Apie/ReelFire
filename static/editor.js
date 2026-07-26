@@ -18,6 +18,8 @@ const state = {
   timelineBound: false,
   draggedSegmentId: null,
   orderDirty: false,
+  agentPollTimer: null,
+  agentCallId: null,
 };
 
 // ── 工具函数 ─────────────────────────────────────────────────────────
@@ -849,6 +851,208 @@ function renderAgentCompleted(comment) {
   }
 }
 
+// ── Agent 调用进度 ───────────────────────────────────────────────────
+function stopAgentPolling() {
+  if (state.agentPollTimer) window.clearTimeout(state.agentPollTimer);
+  state.agentPollTimer = null;
+}
+
+function setAgentProgress(status, detail, call) {
+  var badge = byId("agent-run-badge");
+  var retry = byId("agent-retry-button");
+  var queued = byId("agent-step-queued");
+  var running = byId("agent-step-running");
+  var result = byId("agent-step-result");
+  [queued, running, result].forEach(function (step) {
+    step.classList.remove("active", "complete", "failed");
+  });
+  badge.className = "agent-run-badge " + status;
+  retry.hidden = true;
+
+  if (status === "queued" || status === "pending") {
+    badge.textContent = status === "queued" ? "排队中" : "检查中";
+    queued.classList.add("active");
+  } else if (status === "running") {
+    badge.textContent = "分析中";
+    queued.classList.add("complete");
+    running.classList.add("active");
+  } else if (status === "completed") {
+    badge.textContent = "Agent 已完成";
+    queued.classList.add("complete");
+    running.classList.add("complete");
+    result.classList.add("complete");
+  } else if (status === "degraded") {
+    badge.textContent = "规则降级结果";
+    queued.classList.add("complete");
+    running.classList.add("failed");
+    result.classList.add("complete");
+    retry.hidden = false;
+  } else {
+    badge.textContent = "Agent 失败";
+    queued.classList.add("complete");
+    running.classList.add("failed");
+    result.classList.add("failed");
+    retry.hidden = false;
+  }
+
+  var provider = call && call.model_name ? " · " + call.model_name : "";
+  byId("agent-run-detail").textContent = detail + provider;
+}
+
+function isDegradedAgentCall(call) {
+  var flags =
+    call && call.result && Array.isArray(call.result.risk_flags)
+      ? call.result.risk_flags
+      : [];
+  return (
+    flags.indexOf("model_generation_failed") >= 0 ||
+    flags.indexOf("model_provider_not_configured") >= 0
+  );
+}
+
+function refreshEditorComments() {
+  return api
+    .get("/api/jobs/" + encodeURIComponent(state.jobId) + "/editor")
+    .then(function (payload) {
+      applyEditorData(payload);
+    });
+}
+
+function pollAgentCall(agentCallId) {
+  stopAgentPolling();
+  return api
+    .get("/api/agent-calls/" + encodeURIComponent(agentCallId))
+    .then(function (payload) {
+      var call = payload.agent_call;
+      if (call.status === "queued") {
+        setAgentProgress(
+          "queued",
+          "Agent 调用已创建，正在等待后台执行器。",
+          call
+        );
+      } else if (call.status === "running") {
+        setAgentProgress(
+          "running",
+          "正在解析视觉报告、检索知识并生成片段评论。",
+          call
+        );
+      } else if (call.status === "completed") {
+        setAgentProgress(
+          "completed",
+          "在线 Agent 结果和工具轨迹已保存。",
+          call
+        );
+        return refreshEditorComments();
+      } else if (call.status === "needs_review") {
+        if (isDegradedAgentCall(call)) {
+          setAgentProgress(
+            "degraded",
+            "在线模型调用失败，当前展示规则降级结果；可修正配置后重新运行。",
+            call
+          );
+        } else {
+          setAgentProgress(
+            "completed",
+            "Agent 已完成，结果需要人工复核。",
+            call
+          );
+        }
+        return refreshEditorComments();
+      } else {
+        setAgentProgress(
+          "failed",
+          call.error_message || "Agent 执行失败，请检查服务配置。",
+          call
+        );
+        return null;
+      }
+
+      state.agentPollTimer = window.setTimeout(function () {
+        pollAgentCall(agentCallId);
+      }, 1400);
+      return null;
+    })
+    .catch(function (error) {
+      setAgentProgress(
+        "failed",
+        error.message || "无法读取 Agent 调用状态。",
+        null
+      );
+    });
+}
+
+function startAgentRun(forceNew) {
+  stopAgentPolling();
+  setAgentProgress("pending", "正在检查 Agent 调用记录。", null);
+  var historyPromise = forceNew
+    ? Promise.resolve({ agent_calls: [] })
+    : api.get(
+        "/api/jobs/" + encodeURIComponent(state.jobId) + "/agent-calls"
+      );
+
+  return historyPromise
+    .then(function (history) {
+      var call =
+        Array.isArray(history.agent_calls) && history.agent_calls.length
+          ? history.agent_calls[0]
+          : null;
+      if (call) return call;
+      return api
+        .post(
+          "/api/jobs/" + encodeURIComponent(state.jobId) + "/agent-calls",
+          { prompt_version: "v2", force: false }
+        )
+        .then(function (created) {
+          return created.agent_call;
+        });
+    })
+    .then(function (call) {
+      state.agentCallId = call.id;
+      return pollAgentCall(call.id);
+    })
+    .catch(function (error) {
+      setAgentProgress(
+        "failed",
+        error.message || "Agent 调用无法启动。",
+        null
+      );
+    });
+}
+
+function ensureAgentRun() {
+  var hasReadyComment = state.agentComments.some(function (comment) {
+    return comment.status === "completed" && comment.summary;
+  });
+  return api
+    .get("/api/jobs/" + encodeURIComponent(state.jobId) + "/agent-calls")
+    .then(function (history) {
+      var call =
+        Array.isArray(history.agent_calls) && history.agent_calls.length
+          ? history.agent_calls[0]
+          : null;
+      if (call) {
+        state.agentCallId = call.id;
+        return pollAgentCall(call.id);
+      }
+      if (hasReadyComment) {
+        setAgentProgress(
+          "completed",
+          "已读取现有 Agent 报告。",
+          null
+        );
+        return null;
+      }
+      return startAgentRun(true);
+    })
+    .catch(function (error) {
+      setAgentProgress(
+        "failed",
+        error.message || "Agent 调用无法启动。",
+        null
+      );
+    });
+}
+
 // ── 数据加载 ─────────────────────────────────────────────────────────
 function loadEditorData(jobId) {
   state.jobId = jobId;
@@ -857,6 +1061,7 @@ function loadEditorData(jobId) {
   api.get("/api/jobs/" + encodeURIComponent(jobId) + "/editor").then(
     function (payload) {
       applyEditorData(payload);
+      ensureAgentRun();
     },
     function (error) {
       setView("error");
@@ -1000,6 +1205,9 @@ function initEditor() {
   byId("editor-retry-button").addEventListener("click", function () {
     loadEditorData(jobId);
   });
+  byId("agent-retry-button").addEventListener("click", function () {
+    startAgentRun(true);
+  });
   byId("save-review-button").addEventListener("click", function () {
     saveReview();
   });
@@ -1118,3 +1326,4 @@ function setButtonLoading(button, loading, label) {
 }
 
 document.addEventListener("DOMContentLoaded", initEditor);
+window.addEventListener("beforeunload", stopAgentPolling);

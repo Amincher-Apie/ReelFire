@@ -29,6 +29,7 @@ from services.editor_input_validation import (
 from services.ffmpeg_service import (
     create_multi_segment_rough_cut,
     create_rough_cut,
+    ensure_browser_preview,
     is_ffmpeg_available,
 )
 from services.file_service import FileService, FileValidationError
@@ -881,7 +882,22 @@ def get_editor_contract(job_id: str):
         raise FileValidationError("分析报告缺少有效的视频时长")
     source_video = jobs.get_input_video(job_id)
     job_dir = jobs.job_dir(job_id)
-    source_relative = source_video.relative_to(job_dir).as_posix()
+    preview_video = source_video
+    preview_status = "source"
+    try:
+        preview_video = ensure_browser_preview(
+            source_video,
+            job_dir / "result" / "editor_preview_h264.mp4",
+        )
+        if preview_video != source_video.resolve():
+            preview_status = "transcoded"
+    except (FileNotFoundError, RuntimeError):
+        current_app.logger.warning(
+            "Could not prepare browser preview for job %s; serving source video",
+            job_id,
+        )
+        preview_status = "source_unverified"
+    preview_relative = preview_video.relative_to(job_dir).as_posix()
     comments, missing_comment_status = _agent_comments(job_dir)
 
     raw_segments = report.get("segments", [])
@@ -955,12 +971,13 @@ def get_editor_contract(job_id: str):
             "url": url_for(
                 "serve_job_output",
                 job_id=job_id,
-                filename=source_relative,
+                filename=preview_relative,
             ),
             "filename": str(
                 job.get("original_asset_name") or source_video.name
             ),
             "duration": duration,
+            "preview_status": preview_status,
         },
         highlights=highlights,
         output={

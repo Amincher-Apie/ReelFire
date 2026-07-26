@@ -102,6 +102,8 @@ class DifyProviderTests(unittest.TestCase):
         request_payload = json.loads(request.data.decode("utf-8"))
         self.assertEqual(request.full_url, "https://api.dify.test/v1/chat-messages")
         self.assertEqual(request.get_header("Authorization"), "Bearer test-placeholder-key")
+        self.assertEqual(request.get_header("Accept"), "application/json")
+        self.assertIn("ReelFire/1.0", request.get_header("User-agent"))
         self.assertEqual(request_payload["response_mode"], "blocking")
         self.assertEqual(request_payload["user"], "contract-test")
         self.assertIn("ev:segment:seg_001", request_payload["query"])

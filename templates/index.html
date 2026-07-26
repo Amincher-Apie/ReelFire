@@ -226,15 +226,17 @@
               <p class="panel-kicker">WORKFLOW</p>
               <h2 id="agent-heading">Agent 工作流</h2>
             </div>
-            <span class="capability-badge neutral">规则基线</span>
+            <span id="agent-provider-badge" class="capability-badge neutral">等待 Agent</span>
           </div>
 
-          <p class="panel-note">当前展示真实 CV 报告解析与规则输出；独立 Agent 服务尚未接入，不会伪造模型调用。</p>
+          <p id="agent-run-note" class="panel-note" aria-live="polite">
+            YOLO 完成后会自动启动 Agent，并在这里显示排队、运行、完成或降级状态。
+          </p>
 
           <ol id="agent-flow" class="agent-flow">
             <li class="agent-node pending" data-step="1"><span>1</span><div><strong>视觉报告解析</strong><small>等待任务完成</small></div></li>
             <li class="agent-node pending" data-step="2"><span>2</span><div><strong>检测标签汇总</strong><small>等待真实检测</small></div></li>
-            <li class="agent-node pending" data-step="3"><span>3</span><div><strong>知识检索与建议</strong><small>独立 Agent 待接入</small></div></li>
+            <li class="agent-node pending" data-step="3"><span>3</span><div><strong>知识检索与建议</strong><small>等待 Agent 调用</small></div></li>
             <li class="agent-node pending" data-step="4"><span>4</span><div><strong>人工审核与输出</strong><small>等待复核</small></div></li>
           </ol>
 

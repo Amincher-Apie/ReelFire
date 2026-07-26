@@ -55,6 +55,7 @@
   display: grid;
   grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
   grid-template-areas:
+    "agent agent"
     "media preview"
     "toolbar toolbar";
   gap: 18px;
@@ -65,6 +66,113 @@
   margin: 0 0 12px;
   font-size: 15px;
   letter-spacing: -0.02em;
+}
+
+/* ---- Agent 运行状态 ---- */
+
+.agent-run-panel {
+  grid-area: agent;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.4fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel-soft);
+}
+
+.agent-run-copy h2,
+.agent-run-copy p {
+  margin: 0;
+}
+
+.agent-run-copy h2 {
+  margin-top: 2px;
+  font-size: 14px;
+}
+
+.agent-run-copy #agent-run-detail {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.agent-run-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(72px, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.agent-run-steps li {
+  min-height: 36px;
+  padding: 9px 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text-faint);
+  background: var(--panel);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.agent-run-steps li.active {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  color: var(--warning);
+}
+
+.agent-run-steps li.complete {
+  border-color: color-mix(in srgb, var(--success) 40%, var(--border));
+  color: var(--success);
+}
+
+.agent-run-steps li.failed {
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
+  color: var(--danger);
+}
+
+.agent-run-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.agent-run-actions .button {
+  min-height: 44px;
+}
+
+.agent-run-badge {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  background: var(--panel);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.agent-run-badge.running {
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--border));
+  color: var(--warning);
+}
+
+.agent-run-badge.completed {
+  border-color: color-mix(in srgb, var(--success) 42%, var(--border));
+  color: var(--success);
+}
+
+.agent-run-badge.failed {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+  color: var(--danger);
 }
 
 /* ---- 视频区 ---- */
@@ -1135,15 +1243,33 @@
   .segment-detail-panel {
     position: static;
   }
+
+  .agent-run-panel {
+    grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.5fr);
+  }
+
+  .agent-run-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
 }
 
 @media (max-width: 900px) {
   .editor-content {
     grid-template-columns: 1fr;
     grid-template-areas:
+      "agent"
       "preview"
       "media"
       "toolbar";
+  }
+
+  .agent-run-panel {
+    grid-template-columns: 1fr;
+  }
+
+  .agent-run-actions {
+    grid-column: auto;
   }
 
   .editor-header {

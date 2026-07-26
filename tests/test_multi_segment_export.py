@@ -12,6 +12,7 @@ from app import create_app
 from services.ffmpeg_service import (
     create_multi_segment_rough_cut,
     create_rough_cut,
+    ensure_browser_preview,
 )
 
 
@@ -167,6 +168,66 @@ class MultiSegmentFfmpegServiceTestCase(unittest.TestCase):
 
         self.assertEqual(result, self.output.resolve())
         self.assertEqual(self.output.read_bytes(), b"encoded")
+
+    def test_h264_source_is_used_without_preview_transcode(self) -> None:
+        def h264_probe(command, **_kwargs):
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="h264\n",
+                stderr="",
+            )
+
+        with (
+            patch("services.ffmpeg_service.shutil.which", side_effect=self._which),
+            patch(
+                "services.ffmpeg_service.subprocess.run",
+                side_effect=h264_probe,
+            ) as mocked_run,
+        ):
+            result = ensure_browser_preview(
+                self.source,
+                self.root / "preview.mp4",
+            )
+
+        self.assertEqual(result, self.source.resolve())
+        self.assertEqual(mocked_run.call_count, 1)
+
+    def test_hevc_source_creates_h264_browser_preview(self) -> None:
+        def hevc_then_transcode(command, **kwargs):
+            self.assertFalse(kwargs["shell"])
+            self.commands.append(command)
+            if command[0] == "ffprobe":
+                return subprocess.CompletedProcess(
+                    command,
+                    0,
+                    stdout="hevc\n",
+                    stderr="",
+                )
+            Path(command[-1]).write_bytes(b"h264-preview")
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="",
+                stderr="",
+            )
+
+        preview = self.root / "preview.mp4"
+        with (
+            patch("services.ffmpeg_service.shutil.which", side_effect=self._which),
+            patch(
+                "services.ffmpeg_service.subprocess.run",
+                side_effect=hevc_then_transcode,
+            ),
+        ):
+            result = ensure_browser_preview(self.source, preview)
+
+        self.assertEqual(result, preview.resolve())
+        self.assertEqual(preview.read_bytes(), b"h264-preview")
+        ffmpeg_command = self.commands[1]
+        self.assertIn("libx264", ffmpeg_command)
+        self.assertIn("yuv420p", ffmpeg_command)
+        self.assertIn("+faststart", ffmpeg_command)
 
     def test_invalid_ratio_and_segments_are_rejected(self) -> None:
         with patch(

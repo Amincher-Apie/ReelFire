@@ -212,6 +212,112 @@ def _source_has_audio(ffprobe: str, source: Path) -> bool:
     return bool(result.stdout.strip())
 
 
+def _source_video_codec(ffprobe: str, source: Path) -> str:
+    command = [
+        ffprobe,
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=codec_name",
+        "-of",
+        "default=noprint_wrappers=1:nokey=1",
+        str(source),
+    ]
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="backslashreplace",
+            shell=False,
+        )
+    except OSError as exc:
+        raise RuntimeError(
+            "FFprobe 检查视频编码失败：无法启动 FFprobe"
+        ) from exc
+    if result.returncode != 0:
+        detail = _process_detail(result, (source,))
+        raise RuntimeError(
+            f"FFprobe 检查视频编码失败（退出码 {result.returncode}）：{detail}"
+        )
+    codec = result.stdout.strip().lower()
+    if not codec:
+        raise RuntimeError("FFprobe 未返回视频编码")
+    return codec
+
+
+def ensure_browser_preview(
+    input_path: Path,
+    output_path: Path,
+) -> Path:
+    """Return an H.264/AAC MP4 that mainstream browsers can preview.
+
+    H.265/HEVC MP4 files can be decoded by OpenCV and FFmpeg while still
+    rendering as a black frame in Chromium. H.264 inputs are served directly;
+    other codecs are transcoded once and cached beside the analysis results.
+    """
+
+    ffmpeg = shutil.which("ffmpeg")
+    ffprobe = shutil.which("ffprobe")
+    if not ffmpeg or not ffprobe:
+        raise RuntimeError(
+            "FFmpeg 或 FFprobe 不可用，无法生成浏览器兼容预览"
+        )
+    source = Path(input_path).resolve()
+    destination = Path(output_path).resolve()
+    if not source.is_file():
+        raise FileNotFoundError("视频预览输入文件不存在")
+    if _source_video_codec(ffprobe, source) == "h264":
+        return source
+    if (
+        destination.is_file()
+        and destination.stat().st_size > 0
+        and destination.stat().st_mtime >= source.stat().st_mtime
+    ):
+        return destination
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = _temporary_output(destination)
+    command = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-y",
+        "-i",
+        str(source),
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "23",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "160k",
+        "-movflags",
+        "+faststart",
+        str(temporary),
+    ]
+    return _run_ffmpeg_atomically(
+        command,
+        temporary,
+        destination,
+        source,
+        "FFmpeg 浏览器预览转码失败",
+    )
+
+
 def create_multi_segment_rough_cut(
     input_path: Path,
     output_path: Path,

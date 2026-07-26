@@ -28,6 +28,7 @@ GET /api/jobs/{job_id}/editor
 4. 允许用户通过片段列表或时间轴定位视频。
 5. 允许用户调整粗剪片段的输出顺序，并保存为审核快照。
 6. 根据已审核的片段顺序生成多片段粗剪。
+7. 自动启动并轮询 Agent 调用，展示排队、运行、完成、失败或规则降级状态。
 
 页面不负责：
 
@@ -53,6 +54,11 @@ document
 │   └── button#editor-export-button
 │       └── 初始状态：disabled
 └── main#editor-main
+    ├── section#agent-run-panel
+    │   ├── status#agent-run-detail
+    │   ├── list：排队、分析、结果
+    │   ├── status#agent-run-badge
+    │   └── button#agent-retry-button
     ├── aside#highlight-sidebar
     │   ├── header
     │   │   ├── h1：精彩片段
@@ -198,7 +204,13 @@ document
 
 ### Agent 评论
 
-- 页面只消费 Editor 聚合接口，不直接请求 Agent 调用日志来生成片段评论。
+- 页面使用 Agent 调用接口启动和轮询真实任务，但不在前端生成评论。
+- 没有调用记录且没有现有 Agent 报告时，页面自动创建 Prompt v2 调用。
+- `queued/running`：显示当前运行状态并继续轮询。
+- `completed/needs_review`：重新请求 Editor 聚合接口读取最终评论。
+- `failed`：停止轮询，显示具体错误和“重新运行 Agent”按钮。
+- `needs_review` 且风险标记包含 `model_generation_failed`：显示“规则降级结果”，
+  不得显示成在线 Dify 成功。
 - Agent 调用日志完成不表示最终评论已经可展示。
 - 只有 Editor 接口返回 `agent_comment_status = ready` 时才显示评论。
 - `ready`：显示后端给出的最终评论。

@@ -73,6 +73,27 @@
     <!-- 主内容区 -->
     <div id="editor-content" class="editor-content" hidden>
 
+      <section id="agent-run-panel" class="agent-run-panel" aria-labelledby="agent-run-heading">
+        <div class="agent-run-copy">
+          <p class="panel-kicker">AGENT WORKFLOW</p>
+          <h2 id="agent-run-heading">Agent 分析进度</h2>
+          <p id="agent-run-detail" aria-live="polite">
+            正在检查 Agent 调用状态。
+          </p>
+        </div>
+        <ol class="agent-run-steps" aria-label="Agent 分析步骤">
+          <li id="agent-step-queued" class="active">1. 排队</li>
+          <li id="agent-step-running">2. 分析</li>
+          <li id="agent-step-result">3. 结果</li>
+        </ol>
+        <div class="agent-run-actions">
+          <span id="agent-run-badge" class="agent-run-badge pending">检查中</span>
+          <button id="agent-retry-button" class="button secondary small" type="button" hidden>
+            重新运行 Agent
+          </button>
+        </div>
+      </section>
+
       <!-- 当前视频预览区 -->
       <section class="editor-video-section" aria-labelledby="video-heading">
         <h2 id="video-heading" class="editor-section-title">当前视频预览</h2>

@@ -80,6 +80,11 @@ class DifyChatClient:
             headers={
                 "Authorization": f"Bearer {self.api_key}",
                 "Content-Type": "application/json",
+                "Accept": "application/json",
+                "User-Agent": (
+                    "ReelFire/1.0 "
+                    "(+https://github.com/Amincher-Apie/ReelFire)"
+                ),
             },
             method="POST",
         )
