@@ -147,6 +147,7 @@ def analyze_video(
     """Run OpenCV sampling, YOLO detection and explainable scoring."""
     import cv2
 
+    from cv_engine.highlight_extractor import HighlightExtractor
     from cv_engine.highlight_scorer import HighlightScorer
     from cv_engine.video_processor import VideoProcessor
     from cv_engine.yolo_detector import YoloDetector
@@ -236,15 +237,46 @@ def analyze_video(
         float(settings.get("target_duration", 30.0)),
     )
     output_ratio = str(settings.get("output_ratio", "16:9"))
-    segment = {
-        "id": "seg_001",
-        "start": start,
-        "end": end,
-        "score": best["highlight_score"],
-        "source_keyframes": [best["id"]],
-        "order": 1,
-    }
-    segment_tags = scorer.calculate_segment_tags(samples, [segment])
+
+    # 使用 HighlightExtractor 生成多片段（基于敌人出现/消失事件）
+    fps = float(video.get("fps", 24.0))
+    frame_results = [
+        {
+            "timestamp": s["timestamp"],
+            "detections": s.get("objects", []),
+        }
+        for s in samples
+    ]
+    extractor = HighlightExtractor()
+    highlight_result = extractor.extract(frame_results, fps, duration)
+    segments = highlight_result.get("segments", [])
+
+    # 向后兼容：如果没有多片段，回退到单片段
+    if not segments:
+        segments = [{
+            "id": "seg_001",
+            "order": 1,
+            "start": start,
+            "end": end,
+            "score": best["highlight_score"],
+            "source_keyframes": [best["id"]],
+            "duration": round(end - start, 3),
+            "peak_enemy_count": 0,
+            "detected_classes": [],
+            "enemy_classes_in_segment": [],
+            "detections_summary": [],
+            "reason": "highlight_score",
+        }]
+
+    # 给 segment 补充 source_keyframes（关联关键帧）
+    for seg in segments:
+        seg_keyframes = [
+            kf["id"] for kf in keyframes
+            if seg["start"] <= float(kf["timestamp"]) <= seg["end"]
+        ]
+        seg["source_keyframes"] = seg_keyframes if seg_keyframes else []
+
+    segment_tags = scorer.calculate_segment_tags(samples, segments)
     ai_cover_prompt = scorer.generate_cover_prompt(best)
 
     contact_sheet = job_dir / "result" / "contact_sheet.jpg"
@@ -263,13 +295,14 @@ def analyze_video(
         },
         "samples": samples,
         "keyframes": keyframes,
-        "segments": [segment],
+        "segments": segments,
         "segment_tags": segment_tags,
         "ai_cover_prompt": ai_cover_prompt,
         "recommended_clip": {
-            "start_time": start,
-            "end_time": end,
+            "start_time": segments[0]["start"] if segments else start,
+            "end_time": segments[0]["end"] if segments else end,
             "output_ratio": output_ratio,
+            "segment_count": len(segments),
         },
         "output": {
             "video": None,

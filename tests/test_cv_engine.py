@@ -1,13 +1,17 @@
 import unittest
 import os
 import sys
+import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cv_engine.video_processor import VideoProcessor
 from cv_engine.yolo_detector import YoloDetector
+from cv_engine.highlight_extractor import HighlightExtractor
 from cv_engine.highlight_scorer import HighlightScorer
+from services.analysis_service import analyze_video
 
 class TestVideoProcessor(unittest.TestCase):
     def test_calculate_scene_change(self):
@@ -113,6 +117,143 @@ class TestHighlightScorer(unittest.TestCase):
         )
         self.assertIn('person×2', prompt)
         self.assertIn('不虚构击杀或残局事件', prompt)
+
+
+class TestHighlightExtractor(unittest.TestCase):
+    def test_extract_returns_stable_ordered_multi_segments(self):
+        extractor = HighlightExtractor(
+            pre_buffer=0.0,
+            post_buffer=0.0,
+            smooth_frames=0,
+            merge_gap=0.5,
+        )
+        frames = [
+            {'timestamp': 0.0, 'detections': []},
+            {
+                'timestamp': 1.0,
+                'detections': [
+                    {'class': 'enemy', 'confidence': 0.8, 'track_id': 1},
+                ],
+            },
+            {
+                'timestamp': 2.0,
+                'detections': [
+                    {'class': 'enemy', 'confidence': 0.9, 'track_id': 1},
+                    {'class': 'enemy', 'confidence': 0.7, 'track_id': 2},
+                ],
+            },
+            {'timestamp': 3.0, 'detections': []},
+            {
+                'timestamp': 8.0,
+                'detections': [
+                    {'class': 'enemy', 'confidence': 0.75, 'track_id': 3},
+                ],
+            },
+            {'timestamp': 9.0, 'detections': []},
+        ]
+
+        result = extractor.extract(frames, fps=24.0, duration=12.0)
+        segments = result['segments']
+
+        self.assertEqual([item['id'] for item in segments], ['seg_001', 'seg_002'])
+        self.assertEqual([item['order'] for item in segments], [1, 2])
+        self.assertEqual(
+            [(item['start'], item['end']) for item in segments],
+            [(1.0, 3.0), (8.0, 9.0)],
+        )
+        self.assertEqual([item['score'] for item in segments], [1.0, 0.65])
+        self.assertTrue(all(item['source_keyframes'] == [] for item in segments))
+        self.assertEqual(result['stats']['total_segments'], 2)
+
+    def test_extract_without_enemy_returns_empty_segments(self):
+        extractor = HighlightExtractor(smooth_frames=0)
+        result = extractor.extract(
+            [
+                {'timestamp': 0.0, 'detections': []},
+                {
+                    'timestamp': 1.0,
+                    'detections': [
+                        {'class': 'weapon', 'confidence': 0.9},
+                    ],
+                },
+            ],
+            fps=24.0,
+            duration=2.0,
+        )
+
+        self.assertEqual(result['segments'], [])
+        self.assertEqual(result['stats']['total_segments'], 0)
+
+
+class TestAnalysisServiceMultiSegment(unittest.TestCase):
+    def test_analysis_report_uses_extractor_multi_segments(self):
+        import numpy as np
+
+        frames = [np.zeros((16, 16, 3), dtype=np.uint8) for _ in range(30)]
+        timestamps = [float(index) for index in range(30)]
+        detections = [[] for _ in frames]
+        for index in (3, 4, 20, 21):
+            detections[index] = [
+                {
+                    'class': 'enemy',
+                    'confidence': 0.9,
+                    'bbox': [2, 2, 10, 10],
+                    'track_id': index,
+                }
+            ]
+
+        class FakeDetector:
+            def __init__(self, *_args, **_kwargs):
+                pass
+
+            def detect_frames(self, _frames):
+                return detections
+
+        with tempfile.TemporaryDirectory() as temporary:
+            job_dir = Path(temporary)
+            with (
+                patch(
+                    'cv_engine.video_processor.VideoProcessor.get_video_info',
+                    return_value={
+                        'duration': 30.0,
+                        'width': 16,
+                        'height': 16,
+                        'fps': 1.0,
+                    },
+                ),
+                patch(
+                    'cv_engine.video_processor.VideoProcessor.sample_video',
+                    return_value=(frames, timestamps),
+                ),
+                patch('cv_engine.yolo_detector.YoloDetector', FakeDetector),
+                patch('cv2.imwrite', return_value=True),
+                patch('services.analysis_service._save_contact_sheet', return_value=False),
+            ):
+                report = analyze_video(
+                    Path(temporary) / 'input.mp4',
+                    job_dir,
+                    {
+                        'model_path': str(Path(temporary) / 'model.pt'),
+                        'max_keyframes': 6,
+                        'min_keyframe_gap': 2.0,
+                    },
+                )
+
+        segments = report['segments']
+        self.assertGreaterEqual(len(segments), 2)
+        self.assertEqual(
+            [segment['id'] for segment in segments],
+            [f'seg_{index:03d}' for index in range(1, len(segments) + 1)],
+        )
+        self.assertEqual(
+            [segment['order'] for segment in segments],
+            list(range(1, len(segments) + 1)),
+        )
+        self.assertEqual(
+            report['recommended_clip']['segment_count'],
+            len(segments),
+        )
+
 
 if __name__ == '__main__':
     unittest.main()
