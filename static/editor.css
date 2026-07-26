@@ -257,6 +257,212 @@
   font-size: 11px;
 }
 
+/* ---- 粗剪顺序轨道 ---- */
+
+.editor-sr-only {
+  position: absolute;
+  overflow: hidden;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  margin: -1px;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+}
+
+.sequence-section {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel-soft);
+}
+
+.sequence-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sequence-header h3 {
+  margin: 2px 0 0;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.sequence-save-state {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 4px 9px;
+  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--border));
+  border-radius: 999px;
+  color: var(--success);
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.sequence-save-state.dirty {
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--border));
+  color: var(--warning);
+}
+
+.sequence-help {
+  margin: 8px 0 12px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.clip-sequence {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 2px 2px 10px;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: inline proximity;
+}
+
+.sequence-clip {
+  display: grid;
+  min-width: 310px;
+  min-height: 72px;
+  flex: 0 0 min(360px, 82vw);
+  grid-template-columns: 44px 32px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text);
+  background: var(--panel);
+  cursor: pointer;
+  scroll-snap-align: start;
+  transition:
+    border-color 180ms ease,
+    background 180ms ease,
+    opacity 180ms ease;
+}
+
+.sequence-clip:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-strong);
+}
+
+.sequence-clip:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 65%, white);
+  outline-offset: 2px;
+}
+
+.sequence-clip.selected {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.sequence-clip.dragging {
+  opacity: 0.45;
+}
+
+.sequence-clip.drag-over {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.sequence-drag-handle {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 9px;
+  color: var(--text-muted);
+  background: var(--panel-soft);
+  cursor: grab;
+  touch-action: none;
+}
+
+.sequence-drag-handle:active {
+  cursor: grabbing;
+}
+
+.sequence-drag-handle svg,
+.sequence-move-button svg {
+  width: 18px;
+  height: 18px;
+  fill: currentColor;
+}
+
+.sequence-clip-order {
+  color: var(--primary);
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.sequence-clip-meta {
+  min-width: 0;
+}
+
+.sequence-clip-meta strong,
+.sequence-clip-meta small {
+  display: block;
+}
+
+.sequence-clip-meta strong {
+  font-family: Consolas, "SFMono-Regular", monospace;
+  font-size: 12px;
+}
+
+.sequence-clip-meta small {
+  overflow: hidden;
+  margin-top: 4px;
+  color: var(--text-faint);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sequence-clip-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.sequence-move-button {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text);
+  background: var(--panel-strong);
+  cursor: pointer;
+}
+
+.sequence-move-button:hover:not(:disabled) {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.sequence-move-button:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--primary) 65%, white);
+  outline-offset: 2px;
+}
+
+.sequence-move-button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.sequence-empty {
+  margin: 0;
+  padding: 16px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
 /* ---- 片段区 ---- */
 
 .editor-segments-section {

@@ -102,7 +102,7 @@ Accept: application/json
 | 字段 | 类型 | 可空 | 说明 |
 | --- | --- | --- | --- |
 | `id` | string | 否 | 片段稳定标识，推荐 `seg_001` 格式 |
-| `order` | integer | 否 | 从 1 开始的展示顺序 |
+| `order` | integer | 否 | 从 1 开始的粗剪输出顺序；Editor 重排后随审核快照写回 |
 | `start` | number | 否 | 起始秒数 |
 | `end` | number | 否 | 结束秒数，必须大于 `start` |
 | `duration` | number | 否 | `end - start`，由后端计算 |
@@ -195,5 +195,7 @@ Editor 1.0 仍只按照上述 `agent_report.json.segment_comments[]` 和带可�
 - 页面只请求聚合接口，不直接读取 `samples` 推导评论。
 - 时间显示可在前端格式化，但不得改变原始秒数。
 - 时间轴片段位置以 `start / video.duration` 和 `(end - start) / video.duration` 计算。
+- 源时间轴位置只由 `start/end` 决定；调整 `order` 不改变片段在源视频中的位置。
+- 用户重排片段后，前端必须将 `order` 规范化为连续的 `1..N` 再保存审核。
 - `agent_comment_status != ready` 时必须明确展示状态，不得伪造评论。
 - 未知新增字段必须忽略，避免前端因兼容性扩展而失败。

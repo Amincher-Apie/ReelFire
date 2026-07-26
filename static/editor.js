@@ -16,6 +16,8 @@ const state = {
   selectedSegmentId: null,
   videoElement: null,
   timelineBound: false,
+  draggedSegmentId: null,
+  orderDirty: false,
 };
 
 // ── 工具函数 ─────────────────────────────────────────────────────────
@@ -32,6 +34,17 @@ function createElement(tag, className, text) {
   if (className) el.className = className;
   if (text !== undefined) el.textContent = String(text);
   return el;
+}
+
+function createSvgIcon(pathData) {
+  var namespace = "http://www.w3.org/2000/svg";
+  var svg = document.createElementNS(namespace, "svg");
+  var path = document.createElementNS(namespace, "path");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  path.setAttribute("d", pathData);
+  svg.append(path);
+  return svg;
 }
 
 function formatTime(seconds) {
@@ -237,7 +250,11 @@ function renderTimeline() {
     segmentsBar.append(marker);
   });
 
-  updatePlayhead(0);
+  updatePlayhead(
+    state.videoElement && Number.isFinite(state.videoElement.currentTime)
+      ? state.videoElement.currentTime
+      : 0
+  );
 }
 
 function updatePlayhead(currentTime) {
@@ -382,6 +399,11 @@ function selectSegment(segmentId) {
     row.classList.toggle("selected", selected);
     row.setAttribute("aria-current", selected ? "true" : "false");
   });
+  document.querySelectorAll(".sequence-clip").forEach(function (clip) {
+    var selected = clip.dataset.segmentId === segmentId;
+    clip.classList.toggle("selected", selected);
+    clip.setAttribute("aria-current", selected ? "true" : "false");
+  });
 
   // 片段标记高亮
   var markers = document.querySelectorAll(".timeline-segment-marker");
@@ -423,7 +445,12 @@ function renderSegmentList() {
     var timeCell = createElement(
       "span",
       "segment-time-cell",
-      formatTime(seg.start) + " : " + formatTime(seg.end)
+      "#" +
+        String(idx + 1).padStart(2, "0") +
+        "  " +
+        formatTime(seg.start) +
+        " : " +
+        formatTime(seg.end)
     );
     timeCell.setAttribute("role", "cell");
     timeCell.append(
@@ -457,6 +484,207 @@ function renderSegmentList() {
     });
 
     container.append(row);
+  });
+}
+
+function normalizeSegmentOrder() {
+  state.segments.forEach(function (segment, index) {
+    segment.order = index + 1;
+  });
+}
+
+function setSequenceSaveState(dirty) {
+  state.orderDirty = dirty;
+  var indicator = byId("sequence-save-state");
+  if (!indicator) return;
+  indicator.classList.toggle("dirty", dirty);
+  indicator.textContent = dirty
+    ? "顺序已修改 · 尚未保存"
+    : "顺序已同步";
+}
+
+function announceSequence(message) {
+  var live = byId("sequence-live");
+  if (live) live.textContent = message;
+}
+
+function moveSegment(segmentId, destinationIndex) {
+  var sourceIndex = state.segments.findIndex(function (segment) {
+    return segment.id === segmentId;
+  });
+  if (sourceIndex < 0) return;
+  var boundedIndex = Math.max(
+    0,
+    Math.min(Number(destinationIndex), state.segments.length - 1)
+  );
+  if (!Number.isInteger(boundedIndex) || boundedIndex === sourceIndex) return;
+
+  var moved = state.segments.splice(sourceIndex, 1)[0];
+  state.segments.splice(boundedIndex, 0, moved);
+  normalizeSegmentOrder();
+  setSequenceSaveState(true);
+  renderTimeline();
+  renderSegmentList();
+  renderClipSequence();
+  selectSegment(moved.id);
+  announceSequence(
+    "片段 " + moved.id + " 已移动到第 " + (boundedIndex + 1) + " 位。"
+  );
+}
+
+function createSequenceMoveButton(segment, index, direction) {
+  var isPrevious = direction === -1;
+  var button = createElement("button", "sequence-move-button");
+  button.type = "button";
+  button.disabled =
+    (isPrevious && index === 0) ||
+    (!isPrevious && index === state.segments.length - 1);
+  button.setAttribute(
+    "aria-label",
+    "将片段 " + segment.id + (isPrevious ? " 向前移动" : " 向后移动")
+  );
+  button.title = isPrevious ? "向前移动" : "向后移动";
+  button.append(
+    createSvgIcon(
+      isPrevious
+        ? "M15 18l-6-6 6-6"
+        : "M9 18l6-6-6-6"
+    )
+  );
+  button.addEventListener("click", function (event) {
+    event.stopPropagation();
+    moveSegment(segment.id, index + direction);
+  });
+  return button;
+}
+
+function renderClipSequence() {
+  var container = byId("clip-sequence");
+  clearChildren(container);
+  if (!container) return;
+
+  if (!state.segments.length) {
+    container.append(
+      createElement("p", "sequence-empty", "没有可加入粗剪的精彩片段。")
+    );
+    return;
+  }
+
+  state.segments.forEach(function (segment, index) {
+    var clip = createElement("article", "sequence-clip");
+    clip.dataset.segmentId = segment.id;
+    clip.setAttribute("role", "listitem");
+    clip.setAttribute("tabindex", "0");
+    clip.setAttribute(
+      "aria-label",
+      "输出顺序第 " +
+        (index + 1) +
+        " 位，" +
+        formatTime(segment.start) +
+        " 到 " +
+        formatTime(segment.end) +
+        "。按 Alt 加左右方向键可调整顺序。"
+    );
+
+    var handle = createElement("span", "sequence-drag-handle");
+    handle.draggable = true;
+    handle.title = "拖动调整顺序";
+    handle.setAttribute("aria-hidden", "true");
+    handle.append(
+      createSvgIcon(
+        "M8 5.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Zm11-13a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Zm0 6.5a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0Z"
+      )
+    );
+    handle.addEventListener("dragstart", function (event) {
+      state.draggedSegmentId = segment.id;
+      clip.classList.add("dragging");
+      if (event.dataTransfer) {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData("text/plain", segment.id);
+      }
+    });
+    handle.addEventListener("dragend", function () {
+      state.draggedSegmentId = null;
+      document.querySelectorAll(".sequence-clip").forEach(function (item) {
+        item.classList.remove("dragging", "drag-over");
+      });
+    });
+
+    var number = createElement(
+      "span",
+      "sequence-clip-order",
+      String(index + 1).padStart(2, "0")
+    );
+    var metadata = createElement("span", "sequence-clip-meta");
+    metadata.append(
+      createElement(
+        "strong",
+        "",
+        formatTime(segment.start) + " – " + formatTime(segment.end)
+      ),
+      createElement(
+        "small",
+        "",
+        formatNumber(segment.end - segment.start, 1) + " 秒 · " + segment.id
+      )
+    );
+    var controls = createElement("span", "sequence-clip-controls");
+    controls.append(
+      createSequenceMoveButton(segment, index, -1),
+      createSequenceMoveButton(segment, index, 1)
+    );
+    clip.append(handle, number, metadata, controls);
+
+    clip.addEventListener("click", function () {
+      selectSegment(segment.id);
+      seekTo(segment.start);
+    });
+    clip.addEventListener("keydown", function (event) {
+      if (event.altKey && event.key === "ArrowLeft") {
+        event.preventDefault();
+        moveSegment(segment.id, index - 1);
+      } else if (event.altKey && event.key === "ArrowRight") {
+        event.preventDefault();
+        moveSegment(segment.id, index + 1);
+      } else if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        selectSegment(segment.id);
+        seekTo(segment.start);
+      }
+    });
+    clip.addEventListener("dragover", function (event) {
+      if (!state.draggedSegmentId || state.draggedSegmentId === segment.id) return;
+      event.preventDefault();
+      clip.classList.add("drag-over");
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    });
+    clip.addEventListener("dragleave", function () {
+      clip.classList.remove("drag-over");
+    });
+    clip.addEventListener("drop", function (event) {
+      event.preventDefault();
+      clip.classList.remove("drag-over");
+      var draggedId =
+        state.draggedSegmentId ||
+        (event.dataTransfer
+          ? event.dataTransfer.getData("text/plain")
+          : "");
+      var sourceIndex = state.segments.findIndex(function (item) {
+        return item.id === draggedId;
+      });
+      var destinationIndex = index;
+      var bounds = clip.getBoundingClientRect();
+      if (event.clientX > bounds.left + bounds.width / 2) {
+        destinationIndex += 1;
+      }
+      if (sourceIndex >= 0 && sourceIndex < destinationIndex) {
+        destinationIndex -= 1;
+      }
+      moveSegment(draggedId, destinationIndex);
+      state.draggedSegmentId = null;
+    });
+
+    container.append(clip);
   });
 }
 
@@ -706,9 +934,15 @@ function applyEditorData(payload) {
   }
   state.editorData = data;
   state.video = data.video || null;
-  state.segments = Array.isArray(data.segments) ? data.segments : [];
+  state.segments = Array.isArray(data.segments)
+    ? data.segments.slice().sort(function (first, second) {
+        return Number(first.order) - Number(second.order);
+      })
+    : [];
+  normalizeSegmentOrder();
   state.agentComments = Array.isArray(data.agent_comments) ? data.agent_comments : [];
   state.keyframes = Array.isArray(data.keyframes) ? data.keyframes : [];
+  setSequenceSaveState(false);
 
   // 更新头部任务信息
   byId("header-job-id").textContent = data.job_id || state.jobId || "—";
@@ -722,6 +956,7 @@ function applyEditorData(payload) {
   renderVideo();
   renderTimeline();
   renderSegmentList();
+  renderClipSequence();
   bindTimelineEvents();
 
   // 默认选中第一个片段
@@ -806,11 +1041,19 @@ function saveReview() {
       showToast("审核结果已保存", "success");
       if (payload.report) {
         state.segments = Array.isArray(payload.report.segments)
-          ? payload.report.segments.map(function (s) { return Object.assign({}, s); })
+          ? payload.report.segments
+              .map(function (s) { return Object.assign({}, s); })
+              .sort(function (first, second) {
+                return Number(first.order) - Number(second.order);
+              })
           : state.segments;
+        normalizeSegmentOrder();
+        renderTimeline();
         renderSegmentList();
+        renderClipSequence();
         if (state.selectedSegmentId) selectSegment(state.selectedSegmentId);
       }
+      setSequenceSaveState(false);
       setButtonLoading(button, false);
     },
     function (error) {
@@ -822,7 +1065,10 @@ function saveReview() {
 
 // ── 生成粗剪 ───────────────────────────────────────────────────────────
 function createRoughCut() {
-  if (!state.jobId) return;
+  if (!state.jobId || !state.segments.length) {
+    showToast("当前没有可生成粗剪的精彩片段", "error");
+    return;
+  }
   var button = byId("rough-cut-button");
   setButtonLoading(button, true, "生成中…");
   // 先保存审核再生成粗剪
@@ -843,9 +1089,7 @@ function createRoughCut() {
       return api.post("/api/jobs/" + encodeURIComponent(state.jobId) + "/rough-cut", {});
     },
     function (error) {
-      // 即使保存审核失败也尝试生成粗剪
-      showToast("审核保存失败：" + error.message + "，继续尝试生成粗剪…", "info");
-      return api.post("/api/jobs/" + encodeURIComponent(state.jobId) + "/rough-cut", {});
+      throw new Error("审核顺序保存失败，未生成粗剪：" + error.message);
     }
   ).then(
     function () {

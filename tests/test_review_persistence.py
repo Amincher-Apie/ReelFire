@@ -162,6 +162,53 @@ class ReviewPersistenceTestCase(unittest.TestCase):
         self.assertEqual(row["job_row_id"], row["job_id"])
         self.assertEqual(row["reviewer_id"], self.owner_user["id"])
 
+    def test_reordered_segments_are_preserved_in_review_snapshot(self) -> None:
+        response = self.owner.patch(
+            f"/api/jobs/{self.job_id}/review",
+            json={
+                "status": "approved",
+                "segments": [
+                    {
+                        "id": "seg_source_first",
+                        "start": 1.0,
+                        "end": 4.0,
+                        "order": 2,
+                        "score": 0.9,
+                        "source_keyframes": ["kf_001"],
+                    },
+                    {
+                        "id": "seg_output_first",
+                        "start": 8.0,
+                        "end": 12.0,
+                        "order": 1,
+                        "score": 0.7,
+                        "source_keyframes": [],
+                    },
+                ],
+            },
+        )
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        report_ids = [
+            segment["id"]
+            for segment in response.get_json()["report"]["segments"]
+        ]
+        latest = self.owner.get(
+            f"/api/jobs/{self.job_id}/review/latest"
+        ).get_json()["review"]
+        self.assertEqual(
+            report_ids,
+            ["seg_output_first", "seg_source_first"],
+        )
+        self.assertEqual(
+            [segment["id"] for segment in latest["segments"]],
+            report_ids,
+        )
+        self.assertEqual(
+            [segment["order"] for segment in latest["segments"]],
+            [1, 2],
+        )
+
     def test_pending_and_rejected_append_history_and_latest_is_newest(self) -> None:
         for status in ("pending", "rejected"):
             response = self.owner.patch(

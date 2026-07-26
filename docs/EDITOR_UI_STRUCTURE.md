@@ -26,7 +26,8 @@ GET /api/jobs/{job_id}/editor
 2. 在统一时间轴上表示所有 YOLO/CV 精彩片段。
 3. 展示每个片段的时间区间、评分状态和 Agent 最终评论。
 4. 允许用户通过片段列表或时间轴定位视频。
-5. 为后续人工审核与导出功能预留入口。
+5. 允许用户调整粗剪片段的输出顺序，并保存为审核快照。
+6. 根据已审核的片段顺序生成多片段粗剪。
 
 页面不负责：
 
@@ -88,6 +89,15 @@ document
         │   └── div#timeline-scale
         │       ├── output#timeline-start
         │       └── output#timeline-end
+        ├── section#sequence-section
+        │   ├── status#sequence-save-state
+        │   └── div#clip-sequence[role=list]
+        │       └── article.sequence-clip × N
+        │           ├── drag-handle
+        │           ├── output-order
+        │           ├── start/end/duration
+        │           ├── button：向前移动
+        │           └── button：向后移动
         └── section#active-highlight-detail
             ├── h2：当前片段
             ├── output#active-highlight-time
@@ -106,6 +116,7 @@ document
 | `highlights.length` | `#highlight-count` | 显示“共 N 段” |
 | `highlights[].start/end` | 第一列表格和时间轴位置 | 文本可格式化，位置按比例计算 |
 | `highlights[].score` | 当前片段评分 | 只格式化为百分比 |
+| `highlights[].order` | 输出顺序轨道 | 每次重排后重新编号为连续的 `1..N` |
 | `highlights[].agent_comment` | 第二列 | 仅 `ready` 时显示 |
 | `highlights[].agent_comment_status` | 第二列状态 | `pending/unavailable` 显示明确占位状态 |
 | `highlights[].agent_review_status` | 第二列审核结论 | 展示 `pass/needs_review/reject`，不得由前端猜测 |
@@ -169,6 +180,22 @@ document
 - 播放头进入某个片段区间时自动更新当前片段。
 - 同一时间只能有一个当前片段。
 
+### 粗剪片段排序
+
+- 输出顺序轨道与源视频时间轴是两个不同概念：
+  - 源视频时间轴始终按 `start/end` 表示素材位置。
+  - 输出顺序轨道按 `order` 表示最终拼接顺序。
+- 桌面端允许通过拖动片段卡片调整位置。
+- 每个片段必须同时提供“向前移动”和“向后移动”按钮，拖动不是唯一操作方式。
+- 聚焦片段时支持 `Alt + ArrowLeft/ArrowRight` 调整顺序。
+- 每次移动后：
+  1. 更新内存数组顺序。
+  2. 将所有 `order` 重写为连续的 `1..N`。
+  3. 同步精彩片段列表、输出顺序轨道和选中状态。
+  4. 将状态标记为“尚未保存”并通过 `aria-live` 报告结果。
+- “保存审核”提交 `pending` 快照；“生成粗剪”先提交 `approved` 快照。
+- 审核保存失败时不得继续使用旧顺序生成粗剪。
+
 ### Agent 评论
 
 - 页面只消费 Editor 聚合接口，不直接请求 Agent 调用日志来生成片段评论。
@@ -228,6 +255,8 @@ DOM 顺序不变，但布局顺序为：
 前进 5 秒
 时间轴滑块
 时间轴片段标记（按 order）
+输出顺序片段（按 order）
+每个片段的向前/向后移动按钮
 ```
 
 动态加载完成后不得强制抢夺用户焦点。接口错误使用 `role="alert"`，普通加载和状态更新使用 `aria-live="polite"`。
@@ -242,11 +271,11 @@ DOM 顺序不变，但布局顺序为：
 - 时间轴拖动。
 - 精彩片段定位和选中同步。
 - Agent 评论状态展示。
+- 片段拖动排序、键盘排序和可见移动按钮。
+- 审核顺序写回与多片段拼接导出。
 
 后续功能包括：
 
 - 多片段 YOLO 生产逻辑。
 - Agent 原生 `segment_comments` 生产。
-- 审核状态写回。
-- 多片段批量切片、排序、拼接与导出。
 - 缩略图精灵或 WebVTT 预览轨道。

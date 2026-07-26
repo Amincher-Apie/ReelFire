@@ -114,6 +114,24 @@
           </div>
           <p class="timeline-hint">拖动时间条预览整段视频；彩色区间为 YOLO 识别出的精彩片段。</p>
         </div>
+
+        <!-- 粗剪输出顺序 -->
+        <section class="sequence-section" aria-labelledby="sequence-heading">
+          <div class="sequence-header">
+            <div>
+              <p class="panel-kicker">OUTPUT SEQUENCE</p>
+              <h3 id="sequence-heading">剪辑片段顺序</h3>
+            </div>
+            <span id="sequence-save-state" class="sequence-save-state">顺序已同步</span>
+          </div>
+          <p id="sequence-help" class="sequence-help">
+            拖动片段调整输出顺序，也可使用每个片段的左移、右移按钮；源视频时间不会改变。
+          </p>
+          <div id="clip-sequence" class="clip-sequence" role="list"
+               aria-describedby="sequence-help"
+               aria-label="粗剪片段输出顺序"></div>
+          <p id="sequence-live" class="editor-sr-only" aria-live="polite"></p>
+        </section>
       </section>
 
       <!-- 精彩片段区 -->

@@ -119,9 +119,13 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(html.count('id="highlight-list"'), 1)
         self.assertEqual(html.count('id="editor-video"'), 1)
         self.assertEqual(html.count('id="timeline-scrubber"'), 1)
+        self.assertEqual(html.count('id="clip-sequence"'), 1)
+        self.assertEqual(html.count('id="sequence-save-state"'), 1)
         self.assertIn("时间片段（start:end）", html)
         self.assertIn("Agent 评论", html)
         self.assertIn("YOLO 精彩片段区间", html)
+        self.assertIn("剪辑片段顺序", html)
+        self.assertIn("左移、右移按钮", html)
         self.assertEqual(html.count("editor.js"), 1)
         self.assertNotIn("onclick=", html)
 
