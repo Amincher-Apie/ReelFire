@@ -13,6 +13,7 @@ class Config:
     """Default configuration for the first backend release."""
 
     BASE_DIR = BASE_DIR
+    SECRET_KEY = os.environ.get("REELFIRE_SECRET_KEY", "reelfire-dev-secret-key-change-in-production")
     DATABASE = Path(
         os.environ.get(
             "REELFIRE_DATABASE",

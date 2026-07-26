@@ -29,14 +29,14 @@ const api = {
     try {
       payload = await response.json();
     } catch {
-      const err = new Error(`服务返回了无法解析的响应（HTTP ${response.status}）`);
-      err.status = response.status;
-      throw err;
+      const error = new Error(`服务返回了无法解析的响应（HTTP ${response.status}）`);
+      error.status = response.status;
+      throw error;
     }
     if (!response.ok || payload.ok === false) {
-      const err = new Error(payload.error || `请求失败（HTTP ${response.status}）`);
-      err.status = response.status;
-      throw err;
+      const error = new Error(payload.error || `请求失败（HTTP ${response.status}）`);
+      error.status = response.status;
+      throw error;
     }
     return payload;
   },
@@ -184,6 +184,18 @@ function selectAuthView(view) {
   byId(login ? "login-username" : "register-username").focus();
 }
 
+function authRedirectTarget() {
+  const value = new URLSearchParams(window.location.search).get("next");
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
+  try {
+    const target = new URL(value, window.location.origin);
+    if (target.origin !== window.location.origin) return "/";
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
 async function submitAuth(form, mode) {
   const isLogin = mode === "login";
   const prefix = isLogin ? "login" : "register";
@@ -210,7 +222,23 @@ async function submitAuth(form, mode) {
   try {
     await api.post(`/api/auth/${mode}`, { username, password });
     showToast(isLogin ? "登录成功" : "账号创建成功", "success");
-    window.location.assign("/");
+    window.location.assign(authRedirectTarget());
+  } catch (requestError) {
+    error.textContent = requestError.message;
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function submitGuestLogin() {
+  const button = byId("guest-submit");
+  const error = byId("guest-error");
+  error.textContent = "";
+  setButtonLoading(button, true, "正在创建游客空间…");
+  try {
+    await api.post("/api/auth/guest", {});
+    showToast("已进入独立游客空间", "success");
+    window.location.assign(authRedirectTarget());
   } catch (requestError) {
     error.textContent = requestError.message;
   } finally {
@@ -229,6 +257,7 @@ function initAuth() {
     event.preventDefault();
     submitAuth(event.currentTarget, "register");
   });
+  byId("guest-submit").addEventListener("click", submitGuestLogin);
 }
 
 function setView(view) {
@@ -248,7 +277,7 @@ function setView(view) {
 async function loadUser() {
   try {
     const payload = await api.get("/api/auth/me");
-    byId("user-name").textContent = payload.user.username;
+    byId("user-name").textContent = payload.user.display_name || payload.user.username;
     byId("user-info").hidden = false;
     byId("login-link").hidden = true;
   } catch {
@@ -261,7 +290,7 @@ async function logout() {
   try {
     await api.post("/api/auth/logout", {});
     showToast("已退出登录", "success");
-    await loadUser();
+    window.location.assign("/login");
   } catch (error) {
     showToast(error.message, "error");
   }
@@ -512,254 +541,6 @@ function renderOutputs(report) {
   });
 }
 
-// ── Day 3: 统计图表 ──────────────────────────────────────────────────
-function renderStatsCharts(report) {
-  var statsCard = byId("stats-card");
-  if (!statsCard) return;
-  statsCard.hidden = false;
-
-  var detections = aggregateDetections(report);
-  drawDetectionClassChart(detections);
-
-  var segments = Array.isArray(report.segments) ? report.segments : [];
-  drawSegmentScoreChart(segments);
-}
-
-function drawDetectionClassChart(detections) {
-  var canvas = byId("detection-class-chart");
-  if (!canvas) return;
-  var ctx = canvas.getContext("2d");
-  var dpr = window.devicePixelRatio || 1;
-  var rect = canvas.parentElement.getBoundingClientRect();
-  var w = rect.width;
-  var h = 200;
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
-  canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
-  ctx.scale(dpr, dpr);
-
-  ctx.clearRect(0, 0, w, h);
-
-  if (!detections.length) {
-    ctx.fillStyle = "#6b6880";
-    ctx.font = "12px Inter, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("无检测数据", w / 2, h / 2);
-    return;
-  }
-
-  var top10 = detections.slice(0, 10);
-  var maxCount = top10[0].count;
-  var barAreaW = w - 100;
-  var barW = Math.min(28, (barAreaW / top10.length) - 6);
-  var barGap = barAreaW / top10.length;
-
-  var colors = ["#ff4655", "#bd7ee6", "#0acefe", "#20b06e", "#f0a030", "#ff5f6a", "#9b6ec7", "#0ab8e8", "#1a9e5e", "#e89820"];
-
-  top10.forEach(function (item, i) {
-    var x = 70 + barGap * i + barGap / 2 - barW / 2;
-    var barH = (item.count / maxCount) * (h - 50);
-    var y = h - 30 - barH;
-
-    ctx.fillStyle = colors[i % colors.length];
-    ctx.beginPath();
-    ctx.moveTo(x + 3, y);
-    ctx.lineTo(x + barW - 3, y);
-    ctx.quadraticCurveTo(x + barW, y, x + barW, y + 3);
-    ctx.lineTo(x + barW, y + barH - 3);
-    ctx.quadraticCurveTo(x + barW, y + barH, x + barW - 3, y + barH);
-    ctx.lineTo(x + 3, y + barH);
-    ctx.quadraticCurveTo(x, y + barH, x, y + barH - 3);
-    ctx.lineTo(x, y + 3);
-    ctx.quadraticCurveTo(x, y, x + 3, y);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.fillStyle = "#ece8e1";
-    ctx.font = "10px Inter, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(String(item.count), x + barW / 2, y - 5);
-
-    ctx.fillStyle = "#9e9ab0";
-    ctx.save();
-    ctx.translate(x + barW / 2, h - 10);
-    ctx.rotate(-Math.PI / 4);
-    ctx.fillText(item.label, 0, 0);
-    ctx.restore();
-  });
-}
-
-function drawSegmentScoreChart(segments) {
-  var canvas = byId("segment-score-chart");
-  if (!canvas) return;
-  var ctx = canvas.getContext("2d");
-  var dpr = window.devicePixelRatio || 1;
-  var rect = canvas.parentElement.getBoundingClientRect();
-  var w = rect.width;
-  var h = 200;
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
-  canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
-  ctx.scale(dpr, dpr);
-
-  ctx.clearRect(0, 0, w, h);
-
-  if (!segments.length) {
-    ctx.fillStyle = "#6b6880";
-    ctx.font = "12px Inter, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText("无片段数据", w / 2, h / 2);
-    return;
-  }
-
-  var barAreaW = w - 80;
-  var barW = Math.min(48, barAreaW / segments.length - 8);
-  var barGap = barAreaW / segments.length;
-
-  ctx.strokeStyle = "rgba(158, 154, 176, 0.15)";
-  ctx.lineWidth = 1;
-  for (var i = 0; i <= 4; i++) {
-    var y = 20 + (h - 50) * (i / 4);
-    ctx.beginPath();
-    ctx.moveTo(40, y);
-    ctx.lineTo(w - 20, y);
-    ctx.stroke();
-  }
-
-  segments.forEach(function (seg, i) {
-    var x = 50 + barGap * i + barGap / 2 - barW / 2;
-    var score = Number(seg.score) || 0;
-    var barH = score * (h - 60);
-    y = h - 30 - barH;
-
-    var grad = ctx.createLinearGradient(x, y, x, h - 30);
-    grad.addColorStop(0, "rgba(255, 70, 85, 0.85)");
-    grad.addColorStop(1, "rgba(189, 126, 230, 0.4)");
-    ctx.fillStyle = grad;
-    ctx.beginPath();
-    ctx.moveTo(x + 4, y);
-    ctx.lineTo(x + barW - 4, y);
-    ctx.quadraticCurveTo(x + barW, y, x + barW, y + 4);
-    ctx.lineTo(x + barW, h - 30);
-    ctx.lineTo(x, h - 30);
-    ctx.lineTo(x, y + 4);
-    ctx.quadraticCurveTo(x, y, x + 4, y);
-    ctx.closePath();
-    ctx.fill();
-
-    ctx.fillStyle = "#ece8e1";
-    ctx.font = "10px Inter, sans-serif";
-    ctx.textAlign = "center";
-    ctx.fillText(String(Math.round(score * 100)), x + barW / 2, y - 5);
-  });
-
-  // Y 轴标签
-  ctx.fillStyle = "#6b6880";
-  ctx.font = "9px Inter, sans-serif";
-  ctx.textAlign = "right";
-  for (i = 0; i <= 4; i++) {
-    var val = Math.round((1 - i / 4) * 100);
-    ctx.fillText(String(val), 36, 20 + (h - 50) * (i / 4) + 4);
-  }
-}
-
-// ── Day 3: 轨迹图 ────────────────────────────────────────────────────
-function renderTrajectoryChart(report) {
-  var card = byId("trajectory-card");
-  var canvas = byId("workbench-trajectory-canvas");
-  if (!card || !canvas) return;
-
-  var keyframes = Array.isArray(report.keyframes) ? report.keyframes : [];
-  var hasTrajectory = keyframes.some(function (kf) {
-    return kf.trajectory && kf.trajectory.length;
-  });
-
-  if (!hasTrajectory) {
-    byId("trajectory-status-badge").textContent = "无跟踪数据";
-    card.hidden = true;
-    return;
-  }
-
-  card.hidden = false;
-  byId("trajectory-status-badge").textContent = "已生成";
-
-  var ctx = canvas.getContext("2d");
-  var dpr = window.devicePixelRatio || 1;
-  var rect = canvas.parentElement.getBoundingClientRect();
-  var w = rect.width;
-  var h = 200;
-  canvas.width = w * dpr;
-  canvas.height = h * dpr;
-  canvas.style.width = w + "px";
-  canvas.style.height = h + "px";
-  ctx.scale(dpr, dpr);
-
-  ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = "rgba(15, 14, 26, 0.6)";
-  ctx.fillRect(0, 0, w, h);
-
-  var duration = Number(report.duration) || 1;
-  var colors = ["#ff4655", "#0acefe", "#20b06e"];
-
-  ctx.strokeStyle = "#2a2840";
-  ctx.beginPath();
-  ctx.moveTo(40, h - 25);
-  ctx.lineTo(w - 20, h - 25);
-  ctx.stroke();
-
-  for (var t = 0; t < 3; t++) {
-    ctx.strokeStyle = colors[t];
-    ctx.lineWidth = 2;
-    ctx.setLineDash([4, 2]);
-    ctx.beginPath();
-    for (var k = 0; k < keyframes.length; k++) {
-      var kf = keyframes[k];
-      var kx = 40 + (w - 60) * (Number(kf.timestamp) / duration);
-      var ky = 40 + t * 30 + Math.sin(k * 2 + t) * 12;
-      if (k === 0) ctx.moveTo(kx, ky);
-      else ctx.lineTo(kx, ky);
-    }
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    for (k = 0; k < keyframes.length; k++) {
-      kf = keyframes[k];
-      kx = 40 + (w - 60) * (Number(kf.timestamp) / duration);
-      ky = 40 + t * 30 + Math.sin(k * 2 + t) * 12;
-      ctx.fillStyle = colors[t];
-      ctx.beginPath();
-      ctx.arc(kx, ky, 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-}
-
-// ── Day 3: 报告下载链接 ──────────────────────────────────────────────
-function updateDownloadLinks() {
-  var downloadCard = byId("download-card");
-  if (!downloadCard) return;
-  downloadCard.hidden = false;
-
-  var reportLink = byId("download-report-json");
-  if (reportLink && state.currentJobId) {
-    reportLink.href = "/api/jobs/" + encodeURIComponent(state.currentJobId) + "/report";
-  }
-
-  var agentLink = byId("download-agent-report");
-  if (agentLink && state.currentJobId) {
-    agentLink.href = "/api/jobs/" + encodeURIComponent(state.currentJobId) + "/report";
-  }
-
-  var roughCutLink = byId("download-rough-cut");
-  var report = state.report;
-  if (roughCutLink && report && report.output && report.output.video && state.currentJobId) {
-    roughCutLink.href = "/outputs/" + encodeURIComponent(state.currentJobId) + "/" + encodeURIComponent(report.output.video);
-    roughCutLink.hidden = false;
-  }
-}
-
 function renderReport(report) {
   state.report = report;
   state.keyframes = Array.isArray(report.keyframes) ? report.keyframes.map((item) => ({ ...item })) : [];
@@ -781,9 +562,6 @@ function renderReport(report) {
   renderSegments(state.segments);
   renderKeyframes(state.keyframes);
   renderOutputs(report);
-  renderStatsCharts(report);
-  renderTrajectoryChart(report);
-  updateDownloadLinks();
   byId("report-content").textContent = JSON.stringify(report, null, 2);
   byId("generation-panel").hidden = false;
   byId("generation-output").hidden = true;
@@ -796,6 +574,8 @@ function renderReport(report) {
     editorLink.href = "/jobs/" + encodeURIComponent(state.currentJobId) + "/editor";
     editorLink.hidden = false;
   }
+
+  renderWorkbenchCharts(report);
 }
 
 async function loadReport(jobId) {
@@ -838,15 +618,14 @@ async function pollJob(jobId) {
 }
 
 async function resolveProject(projectName, gameType) {
-  // 如果已有缓存的 project_id 且项目名称未变更，直接复用
+  // 仅在项目名称未变化时复用已创建的 project_id。
   if (state.currentProjectId && state.currentProjectName === projectName) {
     return state.currentProjectId;
   }
-  // 项目名称已变更或尚无缓存，清空旧 project_id
   state.currentProjectId = null;
   state.currentProjectName = null;
 
-  // 尝试创建项目（后端兼容期可能返回 404，降级使用 project_name）
+  // 尝试创建项目；后端兼容期可能返回 404，此时降级使用 project_name。
   try {
     const payload = await api.post("/api/projects", {
       name: projectName,
@@ -857,16 +636,11 @@ async function resolveProject(projectName, gameType) {
       state.currentProjectName = projectName;
       return payload.project.id;
     }
-  } catch (err) {
-    const status = err.status || 0;
-    // 404 或接口尚未接入：静默降级，不阻塞上传流程
-    if (status === 404) {
-      // 后端项目 API 尚未接入，此场景允许兼容回退
-    } else if (status === 400 || status === 401 || status === 403 || status === 500) {
-      // 明确的服务器错误，提示用户
-      showToast(`项目创建失败：${err.message}`, "error");
+  } catch (error) {
+    const status = error.status || 0;
+    if ([400, 401, 403, 500].includes(status)) {
+      showToast(`项目创建失败：${error.message}`, "error");
     }
-    // 网络超时、DNS 错误等（status === 0）也静默降级
   }
   return null;
 }
@@ -1090,17 +864,259 @@ async function deleteHistoryJob(jobId) {
   }
 }
 
+// ── 工作台图表 ─────────────────────────────────────────────────────────
+
+function wbCanvasColors() {
+  var style = getComputedStyle(document.body);
+  return {
+    bg: style.getPropertyValue("--bg").trim() || "#080b14",
+    panel: style.getPropertyValue("--panel-soft").trim() || "#101727",
+    text: style.getPropertyValue("--text").trim() || "#f7f8fc",
+    textMuted: style.getPropertyValue("--text-muted").trim() || "#9ba6bc",
+    textFaint: style.getPropertyValue("--text-faint").trim() || "#6e7890",
+    border: style.getPropertyValue("--border").trim() || "rgba(255,255,255,0.1)",
+    primary: style.getPropertyValue("--primary").trim() || "#ff4d70",
+    accent: style.getPropertyValue("--accent").trim() || "#66a6ff",
+    success: style.getPropertyValue("--success").trim() || "#35d399",
+    warning: style.getPropertyValue("--warning").trim() || "#f5bd4f",
+    danger: style.getPropertyValue("--danger").trim() || "#ff667d",
+  };
+}
+
+function wbSetupHiDPI(canvas, width, height) {
+  var dpr = window.devicePixelRatio || 1;
+  canvas.width = width * dpr;
+  canvas.height = height * dpr;
+  canvas.style.width = width + "px";
+  canvas.style.height = height + "px";
+  var ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  return ctx;
+}
+
+function renderWorkbenchCharts(report) {
+  var card = byId("workbench-charts-card");
+  if (!card) return;
+  card.hidden = false;
+
+  drawDetectionClassChart(report);
+  drawSegmentScoreChart();
+  drawWorkbenchTrajectory();
+}
+
+function drawDetectionClassChart(report) {
+  var canvas = byId("detection-bar-chart");
+  var empty = byId("detection-chart-empty");
+  if (!canvas) return;
+
+  var summary = (report.segment_tags && report.segment_tags.summary) ? report.segment_tags.summary : [];
+  if (!Array.isArray(summary) || !summary.length) {
+    canvas.hidden = true;
+    if (empty) empty.hidden = false;
+    return;
+  }
+  canvas.hidden = false;
+  if (empty) empty.hidden = true;
+
+  var W = canvas.parentElement ? canvas.parentElement.clientWidth - 24 : 370;
+  var H = 200;
+  var ctx = wbSetupHiDPI(canvas, W, H);
+  var colors = wbCanvasColors();
+  var topN = summary.slice(0, 8);
+
+  var maxCount = Math.max.apply(null, topN.map(function (d) { return d.count || 0; }).concat([1]));
+  var barMaxW = Math.min(36, (W - 80) / topN.length);
+  var barGap = Math.max(3, (W - 80 - barMaxW * topN.length) / (topN.length + 1));
+  var chartBottom = H - 24;
+  var chartTop = 16;
+
+  topN.forEach(function (item, i) {
+    var count = item.count || 0;
+    var barH = ((chartBottom - chartTop) * count) / maxCount;
+    var x = 44 + barGap + i * (barMaxW + barGap);
+    var y = chartBottom - barH;
+
+    ctx.fillStyle = colors.primary;
+    ctx.fillRect(x, y, barMaxW, barH);
+
+    ctx.fillStyle = colors.textFaint;
+    ctx.font = "9px " + getComputedStyle(document.body).fontFamily;
+    ctx.textAlign = "center";
+    ctx.save();
+    ctx.translate(x + barMaxW / 2, chartBottom + 8);
+    var label = (item.label || "").length > 6 ? (item.label || "").slice(0, 5) + "…" : (item.label || "");
+    ctx.fillText(label, 0, 0);
+    ctx.restore();
+
+    ctx.fillStyle = colors.textMuted;
+    ctx.font = "600 9px " + getComputedStyle(document.body).fontFamily;
+    ctx.fillText(String(count), x + barMaxW / 2, y - 4);
+  });
+
+  ctx.strokeStyle = colors.border;
+  ctx.beginPath();
+  ctx.moveTo(38, chartBottom);
+  ctx.lineTo(W - 8, chartBottom);
+  ctx.stroke();
+}
+
+function drawSegmentScoreChart() {
+  var canvas = byId("segment-score-chart");
+  var empty = byId("segment-chart-empty");
+  if (!canvas) return;
+
+  if (!state.segments || !state.segments.length) {
+    canvas.hidden = true;
+    if (empty) empty.hidden = false;
+    return;
+  }
+  canvas.hidden = false;
+  if (empty) empty.hidden = true;
+
+  var W = canvas.parentElement ? canvas.parentElement.clientWidth - 24 : 370;
+  var H = 200;
+  var ctx = wbSetupHiDPI(canvas, W, H);
+  var colors = wbCanvasColors();
+  var segs = state.segments;
+
+  var barMaxW = Math.min(36, (W - 80) / segs.length);
+  var barGap = Math.max(3, (W - 80 - barMaxW * segs.length) / (segs.length + 1));
+  var chartBottom = H - 24;
+  var chartTop = 16;
+
+  segs.forEach(function (seg, i) {
+    var score = Number(seg.score) || 0;
+    var barH = (chartBottom - chartTop) * score;
+    var x = 44 + barGap + i * (barMaxW + barGap);
+    var y = chartBottom - barH;
+
+    ctx.fillStyle = colors.accent;
+    ctx.fillRect(x, y, barMaxW, barH);
+
+    ctx.fillStyle = colors.textFaint;
+    ctx.font = "9px " + getComputedStyle(document.body).fontFamily;
+    ctx.textAlign = "center";
+    ctx.fillText(seg.id || ("#" + (i + 1)), x + barMaxW / 2, chartBottom + 14);
+
+    ctx.fillStyle = colors.textMuted;
+    ctx.font = "600 9px " + getComputedStyle(document.body).fontFamily;
+    ctx.fillText(Math.round(score * 100), x + barMaxW / 2, y - 4);
+  });
+
+  ctx.strokeStyle = colors.border;
+  ctx.beginPath();
+  ctx.moveTo(38, chartBottom);
+  ctx.lineTo(W - 8, chartBottom);
+  ctx.stroke();
+}
+
+function drawWorkbenchTrajectory() {
+  var canvas = byId("workbench-trajectory-canvas");
+  var empty = byId("trajectory-chart-empty");
+  if (!canvas) return;
+
+  var hasTrajectory = state.keyframes.some(function (kf) {
+    return Array.isArray(kf.trajectory) && kf.trajectory.length > 0;
+  });
+
+  if (!hasTrajectory) {
+    canvas.hidden = true;
+    if (empty) empty.hidden = false;
+    return;
+  }
+  canvas.hidden = false;
+  if (empty) empty.hidden = true;
+
+  var W = canvas.parentElement ? canvas.parentElement.clientWidth - 24 : 320;
+  var H = 180;
+  var ctx = wbSetupHiDPI(canvas, W, H);
+  var colors = wbCanvasColors();
+
+  ctx.fillStyle = "#000";
+  ctx.fillRect(0, 0, W, H);
+
+  var allBoxes = [];
+  state.keyframes.forEach(function (kf) {
+    var traj = kf.trajectory;
+    if (!Array.isArray(traj)) return;
+    traj.forEach(function (box) {
+      allBoxes.push({
+        trackId: box.track_id || 0,
+        x: Number(box.x) || 0,
+        y: Number(box.y) || 0,
+        w: Number(box.w) || 0,
+        h: Number(box.h) || 0,
+      });
+    });
+  });
+
+  if (!allBoxes.length) {
+    canvas.hidden = true;
+    if (empty) empty.hidden = false;
+    return;
+  }
+
+  var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  allBoxes.forEach(function (b) {
+    if (b.x < minX) minX = b.x;
+    if (b.y < minY) minY = b.y;
+    if (b.x + b.w > maxX) maxX = b.x + b.w;
+    if (b.y + b.h > maxY) maxY = b.y + b.h;
+  });
+
+  var rangeX = maxX - minX || 1, rangeY = maxY - minY || 1;
+  var margin = 16;
+  var sc = Math.min((W - margin * 2) / rangeX, (H - margin * 2) / rangeY);
+
+  var trackColors = [colors.accent, colors.primary, colors.success, colors.warning];
+  var tracks = {};
+  allBoxes.forEach(function (b) {
+    var key = String(b.trackId);
+    if (!tracks[key]) tracks[key] = [];
+    tracks[key].push(b);
+  });
+
+  var tIdx = 0;
+  Object.keys(tracks).forEach(function (key) {
+    var boxes = tracks[key];
+    var color = trackColors[tIdx % trackColors.length];
+    tIdx++;
+
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.5;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    boxes.forEach(function (b, i) {
+      var cx = margin + (b.x + b.w / 2 - minX) * sc;
+      var cy = margin + (b.y + b.h / 2 - minY) * sc;
+      if (i === 0) ctx.moveTo(cx, cy);
+      else ctx.lineTo(cx, cy);
+    });
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+
+    boxes.forEach(function (b) {
+      var rx = margin + (b.x - minX) * sc;
+      var ry = margin + (b.y - minY) * sc;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(rx, ry, b.w * sc, b.h * sc);
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.12;
+      ctx.fillRect(rx, ry, b.w * sc, b.h * sc);
+      ctx.globalAlpha = 1;
+    });
+  });
+}
+
 function initApp() {
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
   byId("logout-button").addEventListener("click", logout);
-  // project_name 变更时清空旧 currentProjectId，防止新名称与旧 ID 一起提交
   byId("project-name").addEventListener("input", () => {
-    if (state.currentProjectId) {
-      state.currentProjectId = null;
-      state.currentProjectName = null;
-    }
+    state.currentProjectId = null;
+    state.currentProjectName = null;
   });
   byId("analysis-form").addEventListener("submit", (event) => {
     event.preventDefault();
