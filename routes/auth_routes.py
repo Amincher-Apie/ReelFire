@@ -7,6 +7,7 @@ from flask import Blueprint, jsonify, request, session
 from services.auth_service import (
     UsernameExistsError,
     authenticate_user,
+    create_guest_user,
     create_user,
     get_user_by_id,
 )
@@ -68,6 +69,14 @@ def login():
     session.pop("user", None)
     session["user_id"] = user["id"]
     return jsonify(ok=True, user=user)
+
+
+@auth_bp.post("/guest")
+def guest_login():
+    user = create_guest_user()
+    session.clear()
+    session["user_id"] = user["id"]
+    return jsonify(ok=True, user=user), 201
 
 
 @auth_bp.post("/logout")

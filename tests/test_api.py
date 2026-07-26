@@ -33,6 +33,8 @@ class ApiTestCase(unittest.TestCase):
             }
         )
         self.client = self.app.test_client()
+        guest = self.client.post("/api/auth/guest", json={})
+        self.assertEqual(guest.status_code, 201, guest.get_json())
 
     def tearDown(self) -> None:
         self.app.extensions["analysis_service"].shutdown(wait=True)
@@ -60,12 +62,22 @@ class ApiTestCase(unittest.TestCase):
 
     def test_frontend_and_favicon_are_available(self) -> None:
         page = self.client.get("/")
-        login = self.client.get("/login")
+        anonymous = self.app.test_client()
+        login = anonymous.get("/login")
         favicon = self.client.get("/favicon.ico")
         html = page.get_data(as_text=True)
         login_html = login.get_data(as_text=True)
         self.assertEqual(page.status_code, 200)
         self.assertEqual(login.status_code, 200)
+        self.assertEqual(self.client.get("/login").status_code, 302)
+        self.assertEqual(
+            self.client.get("/login?next=/jobs/example/editor").headers["Location"],
+            "/jobs/example/editor",
+        )
+        self.assertEqual(
+            self.client.get("/login?next=//example.invalid").headers["Location"],
+            "/",
+        )
         self.assertIn("ReelFire", html)
         self.assertEqual(html.lower().count("<!doctype html>"), 1)
         self.assertEqual(html.lower().count("<html"), 1)
@@ -76,11 +88,25 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(login_html.lower().count("<html"), 1)
         self.assertEqual(login_html.count('id="login-form"'), 1)
         self.assertEqual(login_html.count('id="register-form"'), 1)
+        self.assertEqual(login_html.count('id="guest-submit"'), 1)
         self.assertEqual(login_html.count("app.js"), 1)
         self.assertNotIn("onsubmit=", login_html)
         self.assertEqual(favicon.status_code, 200)
         self.assertEqual(favicon.mimetype, "image/svg+xml")
         favicon.close()
+
+    def test_anonymous_requests_are_gated_before_system_access(self) -> None:
+        anonymous = self.app.test_client()
+
+        page = anonymous.get("/")
+        jobs = anonymous.get("/api/jobs")
+        health = anonymous.get("/api/health")
+
+        self.assertEqual(page.status_code, 302)
+        self.assertIn("/login?next=/", page.headers["Location"])
+        self.assertEqual(jobs.status_code, 401)
+        self.assertEqual(jobs.get_json()["error_code"], "AUTH_REQUIRED")
+        self.assertEqual(health.status_code, 200)
 
     def test_editor_page_has_one_semantic_document(self) -> None:
         job_id = self.create_job()

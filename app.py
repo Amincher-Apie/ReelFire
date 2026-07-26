@@ -7,8 +7,9 @@ import atexit
 import secrets
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
-from flask import Flask, jsonify, render_template, send_file
+from flask import Flask, jsonify, redirect, render_template, request, send_file, url_for
 from werkzeug.exceptions import MethodNotAllowed, NotFound, RequestEntityTooLarge
 
 from config import Config
@@ -44,7 +45,10 @@ from services.review_service import (
     ReviewPersistenceUnavailableError,
     ReviewValidationError,
 )
-from services.session_service import AuthenticationRequiredError
+from services.session_service import (
+    AuthenticationRequiredError,
+    require_authenticated_user_id,
+)
 
 
 def _create_analysis_service(
@@ -55,6 +59,17 @@ def _create_analysis_service(
     from services.analysis_service import AnalysisService
 
     return AnalysisService(jobs, max_workers, model_path)
+
+
+def _safe_local_redirect(value: object, fallback: str) -> str:
+    if not isinstance(value, str) or not value.startswith("/"):
+        return fallback
+    if value.startswith("//") or "\\" in value:
+        return fallback
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        return fallback
+    return value
 
 
 def create_app(test_config: dict[str, Any] | None = None) -> Flask:
@@ -97,12 +112,45 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     app.register_blueprint(api_bp)
     app.register_blueprint(auth_bp)
 
+    public_endpoints = {
+        "api.health",
+        "auth.guest_login",
+        "auth.login",
+        "auth.register",
+        "favicon",
+        "login_page",
+        "static",
+    }
+
+    @app.before_request
+    def require_application_login():
+        if request.endpoint in public_endpoints:
+            return None
+        try:
+            require_authenticated_user_id()
+        except AuthenticationRequiredError:
+            if request.path.startswith("/api/"):
+                raise
+            next_url = request.full_path.rstrip("?")
+            return redirect(url_for("login_page", next=next_url))
+        return None
+
     @app.get("/")
     def index():
         return render_template("index.html")
 
     @app.get("/login")
     def login_page():
+        try:
+            require_authenticated_user_id()
+        except AuthenticationRequiredError:
+            return render_template("login.html")
+        next_url = _safe_local_redirect(
+            request.args.get("next"),
+            url_for("index"),
+        )
+        return redirect(next_url)
+
         return render_template("login.html")
 
     @app.get("/jobs/<job_id>/editor")

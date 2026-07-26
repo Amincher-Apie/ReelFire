@@ -184,6 +184,18 @@ function selectAuthView(view) {
   byId(login ? "login-username" : "register-username").focus();
 }
 
+function authRedirectTarget() {
+  const value = new URLSearchParams(window.location.search).get("next");
+  if (!value || !value.startsWith("/") || value.startsWith("//")) return "/";
+  try {
+    const target = new URL(value, window.location.origin);
+    if (target.origin !== window.location.origin) return "/";
+    return `${target.pathname}${target.search}${target.hash}`;
+  } catch {
+    return "/";
+  }
+}
+
 async function submitAuth(form, mode) {
   const isLogin = mode === "login";
   const prefix = isLogin ? "login" : "register";
@@ -210,7 +222,23 @@ async function submitAuth(form, mode) {
   try {
     await api.post(`/api/auth/${mode}`, { username, password });
     showToast(isLogin ? "登录成功" : "账号创建成功", "success");
-    window.location.assign("/");
+    window.location.assign(authRedirectTarget());
+  } catch (requestError) {
+    error.textContent = requestError.message;
+  } finally {
+    setButtonLoading(button, false);
+  }
+}
+
+async function submitGuestLogin() {
+  const button = byId("guest-submit");
+  const error = byId("guest-error");
+  error.textContent = "";
+  setButtonLoading(button, true, "正在创建游客空间…");
+  try {
+    await api.post("/api/auth/guest", {});
+    showToast("已进入独立游客空间", "success");
+    window.location.assign(authRedirectTarget());
   } catch (requestError) {
     error.textContent = requestError.message;
   } finally {
@@ -229,6 +257,7 @@ function initAuth() {
     event.preventDefault();
     submitAuth(event.currentTarget, "register");
   });
+  byId("guest-submit").addEventListener("click", submitGuestLogin);
 }
 
 function setView(view) {
@@ -248,7 +277,7 @@ function setView(view) {
 async function loadUser() {
   try {
     const payload = await api.get("/api/auth/me");
-    byId("user-name").textContent = payload.user.username;
+    byId("user-name").textContent = payload.user.display_name || payload.user.username;
     byId("user-info").hidden = false;
     byId("login-link").hidden = true;
   } catch {
@@ -261,7 +290,7 @@ async function logout() {
   try {
     await api.post("/api/auth/logout", {});
     showToast("已退出登录", "success");
-    await loadUser();
+    window.location.assign("/login");
   } catch (error) {
     showToast(error.message, "error");
   }

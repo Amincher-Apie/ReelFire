@@ -113,6 +113,30 @@ class AuthenticationTestCase(unittest.TestCase):
             self.assertNotIn("user", flask_session)
         self.assertFalse(self.legacy_users_file.exists())
 
+    def test_guest_login_creates_isolated_database_identity_and_session(self) -> None:
+        first = self.client.post("/api/auth/guest", json={})
+        first_payload = first.get_json()
+
+        self.assertEqual(first.status_code, 201, first_payload)
+        self.assertTrue(first_payload["ok"])
+        self.assertTrue(first_payload["user"]["is_guest"])
+        self.assertEqual(first_payload["user"]["display_name"], "游客")
+        self.assertRegex(first_payload["user"]["username"], r"^guest_[0-9a-f]{12}$")
+
+        first_id = first_payload["user"]["id"]
+        with self.client.session_transaction() as flask_session:
+            self.assertEqual(flask_session["user_id"], first_id)
+
+        second_client = self.app.test_client()
+        second = second_client.post("/api/auth/guest", json={})
+        second_payload = second.get_json()
+        self.assertEqual(second.status_code, 201, second_payload)
+        self.assertNotEqual(second_payload["user"]["id"], first_id)
+        self.assertNotEqual(
+            second_payload["user"]["username"],
+            first_payload["user"]["username"],
+        )
+
     def test_register_rejects_case_insensitive_duplicate(self) -> None:
         self.assertEqual(self.register("Reviewer").status_code, 201)
         duplicate = self.register("reviewer")

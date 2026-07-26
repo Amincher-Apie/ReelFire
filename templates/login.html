@@ -80,7 +80,12 @@
         </button>
       </form>
 
-      <p class="auth-footnote">账号仅保存在当前 ReelFire 运行环境中。</p>
+      <div class="auth-divider" role="separator"><span>或</span></div>
+      <p id="guest-error" class="field-error auth-error" role="alert"></p>
+      <button id="guest-submit" class="button secondary full" type="button">
+        <span class="button-label">以游客身份继续</span>
+      </button>
+      <p class="auth-footnote">游客也拥有独立项目空间；退出后无法恢复该游客身份。</p>
     </div>
   </section>
 </main>

@@ -89,7 +89,7 @@ class AgentCallPersistenceTestCase(unittest.TestCase):
         return response.get_json()["job_id"]
 
     def _upload_legacy_job(self) -> str:
-        response = self.anonymous.post(
+        response = self.owner.post(
             "/api/jobs",
             data={
                 "file": (io.BytesIO(self.MINIMAL_MP4), "legacy.mp4"),
@@ -484,7 +484,7 @@ class AgentCallPersistenceTestCase(unittest.TestCase):
                     expected_code,
                 )
 
-    def test_anonymous_create_and_legacy_behavior(self) -> None:
+    def test_anonymous_create_and_authenticated_legacy_behavior(self) -> None:
         anonymous_create = self.anonymous.post(
             f"/api/jobs/{self.job_id}/agent-calls",
             json={"prompt_version": "v1"},
@@ -494,11 +494,11 @@ class AgentCallPersistenceTestCase(unittest.TestCase):
             json={"prompt_version": "v1"},
         )
         legacy_id = self._upload_legacy_job()
-        legacy_create = self.anonymous.post(
+        legacy_create = self.owner.post(
             f"/api/jobs/{legacy_id}/agent-calls",
             json={"prompt_version": "v1"},
         )
-        legacy_history = self.anonymous.get(
+        legacy_history = self.owner.get(
             f"/api/jobs/{legacy_id}/agent-calls"
         )
 

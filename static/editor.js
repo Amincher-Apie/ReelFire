@@ -105,7 +105,7 @@ const api = {
 function loadUser() {
   api.get("/api/auth/me").then(
     function (payload) {
-      byId("user-name").textContent = payload.user.username;
+      byId("user-name").textContent = payload.user.display_name || payload.user.username;
       byId("user-info").hidden = false;
       byId("login-link").hidden = true;
     },

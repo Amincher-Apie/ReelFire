@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import re
+import secrets
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -101,6 +102,55 @@ def create_user(username: str, password: str) -> dict[str, Any]:
         (cursor.lastrowid,),
     ).fetchone()
     return _public_user(row)
+
+
+def create_guest_user() -> dict[str, Any]:
+    """Create an isolated guest identity that can own projects and jobs."""
+    connection = get_db()
+    timestamp = _utc_now()
+    for _attempt in range(5):
+        username = f"guest_{secrets.token_hex(6)}"
+        try:
+            cursor = connection.execute(
+                """
+                INSERT INTO users (
+                    username,
+                    password_hash,
+                    display_name,
+                    role,
+                    is_active,
+                    created_at,
+                    updated_at
+                )
+                VALUES (?, ?, '游客', 'user', 1, ?, ?)
+                """,
+                (
+                    username,
+                    generate_password_hash(secrets.token_urlsafe(32)),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            connection.commit()
+        except sqlite3.IntegrityError:
+            connection.rollback()
+            continue
+        except sqlite3.Error:
+            connection.rollback()
+            raise
+
+        row = connection.execute(
+            """
+            SELECT id, username, display_name, role, created_at
+            FROM users
+            WHERE id = ?
+            """,
+            (cursor.lastrowid,),
+        ).fetchone()
+        user = _public_user(row)
+        user["is_guest"] = True
+        return user
+    raise RuntimeError("无法分配唯一的游客身份")
 
 
 def authenticate_user(username: str, password: str) -> dict[str, Any] | None:

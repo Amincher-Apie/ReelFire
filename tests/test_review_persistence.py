@@ -78,7 +78,7 @@ class ReviewPersistenceTestCase(unittest.TestCase):
         return response.get_json()["job_id"]
 
     def _upload_legacy_job(self) -> str:
-        response = self.anonymous.post(
+        response = self.owner.post(
             "/api/jobs",
             data={
                 "file": (io.BytesIO(self.MINIMAL_MP4), "legacy.mp4"),
@@ -309,7 +309,7 @@ class ReviewPersistenceTestCase(unittest.TestCase):
 
     def test_legacy_file_review_remains_compatible_without_status(self) -> None:
         job_id = self._upload_legacy_job()
-        update = self.anonymous.patch(
+        update = self.owner.patch(
             f"/api/jobs/{job_id}/review",
             json={
                 "recommended_clip": {
@@ -326,13 +326,13 @@ class ReviewPersistenceTestCase(unittest.TestCase):
             4.0,
         )
         self.assertEqual(
-            self.anonymous.get(
+            self.owner.get(
                 f"/api/jobs/{job_id}/reviews"
             ).get_json()["reviews"],
             [],
         )
         self.assertIsNone(
-            self.anonymous.get(
+            self.owner.get(
                 f"/api/jobs/{job_id}/review/latest"
             ).get_json()["review"]
         )
@@ -341,7 +341,7 @@ class ReviewPersistenceTestCase(unittest.TestCase):
         job_id = self._upload_legacy_job()
         report_before = self.jobs.report_path(job_id).read_bytes()
 
-        response = self.anonymous.patch(
+        response = self.owner.patch(
             f"/api/jobs/{job_id}/review",
             json={
                 "status": "approved",

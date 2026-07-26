@@ -73,7 +73,7 @@ class JobAccessPermissionsTestCase(unittest.TestCase):
         return response.get_json()["job_id"]
 
     def _upload_legacy_job(self) -> str:
-        response = self.anonymous.post(
+        response = self.client_a.post(
             "/api/jobs",
             data={
                 "file": (io.BytesIO(self.MINIMAL_MP4), "legacy.mp4"),
@@ -131,17 +131,22 @@ class JobAccessPermissionsTestCase(unittest.TestCase):
 
     def test_anonymous_project_job_requests_return_auth_required(self) -> None:
         job_id = self._upload_project_job(self.client_a, self.project_a["id"])
-        requests = (
+        api_requests = (
             self.anonymous.get(f"/api/jobs/{job_id}"),
             self.anonymous.get(f"/api/jobs/{job_id}/editor"),
             self.anonymous.get(f"/api/jobs/{job_id}/report"),
+        )
+        page_requests = (
             self.anonymous.get(f"/jobs/{job_id}/editor"),
             self.anonymous.get(f"/outputs/{job_id}/input/demo.mp4"),
         )
 
-        for response in requests:
+        for response in api_requests:
             self.assertEqual(response.status_code, 401, response.get_json())
             self.assertEqual(response.get_json()["error_code"], "AUTH_REQUIRED")
+        for response in page_requests:
+            self.assertEqual(response.status_code, 302)
+            self.assertIn("/login?next=", response.headers["Location"])
 
     def test_other_user_cannot_read_or_mutate_project_job(self) -> None:
         job_id = self._upload_project_job(self.client_a, self.project_a["id"])
@@ -209,13 +214,17 @@ class JobAccessPermissionsTestCase(unittest.TestCase):
         )
         self.assertEqual(traversal.status_code, 404)
 
-    def test_legacy_file_job_remains_anonymously_accessible(self) -> None:
+    def test_legacy_file_job_requires_login_but_remains_compatible(self) -> None:
         job_id = self._upload_legacy_job()
 
-        detail = self.anonymous.get(f"/api/jobs/{job_id}")
-        page = self.anonymous.get(f"/jobs/{job_id}/editor")
-        video = self.anonymous.get(f"/outputs/{job_id}/input/legacy.mp4")
+        anonymous_detail = self.anonymous.get(f"/api/jobs/{job_id}")
+        anonymous_page = self.anonymous.get(f"/jobs/{job_id}/editor")
+        detail = self.client_a.get(f"/api/jobs/{job_id}")
+        page = self.client_a.get(f"/jobs/{job_id}/editor")
+        video = self.client_a.get(f"/outputs/{job_id}/input/legacy.mp4")
 
+        self.assertEqual(anonymous_detail.status_code, 401)
+        self.assertEqual(anonymous_page.status_code, 302)
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(page.status_code, 200)
         self.assertEqual(video.status_code, 200)
@@ -226,10 +235,7 @@ class JobAccessPermissionsTestCase(unittest.TestCase):
         job_a = self._upload_project_job(self.client_a, self.project_a["id"])
         job_b = self._upload_project_job(self.client_b, self.project_b["id"])
 
-        anonymous_ids = {
-            job["job_id"]
-            for job in self.anonymous.get("/api/jobs").get_json()["jobs"]
-        }
+        anonymous_response = self.anonymous.get("/api/jobs")
         ids_a = {
             job["job_id"]
             for job in self.client_a.get("/api/jobs").get_json()["jobs"]
@@ -239,7 +245,11 @@ class JobAccessPermissionsTestCase(unittest.TestCase):
             for job in self.client_b.get("/api/jobs").get_json()["jobs"]
         }
 
-        self.assertEqual(anonymous_ids, {legacy_id})
+        self.assertEqual(anonymous_response.status_code, 401)
+        self.assertEqual(
+            anonymous_response.get_json()["error_code"],
+            "AUTH_REQUIRED",
+        )
         self.assertEqual(ids_a, {legacy_id, job_a})
         self.assertEqual(ids_b, {legacy_id, job_b})
 

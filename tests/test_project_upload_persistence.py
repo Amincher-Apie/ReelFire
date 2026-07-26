@@ -278,7 +278,18 @@ class ProjectUploadPersistenceTestCase(unittest.TestCase):
         self.assertEqual(self.table_count("assets"), 0)
         self.assertEqual(self.table_count("jobs"), 0)
 
-    def test_project_name_only_upload_remains_anonymous_and_file_backed(self) -> None:
+    def test_project_name_only_upload_requires_login_and_remains_file_backed(self) -> None:
+        anonymous = self.client.post(
+            "/api/jobs",
+            data={
+                "file": (io.BytesIO(self.MINIMAL_MP4), "legacy.mp4"),
+                "project_name": "Legacy project",
+            },
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(anonymous.status_code, 401, anonymous.get_json())
+
+        self.register(self.client, "legacy-upload-user")
         response = self.client.post(
             "/api/jobs",
             data={
