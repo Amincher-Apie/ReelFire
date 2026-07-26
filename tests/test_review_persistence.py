@@ -128,6 +128,7 @@ class ReviewPersistenceTestCase(unittest.TestCase):
                         "end": 6.0,
                         "order": 1,
                         "score": 0.9,
+                        "source_keyframes": [],
                     }
                 ],
                 "keyframes": [

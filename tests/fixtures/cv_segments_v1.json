@@ -1,0 +1,41 @@
+[
+  {
+    "id": "seg_002",
+    "order": 2,
+    "start": 8.5,
+    "end": 14.0,
+    "score": 0.72,
+    "source_keyframes": ["kf_004"],
+    "duration": 5.5,
+    "peak_enemy_count": 2,
+    "reason": "enemy_engagement"
+  },
+  {
+    "id": "seg_001",
+    "order": 1,
+    "start": 1.0,
+    "end": 6.0,
+    "score": 1.0,
+    "source_keyframes": [],
+    "duration": 5.0,
+    "detected_classes": ["enemy"],
+    "detections_summary": [
+      {
+        "track_id": 7,
+        "class": "enemy",
+        "confidence": 0.91
+      }
+    ]
+  },
+  {
+    "id": "seg_003",
+    "order": 3,
+    "start": 18.0,
+    "end": 23.5,
+    "score": 0.0,
+    "source_keyframes": ["kf_009", "kf_010"],
+    "duration": 5.5,
+    "detected_classes": ["enemy", "weapon"],
+    "reason": "enemy_engagement"
+  }
+]

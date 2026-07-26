@@ -19,6 +19,11 @@ from services.agent_call_service import (
     get_agent_call,
     list_agent_calls,
 )
+from services.editor_input_validation import (
+    EditorSegmentValidationError,
+    adapt_legacy_segments,
+    validate_editor_segments,
+)
 from services.ffmpeg_service import create_rough_cut, is_ffmpeg_available
 from services.file_service import FileService, FileValidationError
 from services.job_access_service import (
@@ -314,39 +319,6 @@ def _validate_keyframes(value: Any, duration: float | None) -> list[dict[str, An
     return keyframes
 
 
-def _validate_segments(value: Any, duration: float | None) -> list[dict[str, Any]]:
-    if not isinstance(value, list) or not value:
-        raise FileValidationError("segments 必须是非空数组")
-    segments: list[dict[str, Any]] = []
-    for index, item in enumerate(value):
-        if not isinstance(item, dict):
-            raise FileValidationError(f"segments[{index}] 必须是 JSON 对象")
-        segment = dict(item)
-        start = _number(
-            segment, "start", 0.0, minimum=0.0, maximum=86_400_000.0
-        )
-        end = _number(
-            segment, "end", 0.0, minimum=0.0, maximum=86_400_000.0
-        )
-        if start >= end:
-            raise FileValidationError(
-                f"segments[{index}] 必须满足 0 <= start < end"
-            )
-        if duration is not None and end > duration:
-            raise FileValidationError(f"segments[{index}].end 超过视频时长")
-        order = _integer(
-            segment, "order", index + 1, minimum=1, maximum=100_000
-        )
-        segment.update(
-            id=str(segment.get("id") or f"seg_{index + 1:03d}"),
-            start=start,
-            end=end,
-            order=order,
-        )
-        segments.append(segment)
-    return sorted(segments, key=lambda item: item["order"])
-
-
 def _json_object(*, optional: bool = False) -> dict[str, Any]:
     if optional and not request.data:
         return {}
@@ -578,23 +550,31 @@ def review_job(job_id: str):
             payload["recommended_clip"], duration
         )
     if "segments" in payload:
-        segments = _validate_segments(payload["segments"], duration)
+        try:
+            segments = (
+                adapt_legacy_segments(payload["segments"], duration)
+                if access["is_legacy"]
+                else validate_editor_segments(payload["segments"], duration)
+            )
+        except EditorSegmentValidationError as exc:
+            raise ReviewValidationError(str(exc)) from exc
         changes["segments"] = segments
-        first = segments[0]
-        existing_clip = report.get("recommended_clip", {})
-        ratio = (
-            existing_clip.get("output_ratio", "16:9")
-            if isinstance(existing_clip, dict)
-            else "16:9"
-        )
-        changes["recommended_clip"] = _validate_clip(
-            {
-                "start_time": first["start"],
-                "end_time": first["end"],
-                "output_ratio": ratio,
-            },
-            duration,
-        )
+        if segments:
+            first = segments[0]
+            existing_clip = report.get("recommended_clip", {})
+            ratio = (
+                existing_clip.get("output_ratio", "16:9")
+                if isinstance(existing_clip, dict)
+                else "16:9"
+            )
+            changes["recommended_clip"] = _validate_clip(
+                {
+                    "start_time": first["start"],
+                    "end_time": first["end"],
+                    "output_ratio": ratio,
+                },
+                duration,
+            )
 
     apply_report_update = lambda: jobs.update_report(
         job_id,
@@ -770,7 +750,7 @@ def get_report(job_id: str):
 @api_bp.get("/jobs/<job_id>/editor")
 def get_editor_contract(job_id: str):
     jobs, _, _ = _services()
-    require_job_access(job_id)
+    access = require_job_access(job_id)
     job = jobs.get_job_detail(job_id)
     if job.get("status") != "completed" or not job.get("report_available"):
         raise JobStateConflictError("分析报告尚未生成，不能打开剪辑预览")
@@ -785,17 +765,17 @@ def get_editor_contract(job_id: str):
     comments, missing_comment_status = _agent_comments(job_dir)
 
     raw_segments = report.get("segments", [])
-    if not isinstance(raw_segments, list):
-        raise FileValidationError("分析报告中的 segments 必须是数组")
-    segments = _validate_segments(raw_segments, duration) if raw_segments else []
+    try:
+        segments = (
+            adapt_legacy_segments(raw_segments, duration)
+            if access["is_legacy"]
+            else validate_editor_segments(raw_segments, duration)
+        )
+    except EditorSegmentValidationError as exc:
+        raise FileValidationError(f"分析报告中的 {exc}") from exc
     highlights = []
     for segment in segments:
-        score_value = segment.get("score")
-        score = None
-        if isinstance(score_value, (int, float)) and not isinstance(score_value, bool):
-            normalized_score = float(score_value)
-            if math.isfinite(normalized_score) and 0 <= normalized_score <= 1:
-                score = normalized_score
+        score = segment["score"]
         segment_id = str(segment["id"])
         agent = comments.get(segment_id)
         highlights.append(
