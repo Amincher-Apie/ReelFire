@@ -4,6 +4,7 @@ const state = {
   currentJobId: null,
   currentJob: null,
   currentProjectId: null,
+  currentProjectName: null,
   report: null,
   keyframes: [],
   segments: [],
@@ -28,10 +29,14 @@ const api = {
     try {
       payload = await response.json();
     } catch {
-      throw new Error(`服务返回了无法解析的响应（HTTP ${response.status}）`);
+      const error = new Error(`服务返回了无法解析的响应（HTTP ${response.status}）`);
+      error.status = response.status;
+      throw error;
     }
     if (!response.ok || payload.ok === false) {
-      throw new Error(payload.error || `请求失败（HTTP ${response.status}）`);
+      const error = new Error(payload.error || `请求失败（HTTP ${response.status}）`);
+      error.status = response.status;
+      throw error;
     }
     return payload;
   },
@@ -582,11 +587,14 @@ async function pollJob(jobId) {
 }
 
 async function resolveProject(projectName, gameType) {
-  // 如果已有缓存的 project_id，直接复用
-  if (state.currentProjectId) {
+  // 仅在项目名称未变化时复用已创建的 project_id。
+  if (state.currentProjectId && state.currentProjectName === projectName) {
     return state.currentProjectId;
   }
-  // 尝试创建项目（后端兼容期可能返回 404，降级使用 project_name）
+  state.currentProjectId = null;
+  state.currentProjectName = null;
+
+  // 尝试创建项目；后端兼容期可能返回 404，此时降级使用 project_name。
   try {
     const payload = await api.post("/api/projects", {
       name: projectName,
@@ -594,10 +602,14 @@ async function resolveProject(projectName, gameType) {
     });
     if (payload.project && payload.project.id) {
       state.currentProjectId = payload.project.id;
+      state.currentProjectName = projectName;
       return payload.project.id;
     }
-  } catch (_err) {
-    // 后端项目 API 尚未就绪，不阻塞上传流程
+  } catch (error) {
+    const status = error.status || 0;
+    if ([400, 401, 403, 500].includes(status)) {
+      showToast(`项目创建失败：${error.message}`, "error");
+    }
   }
   return null;
 }
@@ -826,6 +838,10 @@ function initApp() {
     button.addEventListener("click", () => setView(button.dataset.view));
   });
   byId("logout-button").addEventListener("click", logout);
+  byId("project-name").addEventListener("input", () => {
+    state.currentProjectId = null;
+    state.currentProjectName = null;
+  });
   byId("analysis-form").addEventListener("submit", (event) => {
     event.preventDefault();
     submitAnalysis();
