@@ -592,6 +592,115 @@ Provider 或 FFmpeg。
 - 任务未 completed 或报告不存在：`409 REPORT_NOT_READY`；
 - 报告 JSON 损坏或统计结构包含非法数据：复用现有 `500` 损坏数据响应。
 
+### 5.10 `GET /api/jobs/<job_id>/report-data`
+
+该只读接口为 HTML 报告、PDF 报告和审核包提供统一的 JSON 数据源；接口
+本身不生成 HTML、PDF 或 ZIP，也不会运行 CV、Agent 或 FFmpeg。调用者
+必须登录且拥有任务，任务必须为 `completed`，并且正式
+`analysis_report.json` 必须存在。
+
+成功响应的一级数据块固定如下：
+
+```json
+{
+  "ok": true,
+  "contract_version": "1.0",
+  "report_data": {
+    "job": {
+      "job_id": "20260726_120000_1a2b3c4d",
+      "status": "completed",
+      "created_at": "2026-07-26T12:00:00",
+      "completed_at": "2026-07-26T12:03:10"
+    },
+    "video": {
+      "filename": "demo.mp4",
+      "duration_seconds": 120.0
+    },
+    "statistics": {
+      "job_id": "20260726_120000_1a2b3c4d",
+      "timeline": {},
+      "detections": {},
+      "segments": {},
+      "reviews": {},
+      "agent_calls": {}
+    },
+    "cv": {
+      "summary": {
+        "sample_interval_seconds": 0.5,
+        "sampled_frame_count": 24,
+        "keyframe_count": 10,
+        "detection_occurrence_count": 12,
+        "segment_count": 3
+      },
+      "segments": []
+    },
+    "agent": {
+      "availability": "unavailable",
+      "status": null,
+      "summary": null,
+      "segment_comments": [],
+      "knowledge_refs": [],
+      "calls": {
+        "history_count": 0,
+        "status_counts": {
+          "queued": 0,
+          "running": 0,
+          "completed": 0,
+          "needs_review": 0,
+          "failed": 0
+        },
+        "latest_status": null
+      }
+    },
+    "review": {
+      "latest": null,
+      "history_count": 0,
+      "status_counts": {
+        "pending": 0,
+        "approved": 0,
+        "rejected": 0
+      }
+    },
+    "rough_cut": {
+      "available": false,
+      "filename": null,
+      "download_url": null
+    }
+  }
+}
+```
+
+数据来源与边界：
+
+- `job` 只含文件任务的公共编号、状态和时间；`video.filename` 为安全文件
+  basename，时长与 statistics 接口使用相同规则。
+- `statistics` 直接调用 `build_job_statistics()`，因此同一任务与
+  `/statistics` 的结果完全一致，不维护第二套统计口径。
+- `cv.segments` 只来自当前正式 CV 报告。最新审核快照不会覆盖原始 CV
+  片段；Agent 评论也不会改写 CV 数据。
+- `review.latest` 使用 SQLite 审核历史既有的最新优先顺序，仅公开状态、
+  标签、备注、片段/关键帧快照和时间。历史只公开总数与固定三态计数。
+- `agent.segment_comments` 和知识引用只读取任务根目录中的正式
+  `agent_report.json`，绝不从 `agent_calls.result` 构造。正式文件不存在时
+  `availability=unavailable` 并返回空数组；文件损坏、Job 不匹配、结构
+  无效或公开内容包含私密路径/非法 JSON 值时 `availability=invalid`，但
+  整个接口仍返回 `200`，且调用历史摘要继续保留。`calls` 仅为 SQLite
+  调用历史的固定五态摘要。
+- `rough_cut.available` 只有在相对元数据指向任务目录内真实存在的文件时
+  才为 `true`。`download_url` 使用现有受任务权限保护的 `/outputs/...`
+  路由；仅有元数据但文件缺失时返回不可用零值。
+- 审核、Agent 或粗剪为空属于正常业务状态，接口仍返回 `200`。
+- 响应使用公开字段白名单，不返回绝对路径、SQLite 内部 ID、用户 ID、
+  Provider 地址、API Key、Authorization、Token 或完整 Agent 调用结果。
+
+错误语义：
+
+- 未登录：`401 AUTH_REQUIRED`；
+- 非任务所有者：`403 JOB_ACCESS_DENIED`；
+- 任务未完成或正式 CV 报告缺失：`409 REPORT_NOT_READY`；
+- CV 报告损坏、统计字段无效或聚合数据无法安全公开：复用现有
+  `500` 损坏数据响应，不返回本机路径或堆栈。
+
 ---
 
 ## 6. 已实现：剪辑预览 1.0
