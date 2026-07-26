@@ -18,9 +18,11 @@ from services.agent_call_service import (
     AgentCallValidationError,
     AgentReportNotReadyError,
     create_agent_call,
+    fail_agent_call,
     get_agent_call,
     list_agent_calls,
 )
+from services.agent_execution_service import AgentExecutionUnavailableError
 from services.editor_input_validation import (
     EditorSegmentValidationError,
     adapt_legacy_segments,
@@ -679,11 +681,42 @@ def create_job_agent_call(job_id: str):
         requested_by=int(access["user_id"]),
         prompt_version=payload.get("prompt_version"),
     )
-    current_app.extensions["agent_execution_service"].enqueue(
-        int(agent_call["id"]),
-        job_id,
-        prompt_version=str(agent_call["prompt_version"]),
-    )
+    try:
+        execution_service = current_app.extensions.get(
+            "agent_execution_service"
+        )
+        if execution_service is None:
+            raise AgentExecutionUnavailableError(
+                "Agent 后台执行服务当前不可用"
+            )
+        execution_service.enqueue(
+            int(agent_call["id"]),
+            job_id,
+            prompt_version=str(agent_call["prompt_version"]),
+        )
+    except Exception as exc:
+        try:
+            fail_agent_call(
+                int(agent_call["id"]),
+                error_code="AGENT_EXECUTION_UNAVAILABLE",
+                error_message="Agent 后台执行服务当前不可用，请稍后重试",
+                duration_ms=0,
+                tool_trace=[],
+            )
+        except Exception:
+            current_app.logger.exception(
+                "无法把调度失败的 Agent 调用 %s 标记为 failed",
+                agent_call["id"],
+            )
+        if isinstance(exc, AgentExecutionUnavailableError):
+            raise
+        current_app.logger.exception(
+            "Agent 调用 %s 提交后台线程失败",
+            agent_call["id"],
+        )
+        raise AgentExecutionUnavailableError(
+            "Agent 后台执行服务当前不可用"
+        ) from exc
     return jsonify(ok=True, agent_call=agent_call), 202
 
 

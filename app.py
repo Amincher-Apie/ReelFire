@@ -24,7 +24,9 @@ from services.agent_call_service import (
     AgentCallStateConflictError,
     AgentCallValidationError,
     AgentReportNotReadyError,
+    recover_interrupted_agent_calls,
 )
+from services.agent_execution_service import AgentExecutionUnavailableError
 from services.auth_service import import_legacy_users
 from services.file_service import FileService, FileValidationError
 from services.job_access_service import JobAccessDeniedError, require_job_access
@@ -124,6 +126,7 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     with app.app_context():
         init_db()
         import_legacy_users(app.config["LEGACY_USERS_FILE"])
+        recover_interrupted_agent_calls()
 
     agent_execution_factory = app.config.get(
         "AGENT_EXECUTION_SERVICE_FACTORY",
@@ -280,6 +283,16 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             error=str(exc),
             error_code="AGENT_CALL_INPUT_INVALID",
         ), 400
+
+    @app.errorhandler(AgentExecutionUnavailableError)
+    def handle_agent_execution_unavailable(
+        exc: AgentExecutionUnavailableError,
+    ):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="AGENT_EXECUTION_UNAVAILABLE",
+        ), 503
 
     @app.errorhandler(AgentCallPersistenceUnavailableError)
     def handle_agent_call_persistence_unavailable(

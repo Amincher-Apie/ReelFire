@@ -929,6 +929,7 @@ Agent；生命周期只能通过 `services.agent_call_service` 的状态更新�
 | 409 | `AGENT_ALREADY_RUNNING` | 已存在活动调用 |
 | 409 | `REPORT_NOT_READY` | 任务或报告尚未就绪 |
 | 409 | `AGENT_CALL_STATE_CONFLICT` | 状态流转非法 |
+| 503 | `AGENT_EXECUTION_UNAVAILABLE` | 后台线程池关闭或无法接受新调用 |
 
 Legacy 任务的创建接口返回持久化不可用，历史接口返回空数组，不创建
 隐式 SQLite 任务，也不在文件系统伪造日志。
@@ -942,6 +943,19 @@ Legacy 任务的创建接口返回持久化不可用，历史接口返回空数�
 不等于人工 `reviews.pending`。Agent 服务不写入 `reviews`，也不修改
 `analysis_report.json`；只原子写入独立的 `agent_report.json` 和
 `agent_trace.json`。
+
+每次后台调用先写入任务目录下调用专属的
+`.agent_runs/<agent_call_id>-<random>/`。只有状态映射为 `completed` 或
+`needs_review`，且报告和轨迹均为非空 JSON 对象、`job_id` 匹配时，才把两份
+文件作为一组发布到任务目录。新运行失败、产物无效、第二份文件发布失败或
+数据库终态写入失败时，服务恢复完整的上一组正式文件；原先没有正式文件时
+删除本次新文件。staging 与备份文件始终清理。
+
+应用启动会在一个事务中把遗留的 `queued`、`running` 调用改为 `failed`，
+错误码为 `AGENT_PROCESS_INTERRUPTED`，不会自动重跑。调度提交失败时，新建
+记录会改为 `failed`，接口返回 `503 AGENT_EXECUTION_UNAVAILABLE`，不会留下
+永久 `queued`。数据库和 API 中的运行错误会隐藏绝对路径、凭据、请求头与
+堆栈；完整异常仅进入服务日志。
 
 `agent_calls.result` 只是调用日志的一部分，不作为 Editor 评论的直接来源：
 Editor 评论仍只来自 `agent_report.json.segment_comments[]` 或带可验证

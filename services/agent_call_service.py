@@ -455,3 +455,32 @@ def fail_agent_call(
         connection.rollback()
         raise
     return get_agent_call(agent_call_id)
+
+
+def recover_interrupted_agent_calls() -> int:
+    """Fail active calls left behind by a stopped application process."""
+    connection = get_db()
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        cursor = connection.execute(
+            """
+            UPDATE agent_calls
+            SET status = 'failed',
+                output_summary = NULL,
+                references_json = NULL,
+                result_path = NULL,
+                error_code = 'AGENT_PROCESS_INTERRUPTED',
+                error_message = ?,
+                completed_at = ?
+            WHERE status IN ('queued', 'running')
+            """,
+            (
+                "Agent 调用因服务进程中断未完成，请重新运行",
+                _utc_now(),
+            ),
+        )
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    return int(cursor.rowcount)
