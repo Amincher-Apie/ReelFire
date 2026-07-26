@@ -1,0 +1,136 @@
+{
+  "status": "passed",
+  "provider": "ollama",
+  "model": "qwen3-embedding:0.6b",
+  "embedding_endpoint": "http://127.0.0.1:11435/api/embed",
+  "executed_at": "2026-07-24T08:36:35.870097+00:00",
+  "knowledge_source": "agent/knowledge/media_review_rules.json",
+  "knowledge_sha256": "a2c19d84b90dc63d2f089bccc541e1b8931efd7c8024513ad8e7ad786b791f14",
+  "document_count": 12,
+  "vector_dimension": 1024,
+  "metric": "cosine",
+  "top_k": 5,
+  "min_similarity": 0.45,
+  "queries": [
+    {
+      "query": "画面没有检测到目标时如何审核？",
+      "results": [
+        {
+          "knowledge_id": "KB-QUALITY-001",
+          "title": "空检测结果处理",
+          "similarity": 0.716265,
+          "passes_threshold": true,
+          "match_reasons": [
+            "ollama_embedding",
+            "cosine_similarity"
+          ],
+          "rank": 1
+        },
+        {
+          "knowledge_id": "KB-SCORE-003",
+          "title": "目标密集片段",
+          "similarity": 0.57908,
+          "passes_threshold": true,
+          "match_reasons": [
+            "ollama_embedding",
+            "cosine_similarity"
+          ],
+          "rank": 2
+        },
+        {
+          "knowledge_id": "KB-CLASS-001",
+          "title": "人物类目标审核",
+          "similarity": 0.574933,
+          "passes_threshold": true,
+          "match_reasons": [
+            "ollama_embedding",
+            "cosine_similarity"
+          ],
+          "rank": 3
+        },
+        {
+          "knowledge_id": "KB-CLASS-002",
+          "title": "交通工具类目标审核",
+          "similarity": 0.550852,
+          "passes_threshold": true,
+          "match_reasons": [
+            "ollama_embedding",
+            "cosine_similarity"
+          ],
+          "rank": 4
+        },
+        {
+          "knowledge_id": "KB-QUALITY-002",
+          "title": "低置信度检测处理",
+          "similarity": 0.535099,
+          "passes_threshold": true,
+          "match_reasons": [
+            "ollama_embedding",
+            "cosine_similarity"
+          ],
+          "rank": 5
+        }
+      ]
+    },
+    {
+      "query": "person 低置信度时如何处理？",
+      "results": [
+        {
+          "knowledge_id": "KB-QUALITY-002",
+          "title": "低置信度检测处理",
+          "similarity": 0.72735,
+          "passes_threshold": true,
+          "match_reasons": [
+            "ollama_embedding",
+            "cosine_similarity"
+          ],
+          "rank": 1
+        },
+        {
+          "knowledge_id": "KB-QUALITY-003",
+          "title": "高置信度检测表述",
+          "similarity": 0.619645,
+          "passes_threshold": true,
+          "match_reasons": [
+            "ollama_embedding",
+            "cosine_similarity"
+          ],
+          "rank": 2
+        },
+        {
+          "knowledge_id": "KB-CORE-001",
+          "title": "检测事实引用边界",
+          "similarity": 0.457689,
+          "passes_threshold": true,
+          "match_reasons": [
+            "ollama_embedding",
+            "cosine_similarity"
+          ],
+          "rank": 3
+        },
+        {
+          "knowledge_id": "KB-REVIEW-001",
+          "title": "证据冲突与知识库未命中",
+          "similarity": 0.448418,
+          "passes_threshold": false,
+          "match_reasons": [
+            "ollama_embedding",
+            "cosine_similarity"
+          ],
+          "rank": 4
+        },
+        {
+          "knowledge_id": "KB-CLASS-001",
+          "title": "人物类目标审核",
+          "similarity": 0.438095,
+          "passes_threshold": false,
+          "match_reasons": [
+            "ollama_embedding",
+            "cosine_similarity"
+          ],
+          "rank": 5
+        }
+      ]
+    }
+  ]
+}

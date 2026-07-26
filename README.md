@@ -1,6 +1,6 @@
 # ReelFire
 
-ReelFire 是一个面向游戏录屏、场景演示和宣传素材的智能视频精彩片段提取工作台。系统使用 OpenCV 采样视频帧，使用 Ultralytics YOLO 检测画面目标，并结合目标密度、场景变化和运动强度生成可解释的精彩分数；用户可以复核关键帧、调整候选片段，再由 FFmpeg 输出粗剪视频。
+ReelFire 是课程题目 1“基于 YOLO+Agent 的智能数字媒体内容理解系统”的 FPS 录屏实现。现有代码使用 OpenCV 采样视频帧，以官方 Ultralytics `yolo11n.pt` 检测画面目标，并结合目标密度、场景变化和运动强度生成可解释的精彩分数；用户可以复核带检测框的关键帧、调整候选片段，再由 FFmpeg 输出粗剪视频。课程四天补齐计划还包括独立 Agent、知识库、三工具调用链、自定义模型、统计图和 HTML/PDF 报告，公开任务安排见 `docs/TEAM_GUIDE.md` 与 `docs/REQUIREMENTS_BOARD.md`。
 
 仓库地址：[Amincher-Apie/ReelFire](https://github.com/Amincher-Apie/ReelFire)
 
@@ -14,13 +14,13 @@ cd ReelFire
 python setup_environment.py
 ```
 
-脚本会复用当前非 `base` Conda 环境；如果当前没有可复用环境，则自动创建并配置名为 `ReelFire` 的环境。完成后按照脚本最后给出的提示激活环境即可。
+脚本会复用当前非 `base` Conda 环境；如果当前没有可复用环境，则自动创建并配置名为 `ReelFire` 的环境。它会根据本机 GPU/CPU 安装合适的 PyTorch，安装 FFmpeg 和业务依赖，并自动下载、校验 `models/yolo11n.pt`。完成后按照脚本最后给出的提示激活环境即可。
 
 注意命令中不需要加入 `run`；`python run setup_environment.py` 会让 Python 尝试打开名为 `run` 的文件。
 
 ## 项目方向
 
-本项目选择课程任务书中的 **方向 B：智能视频精彩片段提取系统**。
+本项目选择课程设计题目 **1. 基于 YOLO+Agent 的智能数字媒体内容理解系统**，以 FPS 游戏录屏内容理解与粗剪为具体场景。
 
 ```text
 上传视频
@@ -29,6 +29,8 @@ python setup_environment.py
   -> YOLO 检测
   -> 三项指标评分
   -> 关键帧去重与候选片段生成
+  -> Agent 解析视觉报告并检索知识库
+  -> 生成摘要、标签、建议与三态审核意见
   -> 人工审核和边界调整
   -> FFmpeg 输出视频
   -> 保存报告并支持历史任务重开
@@ -45,13 +47,13 @@ highlight_score =
 
 ## 团队职责
 
-| 角色 | 主要职责 |
+| 固定角色 | 主要职责 |
 |---|---|
-| 组长、产品负责人 | 需求与验收、进度协调、接口变更确认、项目集成、演示组织 |
-| CV 算法工程师 | OpenCV 采样、YOLO 推理与训练、三项评分、关键帧去重、片段边界及 FFmpeg 算法 |
-| 后端工程师 | Flask API、异步任务、任务状态、JSON 持久化、历史任务和错误处理 |
-| 前端工程师 | 上传与状态轮询、结果展示、关键帧审核、片段调整和页面状态 |
-| 测试工程师 | 正常与异常测试、FFmpeg 边界协测、Bug 记录、交付检查和测试报告 |
+| 产品与项目负责人、集成测试 | 需求、进度门禁、接口变更、项目集成、回归、演示和发布 |
+| CV/数据工程师 | OpenCV、YOLO 推理/训练、评分、关键帧、评估、跟踪和 FFmpeg 协作 |
+| 后端工程师 | Flask API、异步状态、认证、数据层、统计、导出和错误处理 |
+| 前端工程师 | 上传、轮询、Agent 结果、三态审核、图表、报告和页面状态 |
+| Agent/工作流工程师 | 知识库、Prompt、三工具编排、结构化建议和调用日志 |
 
 
 ## 项目文档
@@ -60,7 +62,7 @@ highlight_score =
 - [`docs/REQUIREMENTS_BOARD.md`](docs/REQUIREMENTS_BOARD.md)：按角色划分的 P0/P1 需求看板；
 - [`docs/ACCEPTANCE_CHECKLIST.md`](docs/ACCEPTANCE_CHECKLIST.md)：硬性条件、正常/异常和边界验收；
 - [`docs/DEMO_FLOW.md`](docs/DEMO_FLOW.md)：8 分钟演示流程和现场兜底方案；
-- [`docs/TEAM_GUIDE.md`](docs/TEAM_GUIDE.md)：模块契约、单日时间表和协作规范。
+- [`docs/TEAM_GUIDE.md`](docs/TEAM_GUIDE.md)：模块契约、四天时间表和协作规范。
 
 ## 获取项目
 
@@ -101,7 +103,8 @@ python setup_environment.py
 7. 无兼容 GPU 时安装或保留 CPU 构建；
 8. 安装 `requirements.txt` 中的 Web、CV 和 YOLO 依赖；
 9. 检查 `ffmpeg` 与 `ffprobe`，缺失时通过 conda-forge 安装；
-10. 最后验证所有关键模块和计算后端。
+10. 下载官方 `yolo11n.pt` 到 `models/` 并校验 SHA-256；
+11. 最后验证依赖、模型加载和计算后端。
 
 脚本不会安装或升级显卡驱动。驱动不可用时会给出错误或回退 CPU。
 
@@ -166,6 +169,19 @@ ffprobe -version
 
 NVIDIA 机器的 `torch.cuda.is_available()` 应为 `True`。CPU 机器返回 `False` 属于正常情况，只是 YOLO 推理速度会较慢。
 
+## 模型约定
+
+当前可运行基线统一使用 Ultralytics 官方 `yolo11n.pt`。初始化脚本从 Ultralytics 官方 Release 下载固定版本权重，并使用 SHA-256 校验完整性；模型属于本机运行依赖，因此继续由 `.gitignore` 排除，不直接提交 GitHub。课程四天计划另行增加自定义类别、训练配置、最佳权重和官方模型/多阈值对比证据；在该代码与证据完成前，不得把自定义模型写成现有能力。
+
+`yolo11n.pt` 使用 COCO 类别，能够为通用目标提供真实类别、置信度和边界框，但它不是击杀事件识别模型。ReelFire 的“精彩”推荐由目标分数、场景变化和运动强度共同决定，报告和页面只展示模型真实输出，不虚构 FPS 专用标签。
+
+## 验收证据
+
+- 浏览器完整流程与状态截图：[`docs/Acceptance_screenshot/`](docs/Acceptance_screenshot/)
+- 最终 5 条正常、5 条异常记录：[`docs/TEST_REPORT.md`](docs/TEST_REPORT.md)
+- 三个真实 Bug 及回归：[`docs/BUG_RECORD.md`](docs/BUG_RECORD.md)
+- 8 分钟演示与本机彩排记录：[`docs/DEMO_FLOW.md`](docs/DEMO_FLOW.md)
+
 ## 计划目录结构
 
 ```text
@@ -178,7 +194,7 @@ ReelFire/
 ├─ models/
 ├─ routes/
 ├─ services/
-├─ cv_core/
+├─ cv_engine/
 ├─ templates/
 ├─ static/
 ├─ tests/
@@ -190,10 +206,11 @@ ReelFire/
 模块归属：
 
 - `routes/`、`services/job_service.py`：后端工程师；
-- `cv_core/`、`services/analysis_service.py`、`services/ffmpeg_service.py`：CV 算法工程师；
+- `cv_engine/`、`services/analysis_service.py`、`services/ffmpeg_service.py`：CV 算法工程师；
+- 计划新增的 `services/agent_service.py`、`knowledge_base/` 和 Prompt：Agent/工作流工程师；
 - `templates/`、`static/`：前端工程师；
-- `tests/`、`docs/TEST_REPORT.md`、`docs/BUG_RECORD.md`：测试工程师；
-- `README.md`、PRD、验收清单、整体集成：组长组织，全员共同维护。
+- `tests/` 按模块由对应角色维护；集成测试、测试报告和 Bug 记录由项目负责人组织；
+- `README.md`、PRD、验收清单、整体集成：项目负责人组织，全员共同维护。
 
 ## Git 协作
 
@@ -201,11 +218,11 @@ ReelFire/
 
 ```text
 main
-├─ feature/cv-analysis       # CV 算法工程师
-├─ feature/backend-api       # 后端工程师
-├─ feature/frontend          # 前端工程师
-├─ test/qa-delivery          # 测试工程师
-└─ docs/project-management   # 组长、产品负责人
+├─ feature/cv-model-tracking     # CV/数据工程师
+├─ feature/backend-auth-report   # 后端工程师
+├─ feature/frontend-dashboard    # 前端工程师
+├─ feature/agent-workflow        # Agent/工作流工程师
+└─ docs/project-management       # 产品与项目负责人
 ```
 
 提交信息建议采用：
@@ -245,7 +262,7 @@ http://127.0.0.1:7880/api/health
 
 ### 第一阶段后端能力
 
-当前已实现视频上传、任务目录与 `job.json` 持久化、历史任务查询、安全删除、后台状态流转、报告读取和人工审核写回。公共接口及方向 B 接口为：
+当前已实现视频上传、任务目录与 `job.json` 持久化、历史任务查询、安全删除、后台状态流转、报告读取和人工审核写回。公共接口及题目 1 的现有内容理解接口为：
 
 ```text
 GET    /api/health
@@ -259,7 +276,7 @@ POST   /api/jobs/<job_id>/rough-cut
 GET    /api/jobs/<job_id>/report
 ```
 
-真实 OpenCV/YOLO 分析与 FFmpeg 粗剪仍是明确接入口。当前未接入时任务会保存为 `failed` 或接口返回 `501`，不会生成假关键帧、假分数、假报告或假视频。完整请求字段和状态码见 [`docs/API.md`](docs/API.md)。
+当前已接入真实 OpenCV 采样、YOLO11n 推理、带检测框关键帧、三项评分、联系表和 FFmpeg 粗剪。分析异常会进入 `failed` 并保存可读错误；FFmpeg 缺失时粗剪接口返回 `501`。系统不会生成假关键帧、假分数、假报告或假视频。完整请求字段和状态码见 [`docs/API.md`](docs/API.md)。
 
 ## 基础检查
 
@@ -268,6 +285,7 @@ python -m py_compile app.py
 python -m unittest discover -s tests -v
 node --check static/app.js
 python -c "from app import create_app; app=create_app(); print(app.url_map)"
+python -m tests.local_acceptance
 ```
 
 上述文件尚未加入时可以跳过对应命令；合并到 `main` 前必须执行与自己模块相关的检查。
@@ -285,7 +303,7 @@ python -c "from app import create_app; app=create_app(); print(app.url_map)"
   -> 可以从历史任务重新打开
 ```
 
-完成最小闭环后，再实现多片段合并、三种发布规格、AI 封面 Prompt、交付 ZIP 等加分功能。
+完成最小闭环后，再实现多片段合并、三种发布规格、交付 ZIP 等加分功能。当前报告已额外提供候选片段真实目标统计和基于真实检测的封面描述。
 
 ## 常见问题
 

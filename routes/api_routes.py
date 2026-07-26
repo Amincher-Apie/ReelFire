@@ -403,7 +403,8 @@ def rough_cut(job_id: str):
         return jsonify(ok=False, error="FFmpeg 不可用，无法生成粗剪视频"), 501
 
     job_dir = jobs.job_dir(job_id)
-    output_path = job_dir / "result" / "rough_cut.mp4"
+    ratio_label = clip["output_ratio"].replace(":", "x")
+    output_path = job_dir / "result" / f"rough_cut_{ratio_label}.mp4"
     try:
         result_path = create_rough_cut(
             jobs.get_input_video(job_id),
@@ -420,6 +421,18 @@ def rough_cut(job_id: str):
         raise RuntimeError("粗剪服务未生成有效输出文件")
     relative = result_path.relative_to(job_dir).as_posix()
     jobs.update_job(job_id, rough_cut_file=relative)
+    def update_output(current: dict[str, Any]) -> dict[str, Any]:
+        output = current.get("output")
+        if not isinstance(output, dict):
+            output = {}
+        output = {**output, "video": relative, "ratio": clip["output_ratio"]}
+        return {
+            **current,
+            "recommended_clip": clip,
+            "output": output,
+        }
+
+    jobs.update_report(job_id, update_output)
     return jsonify(ok=True, job_id=job_id, rough_cut_file=relative)
 
 

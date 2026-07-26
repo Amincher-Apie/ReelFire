@@ -13,10 +13,13 @@ from app import create_app
 
 
 class ApiTestCase(unittest.TestCase):
+    MINIMAL_MP4 = b"\x00\x00\x00\x18ftypisom" + b"\x00" * 32
+
     def setUp(self) -> None:
         self.temporary = tempfile.TemporaryDirectory()
         root = Path(self.temporary.name)
         self.outputs_dir = root / "outputs"
+        self.users_file = root / "users.db"
         self.app = create_app(
             {
                 "TESTING": True,
@@ -33,7 +36,7 @@ class ApiTestCase(unittest.TestCase):
         self.app.extensions["analysis_service"].shutdown(wait=True)
         self.temporary.cleanup()
 
-    def create_job(self, content: bytes = b"small test video") -> str:
+    def create_job(self, content: bytes = MINIMAL_MP4) -> str:
         response = self.client.post(
             "/api/jobs",
             data={
@@ -50,7 +53,51 @@ class ApiTestCase(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(response.status_code, 200)
         self.assertTrue(payload["ok"])
+        self.assertEqual(payload["version"], "1.0.0")
         self.assertFalse(payload["model_ready"])
+
+    def test_frontend_and_favicon_are_available(self) -> None:
+        page = self.client.get("/")
+        login = self.client.get("/login")
+        favicon = self.client.get("/favicon.ico")
+        html = page.get_data(as_text=True)
+        login_html = login.get_data(as_text=True)
+        self.assertEqual(page.status_code, 200)
+        self.assertEqual(login.status_code, 200)
+        self.assertIn("ReelFire", html)
+        self.assertEqual(html.lower().count("<!doctype html>"), 1)
+        self.assertEqual(html.lower().count("<html"), 1)
+        self.assertEqual(html.count('id="app"'), 1)
+        self.assertEqual(html.count("app.js"), 1)
+        self.assertNotIn("onclick=", html)
+        self.assertEqual(login_html.lower().count("<!doctype html>"), 1)
+        self.assertEqual(login_html.lower().count("<html"), 1)
+        self.assertEqual(login_html.count('id="login-form"'), 1)
+        self.assertEqual(login_html.count('id="register-form"'), 1)
+        self.assertEqual(login_html.count("app.js"), 1)
+        self.assertNotIn("onsubmit=", login_html)
+        self.assertEqual(favicon.status_code, 200)
+        self.assertEqual(favicon.mimetype, "image/svg+xml")
+        favicon.close()
+
+    def test_register_login_and_logout_flow(self) -> None:
+        credentials = {
+            "username": "frontend-reviewer",
+            "password": "test-passphrase",
+        }
+        with patch("routes.auth_routes.USERS_FILE", self.users_file):
+            register = self.client.post("/api/auth/register", json=credentials)
+            current = self.client.get("/api/auth/me")
+            logout = self.client.post("/api/auth/logout")
+            anonymous = self.client.get("/api/auth/me")
+            login = self.client.post("/api/auth/login", json=credentials)
+
+        self.assertEqual(register.status_code, 201)
+        self.assertEqual(current.status_code, 200)
+        self.assertEqual(logout.status_code, 200)
+        self.assertEqual(anonymous.status_code, 401)
+        self.assertEqual(login.status_code, 200)
+        self.assertTrue(self.users_file.is_file())
 
     def test_create_job_persists_workspace_and_metadata(self) -> None:
         job_id = self.create_job()
@@ -91,6 +138,16 @@ class ApiTestCase(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 400)
 
+    def test_create_job_rejects_spoofed_video_extension(self) -> None:
+        response = self.client.post(
+            "/api/jobs",
+            data={"file": (io.BytesIO(b"\x89PNG\r\n\x1a\n"), "fake.mp4")},
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("文件内容", response.get_json()["error"])
+        self.assertEqual(list(self.outputs_dir.iterdir()), [])
+
     def test_invalid_settings_return_400_without_crashing(self) -> None:
         response = self.client.post(
             "/api/jobs",
@@ -126,7 +183,7 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 409)
         self.assertTrue((self.outputs_dir / job_id).is_dir())
 
-    def test_analyze_returns_202_then_persists_clear_failure(self) -> None:
+    def test_analyze_corrupt_video_returns_202_then_persists_clear_failure(self) -> None:
         job_id = self.create_job()
         response = self.client.post(f"/api/jobs/{job_id}/analyze")
         self.assertEqual(response.status_code, 202)
@@ -140,7 +197,7 @@ class ApiTestCase(unittest.TestCase):
                 break
             time.sleep(0.02)
         self.assertEqual(job["status"], "failed")
-        self.assertIn("CV 分析模块尚未接入", job["error"])
+        self.assertIn("无法读取视频信息", job["error"])
         self.assertFalse((self.outputs_dir / job_id / "analysis_report.json").exists())
 
     def test_duplicate_analyze_returns_409(self) -> None:
@@ -194,7 +251,31 @@ class ApiTestCase(unittest.TestCase):
             "9:16",
         )
 
-    def test_rough_cut_placeholder_returns_501_without_fake_file(self) -> None:
+        segments = self.client.patch(
+            f"/api/jobs/{job_id}/review",
+            json={
+                "segments": [
+                    {"id": "seg_001", "start": 1, "end": 7, "order": 1}
+                ],
+                "keyframes": [
+                    {
+                        "id": "kf_001",
+                        "timestamp": 2,
+                        "decision": "keep",
+                        "label": "clutch",
+                        "note": "test",
+                        "order": 1,
+                    }
+                ],
+            },
+        )
+        self.assertEqual(segments.status_code, 200, segments.get_json())
+        report = segments.get_json()["report"]
+        self.assertEqual(report["segments"][0]["start"], 1.0)
+        self.assertEqual(report["recommended_clip"]["end_time"], 7.0)
+        self.assertEqual(report["keyframes"][0]["decision"], "keep")
+
+    def test_rough_cut_persists_output_in_job_and_report(self) -> None:
         job_id = self.create_job()
         jobs = self.app.extensions["job_service"]
         jobs.write_report(
@@ -209,10 +290,22 @@ class ApiTestCase(unittest.TestCase):
             },
         )
         jobs.update_job(job_id, status="completed", completed_at="2026-07-18T10:00:00")
-        with patch("routes.api_routes.is_ffmpeg_available", return_value=True):
+        def fake_cut(_input, output, _start, _end, _ratio):
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"mock mp4")
+            return output
+
+        with (
+            patch("routes.api_routes.is_ffmpeg_available", return_value=True),
+            patch("routes.api_routes.create_rough_cut", side_effect=fake_cut),
+        ):
             response = self.client.post(f"/api/jobs/{job_id}/rough-cut")
-        self.assertEqual(response.status_code, 501)
-        self.assertFalse((self.outputs_dir / job_id / "result" / "rough_cut.mp4").exists())
+        self.assertEqual(response.status_code, 200, response.get_json())
+        relative = response.get_json()["rough_cut_file"]
+        self.assertTrue((self.outputs_dir / job_id / relative).is_file())
+        report = jobs.read_report(job_id)
+        self.assertEqual(report["output"]["video"], relative)
+        self.assertEqual(report["output"]["ratio"], "16:9")
 
     def test_startup_marks_interrupted_job_failed(self) -> None:
         job_id = self.create_job()

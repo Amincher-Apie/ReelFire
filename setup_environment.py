@@ -13,6 +13,7 @@ itself inside that environment.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import locale
 import os
@@ -21,12 +22,19 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.request
 from pathlib import Path
 from typing import Sequence
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 REQUIREMENTS = PROJECT_ROOT / "requirements.txt"
+MODEL_PATH = PROJECT_ROOT / "models" / "yolo11n.pt"
+MODEL_URL = (
+    "https://github.com/ultralytics/assets/releases/download/"
+    "v8.3.0/yolo11n.pt"
+)
+MODEL_SHA256 = "0ebbc80d4a7680d14987a577cd21342b65ecfd94632bd9a8da63ae6417644ee1"
 DEFAULT_ENV_NAME = "ReelFire"
 MIN_PYTHON = (3, 10)
 MAX_PYTHON = (3, 13)
@@ -362,6 +370,55 @@ def ensure_ffmpeg(*, skip: bool, dry_run: bool) -> None:
     )
 
 
+def file_sha256(path: Path) -> str:
+    """Return the SHA-256 digest of a file without loading it into memory."""
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def ensure_yolo_model(*, dry_run: bool, model_path: Path = MODEL_PATH) -> None:
+    """Download the pinned YOLO11n weights when they are not available."""
+    model_path = Path(model_path)
+    if model_path.is_file() and file_sha256(model_path) == MODEL_SHA256:
+        print(f"[YOLO] 模型已就绪：{model_path}")
+        return
+
+    if model_path.exists():
+        print("[YOLO] 现有模型校验失败，将重新下载官方 yolo11n.pt。")
+    else:
+        print("[YOLO] 未找到 yolo11n.pt，将下载 Ultralytics 官方模型。")
+
+    print(f"[YOLO] 来源：{MODEL_URL}")
+    if dry_run:
+        return
+
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = model_path.with_suffix(model_path.suffix + ".part")
+    request = urllib.request.Request(
+        MODEL_URL,
+        headers={"User-Agent": "ReelFire-Environment-Setup/1.0"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            with temporary_path.open("wb") as destination:
+                shutil.copyfileobj(response, destination)
+        actual_digest = file_sha256(temporary_path)
+        if actual_digest != MODEL_SHA256:
+            raise SetupError(
+                "yolo11n.pt 下载完成但 SHA-256 校验失败；"
+                "请检查网络代理后重新运行初始化脚本。"
+            )
+        os.replace(temporary_path, model_path)
+    except Exception:
+        temporary_path.unlink(missing_ok=True)
+        raise
+
+    print(f"[YOLO] 下载并校验完成：{model_path}")
+
+
 def verify_installation(expected_backend: str, *, skip_ffmpeg: bool) -> None:
     probe = r"""
 import json
@@ -395,6 +452,16 @@ print(json.dumps({
 
     print("\n[验证] 检查 Python 包依赖关系：")
     run([sys.executable, "-m", "pip", "check"])
+    print("\n[验证] 加载 YOLO11n 模型：")
+    run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; from ultralytics import YOLO; "
+            "YOLO(sys.argv[1]); print('yolo11n.pt load ok')",
+            str(MODEL_PATH),
+        ]
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -444,6 +511,7 @@ def main() -> int:
         )
         install_application_dependencies(dry_run=args.dry_run)
         ensure_ffmpeg(skip=args.skip_ffmpeg, dry_run=args.dry_run)
+        ensure_yolo_model(dry_run=args.dry_run)
 
         if args.dry_run:
             print("\n[试运行完成] 未修改 Conda 环境或安装任何软件包。")

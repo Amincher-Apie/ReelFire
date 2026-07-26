@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reelfire.local/schemas/agent_input.schema.json",
+  "title": "ReelFire Agent Input",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "job_id",
+    "provider",
+    "analysis_report"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "job_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{1,80}$"
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "ollama",
+            "dify",
+            "coze",
+            "rule_only"
+          ]
+        },
+        "model": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "timeout_seconds": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "maximum": 120
+        }
+      }
+    },
+    "analysis_report": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "duration",
+        "total_sampled_frames",
+        "keyframes",
+        "segments"
+      ],
+      "properties": {
+        "job_id": {
+          "type": "string"
+        },
+        "duration": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "total_sampled_frames": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "model": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "samples": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/frameEvidence"
+          }
+        },
+        "keyframes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/keyframe"
+          }
+        },
+        "segments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/segment"
+          }
+        },
+        "segment_tags": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "ai_cover_prompt": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "detection": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "class",
+        "confidence"
+      ],
+      "properties": {
+        "class": {
+          "type": "string",
+          "minLength": 1
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "class_id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "bbox": {
+          "type": "array",
+          "minItems": 4,
+          "maxItems": 4,
+          "items": {
+            "type": "number"
+          }
+        }
+      }
+    },
+    "frameEvidence": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "timestamp",
+        "highlight_score",
+        "objects"
+      ],
+      "properties": {
+        "frame_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "timestamp": {
+          "type": "number",
+          "minimum": 0
+        },
+        "object_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "object_score": {
+          "type": "number"
+        },
+        "scene_change_score": {
+          "type": "number"
+        },
+        "motion_score": {
+          "type": "number"
+        },
+        "highlight_score": {
+          "type": "number"
+        },
+        "objects": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/detection"
+          }
+        }
+      }
+    },
+    "keyframe": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/frameEvidence"
+        },
+        {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "minLength": 1
+            },
+            "image": {
+              "type": "string"
+            },
+            "decision": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "segment": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "id",
+        "start",
+        "end"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "start": {
+          "type": "number",
+          "minimum": 0
+        },
+        "end": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "score": {
+          "type": "number"
+        },
+        "source_keyframes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

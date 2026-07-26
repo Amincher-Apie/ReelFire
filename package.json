@@ -1,0 +1,11 @@
+{
+  "name": "reelfire-browser-acceptance",
+  "private": true,
+  "scripts": {
+    "test:js": "node --check static/app.js && node --check tests/browser_acceptance.cjs",
+    "test:browser": "node tests/browser_acceptance.cjs"
+  },
+  "devDependencies": {
+    "playwright": "1.61.1"
+  }
+}
