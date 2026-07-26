@@ -37,6 +37,11 @@
   padding: 0;
 }
 
+/* 确保 hidden 属性始终生效，不被其他 display 规则覆盖 */
+[hidden] {
+  display: none !important;
+}
+
 html {
   font-size: 14px;
   -webkit-font-smoothing: antialiased;
@@ -1148,6 +1153,11 @@ td .job-id {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+/* 确保 hidden 属性始终生效，不被其他 display 规则覆盖 */
+[hidden] {
+  display: none !important;
 }
 
 html {

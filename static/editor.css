@@ -4,6 +4,18 @@
    复用全局 CSS 变量（来自 style.css）
    =================================================================== */
 
+/* ── 全局修正 ──────────────────────────────────────────────────────── */
+[hidden] {
+  display: none !important;
+}
+
+/* 编辑器页面独立滚动（覆盖 style.css 的 body overflow:hidden） */
+body[data-page="editor"] {
+  overflow: auto;
+  height: auto;
+  min-height: 100vh;
+}
+
 /* ── CSS 变量桥接（确保 editor 变量与 style.css 一致）───────────────── */
 :root {
   --panel: var(--bg-surface, #1a1830);
