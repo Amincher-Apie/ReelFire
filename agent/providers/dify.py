@@ -1,4 +1,4 @@
-"""Dify chat application adapter using an API key from the environment."""
+"""Dify Cloud Chatflow adapter using an API key from the environment."""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from agent.providers.ollama import DEFAULT_PROMPT_PATH, ModelProviderError
 
 
 class DifyChatClient:
-    """Generate a business draft through Dify's blocking chat API."""
+    """Generate a business draft through a Dify Chatflow blocking API."""
 
     provider_type = "dify"
 
@@ -39,7 +39,7 @@ class DifyChatClient:
         self.user = user or os.getenv("DIFY_USER", "reelfire-demo")
         self.model = model_label or os.getenv(
             "DIFY_MODEL_LABEL",
-            "dify-chat-app",
+            "reelfire-chatflow-v1.0.0",
         )
         self.timeout = timeout
         self.prompt_template = prompt_path.read_text(encoding="utf-8")
@@ -59,12 +59,7 @@ class DifyChatClient:
             visual_summary,
             knowledge_context,
         )
-        base_url = self.base_url.rstrip("/")
-        endpoint = (
-            f"{base_url}/chat-messages"
-            if base_url.endswith("/v1")
-            else f"{base_url}/v1/chat-messages"
-        )
+        endpoint = self.api_endpoint("chat-messages")
         request = Request(
             endpoint,
             data=json.dumps(
@@ -98,6 +93,39 @@ class DifyChatClient:
         if not isinstance(answer, str) or not answer.strip():
             raise ModelProviderError("Dify returned an empty answer")
         return self._parse_answer(answer)
+
+    def get_app_info(self) -> dict[str, Any]:
+        """Verify the app key and return non-secret Dify app metadata."""
+
+        if not self.api_key.strip():
+            raise ModelProviderError(
+                "Set DIFY_API_KEY in the local .env file before online testing."
+            )
+        request = Request(
+            self.api_endpoint("info"),
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            method="GET",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                payload = json.load(response)
+        except HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise ModelProviderError(
+                f"Dify returned HTTP {exc.code}: {detail[:300]}"
+            ) from exc
+        except (URLError, TimeoutError) as exc:
+            raise ModelProviderError(f"Dify request failed: {exc}") from exc
+        if not isinstance(payload, dict):
+            raise ModelProviderError("Dify app info must be an object")
+        return payload
+
+    def api_endpoint(self, path: str) -> str:
+        """Build a Dify API endpoint from a host with or without ``/v1``."""
+
+        base_url = self.base_url.rstrip("/")
+        api_base = base_url if base_url.endswith("/v1") else f"{base_url}/v1"
+        return f"{api_base}/{path.lstrip('/')}"
 
     def _render_prompt(
         self,

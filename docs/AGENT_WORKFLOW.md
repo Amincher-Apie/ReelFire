@@ -91,7 +91,7 @@ Agent 只给出审核建议。最终审核状态由人工或后端审核接口�
 | 提供方 | 建议用途 | 配置方式 | 失败处理 |
 |---|---|---|---|
 | `ollama` | 默认本地推理，使用已安装的 Qwen3 | `OLLAMA_BASE_URL`、`OLLAMA_MODEL` | 超时后进入规则降级 |
-| `dify` | 通过已实现的阻塞式 Chat API 适配器调用课程 Dify 应用 | `DIFY_BASE_URL`、`DIFY_API_KEY`、`DIFY_USER` | 空 Key、超时或非法 JSON 时记录错误并切换降级 |
+| `dify` | 通过阻塞式 Chat API 调用 Dify Cloud Chatflow（`advanced-chat`） | `DIFY_BASE_URL`、Chatflow 应用 `DIFY_API_KEY`、`DIFY_USER` | 空 Key、类型错误、超时或非法 JSON 时记录错误并切换降级 |
 | `coze` | 复用课程中配置的 Coze 智能体或工作流 | `COZE_BASE_URL`、`COZE_API_TOKEN`、`COZE_BOT_ID` | 记录平台错误，切换降级 |
 | `rule_only` | 无模型或演示离线模式 | 无密钥 | 只输出规则可证明的内容 |
 
@@ -105,6 +105,11 @@ Agent 只给出审核建议。最终审核状态由人工或后端审核接口�
 ```
 
 不同平台必须复用同一份 Prompt 和输出 Schema。平台返回的会话编号只写入调用轨迹，不得成为业务事实。
+
+Dify 部署、应用类型、输入输出契约、版本、DSL 和跨电脑验证步骤冻结在
+`docs/DIFY_CONFIGURATION_HANDOFF.md`。当前适配器使用 `blocking` 的
+`/v1/chat-messages`，因此交付类型固定为 Chatflow，不能用 Workflow 或 Agent
+应用替换。
 
 公开仓库的 `.env.example` 只保存变量名和非敏感默认值，`DIFY_API_KEY` 必须为空。
 测试人员将其复制为被 Git 忽略的 `.env` 后再填写真实 Key。命令行入口
