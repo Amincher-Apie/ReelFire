@@ -431,58 +431,27 @@ class MultiSegmentRoughCutApiTestCase(unittest.TestCase):
             (self.jobs.job_dir(self.job_id) / payload["rough_cut_file"]).is_file()
         )
 
-    def test_legacy_multi_segment_and_single_clip_paths_remain_available(self) -> None:
-        legacy_multi = self._upload_job()
-        self._write_report(
-            legacy_multi,
-            [
-                {"start": 5.0, "end": 7.0},
-                {"start": 1.0, "end": 2.0},
-            ],
+    def test_unowned_legacy_job_cannot_export(self) -> None:
+        legacy_id, job_dir = self.jobs.reserve_workspace()
+        (job_dir / "input" / "legacy.mp4").write_bytes(self.MINIMAL_MP4)
+        self.jobs.create_job_record(
+            legacy_id,
+            "Legacy",
+            "legacy.mp4",
+            {},
         )
-        captured: dict[str, object] = {}
+        self._write_report(legacy_id, [{"start": 1.0, "end": 2.0}])
 
-        def multi(_input, output, segments, ratio):
-            captured["segments"] = segments
-            captured["ratio"] = ratio
-            return self._successful_export(_input, output)
+        response = self.client.post(
+            f"/api/jobs/{legacy_id}/rough-cut",
+            json={},
+        )
 
-        with (
-            patch("routes.api_routes.is_ffmpeg_available", return_value=True),
-            patch(
-                "routes.api_routes.create_multi_segment_rough_cut",
-                side_effect=multi,
-            ),
-        ):
-            multi_response = self.client.post(
-                f"/api/jobs/{legacy_multi}/rough-cut",
-                json={},
-            )
-        self.assertEqual(multi_response.status_code, 200, multi_response.get_json())
-        self.assertEqual(multi_response.get_json()["segment_count"], 2)
-        self.assertEqual(multi_response.get_json()["review_id"], None)
+        self.assertEqual(response.status_code, 403, response.get_json())
         self.assertEqual(
-            [item["id"] for item in captured["segments"]],  # type: ignore[index]
-            ["seg_001", "seg_002"],
+            response.get_json()["error_code"],
+            "JOB_ACCESS_DENIED",
         )
-
-        legacy_single = self._upload_job()
-        self._write_report(legacy_single, [])
-        with (
-            patch("routes.api_routes.is_ffmpeg_available", return_value=True),
-            patch(
-                "routes.api_routes.create_rough_cut",
-                side_effect=self._successful_export,
-            ) as single,
-        ):
-            single_response = self.client.post(
-                f"/api/jobs/{legacy_single}/rough-cut",
-                json={"start_time": 2.0, "end_time": 3.0},
-            )
-        self.assertEqual(single_response.status_code, 200, single_response.get_json())
-        self.assertEqual(single_response.get_json()["segment_count"], 1)
-        self.assertEqual(single_response.get_json()["review_id"], None)
-        self.assertEqual(single.call_args.args[2:4], (2.0, 3.0))
 
     def test_export_failure_preserves_job_report_and_previous_output(self) -> None:
         approved = self._review("approved")

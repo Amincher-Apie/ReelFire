@@ -405,6 +405,16 @@ class ApiTestCase(unittest.TestCase):
             job_id,
             {
                 "duration": 10.0,
+                "segments": [
+                    {
+                        "id": "seg_001",
+                        "order": 1,
+                        "start": 1.0,
+                        "end": 8.0,
+                        "score": 0.8,
+                        "source_keyframes": [],
+                    }
+                ],
                 "recommended_clip": {
                     "start_time": 1.0,
                     "end_time": 8.0,
@@ -413,14 +423,23 @@ class ApiTestCase(unittest.TestCase):
             },
         )
         jobs.update_job(job_id, status="completed", completed_at="2026-07-18T10:00:00")
-        def fake_cut(_input, output, _start, _end, _ratio):
+        approval = self.client.patch(
+            f"/api/jobs/{job_id}/review",
+            json={"status": "approved"},
+        )
+        self.assertEqual(approval.status_code, 200, approval.get_json())
+
+        def fake_cut(_input, output, _segments, _ratio):
             output.parent.mkdir(parents=True, exist_ok=True)
             output.write_bytes(b"mock mp4")
             return output
 
         with (
             patch("routes.api_routes.is_ffmpeg_available", return_value=True),
-            patch("routes.api_routes.create_rough_cut", side_effect=fake_cut),
+            patch(
+                "routes.api_routes.create_multi_segment_rough_cut",
+                side_effect=fake_cut,
+            ),
         ):
             response = self.client.post(f"/api/jobs/{job_id}/rough-cut")
         self.assertEqual(response.status_code, 200, response.get_json())

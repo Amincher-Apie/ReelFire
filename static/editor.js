@@ -789,6 +789,7 @@ function saveReview() {
   var button = byId("save-review-button");
   setButtonLoading(button, true, "保存中…");
   var body = {
+    status: "pending",
     segments: state.segments.map(function (seg) {
       return {
         id: seg.id,
@@ -826,6 +827,7 @@ function createRoughCut() {
   setButtonLoading(button, true, "生成中…");
   // 先保存审核再生成粗剪
   api.patch("/api/jobs/" + encodeURIComponent(state.jobId) + "/review", {
+    status: "approved",
     segments: state.segments.map(function (seg) {
       return {
         id: seg.id,
