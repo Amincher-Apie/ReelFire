@@ -195,8 +195,55 @@ class ReviewPersistenceTestCase(unittest.TestCase):
                 ORDER BY id
                 """
             ).fetchall()
-        self.assertTrue(all(row["segments_json"] is None for row in rows))
+        self.assertTrue(all(row["segments_json"] == "[]" for row in rows))
         self.assertTrue(all(row["keyframes_json"] is None for row in rows))
+
+    def test_status_only_review_saves_current_complete_segments_snapshot(self) -> None:
+        current_segments = [
+            {
+                "id": "seg_002",
+                "order": 2,
+                "start": 8.0,
+                "end": 12.0,
+                "score": 0.6,
+                "source_keyframes": [],
+                "reason": "second",
+            },
+            {
+                "id": "seg_001",
+                "order": 1,
+                "start": 1.0,
+                "end": 4.0,
+                "score": 0.9,
+                "source_keyframes": ["kf_001"],
+                "reason": "first",
+            },
+        ]
+        report = self.jobs.read_report(self.job_id)
+        report["segments"] = current_segments
+        self.jobs.write_report(self.job_id, report)
+
+        response = self.owner.patch(
+            f"/api/jobs/{self.job_id}/review",
+            json={"status": "approved", "labels": ["snapshot"]},
+        )
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        latest = self.owner.get(
+            f"/api/jobs/{self.job_id}/review/latest"
+        ).get_json()["review"]
+        self.assertEqual(
+            [segment["id"] for segment in latest["segments"]],
+            ["seg_001", "seg_002"],
+        )
+        self.assertEqual(latest["segments"][0]["reason"], "first")
+        current_segments[1]["reason"] = "mutated-after-request"
+        self.assertEqual(
+            self.owner.get(
+                f"/api/jobs/{self.job_id}/review/latest"
+            ).get_json()["review"]["segments"][0]["reason"],
+            "first",
+        )
 
     def test_indexed_job_without_reviews_returns_empty_results(self) -> None:
         history = self.owner.get(f"/api/jobs/{self.job_id}/reviews")
