@@ -10,6 +10,8 @@
 | 部署 | Dify Cloud |
 | 应用类型 | Chatflow |
 | Dify 应用模式 | `advanced-chat` |
+| 应用名称 | `ReelFire 媒体审核助手` |
+| Dify 应用 ID | `69241329-2eb7-441c-b4e0-6035c644bce9` |
 | 项目环境变量 | `DIFY_BASE_URL=https://api.dify.ai` |
 | 实际消息接口 | `https://api.dify.ai/v1/chat-messages` |
 | 响应方式 | `blocking` |
@@ -60,6 +62,8 @@ DIFY_BASE_URL=https://api.dify.ai
 DIFY_API_KEY=
 DIFY_USER=reelfire-demo
 DIFY_MODEL_LABEL=reelfire-chatflow-v1.0.0
+DIFY_MAX_ATTEMPTS=3
+DIFY_RETRY_BASE_SECONDS=0.5
 ```
 
 先验证 Key、部署地址和应用类型：
@@ -80,9 +84,19 @@ python -m agent.check_dify
 | 现象 | 原因与处理 |
 |---|---|
 | HTTP 401 | Key 无效、已撤销、复制错误，或不是该应用的 API Key |
+| HTTP 403 | Key 无权访问当前应用；检查是否拿错应用或工作区 |
+| HTTP 429 | Dify 限流；适配器会进行最多 3 次有限退避重试 |
+| HTTP 5xx | Dify 服务端暂时异常；适配器会有限重试，随后安全降级 |
+| `dify_network_error` / `dify_timeout` | 网络或超时；适配器会有限重试，检查代理和网络后再运行 |
+| `dify_contract_error` | Dify 响应或 Chatflow 的 Answer 不是规定 JSON；不重试，修复工作流输出 |
 | `mode=workflow` | 给错了 Workflow 应用；不能用于当前适配器 |
 | `mode=agent-chat` 或 `mode=agent` | 给错了 Agent 应用；当前阻塞调用不验收 |
 | 连接到了其他域名 | Dify Cloud 地址填写错误，恢复为冻结配置 |
+
+自检失败 JSON 还会返回 `provider_error_code`、`retryable`、`status_code`、
+`attempt_count` 和脱敏后的 `request_id`。其中 401/403 和契约错误的
+`retryable=false`，重复点击不会解决问题，应先修复 Key、应用类型或 Answer
+输出；网络、429 和 5xx 才允许有限重试。
 
 ## 4. 输入契约
 
@@ -102,8 +116,10 @@ python -m agent.check_dify
 `knowledge_context_json`，以及允许使用的证据和知识编号白名单。Chatflow 不应
 额外要求自定义输入字段，否则会与当前 `inputs: {}` 契约不兼容。
 
-推荐 Chatflow 节点为：用户输入 `sys.query` → LLM → Answer。Answer 必须只返回
-LLM 生成的 JSON 文本，不添加解释、标题或 Markdown。
+当前已创建并完成预览验证的 Chatflow 节点为：`用户输入` → `LLM` →
+`直接回复`。新版 Dify 画布在 LLM 的 USER 消息中显示变量
+`用户输入.query`；它对应 API 请求体中的顶层 `query` 字段，不是自定义
+`inputs` 字段。`直接回复` 只引用 `LLM.text`，不添加解释、标题或 Markdown。
 
 ## 5. 输出契约
 
@@ -165,7 +181,19 @@ python -m agent.run_agent `
 验收完整的 `completed` 链路，还需启动 Ollama 并准备 `.env.example` 中指定的
 Embedding 模型。
 
-## 7. 版本与 DSL 交付
+## 7. 平台实测与版本交付
+
+2026-07-27 已在 Dify Cloud 创建上述真实 Chatflow，并在平台预览中使用
+`seg_001`、时间区间 `10.2-16.8`、类别 `person`、置信度 `0.82`、轨迹编号
+`3` 和 `ev:segment:seg_001` 完成一次真实模型调用。返回内容为可解析 JSON，
+包含 `summary`、`tags`、`suggestions`、`segment_comments` 与 `review`；逐片段
+评论保留原始 `segment_id` 和证据引用，证据不足时返回 `needs_review`。
+
+随后使用应用 Key 完成了真实 API 验收：`python -m agent.check_dify` 返回
+`ok=true`、应用名称正确、`mode=advanced-chat`，实际业务调用也由
+`provider.type=dify` 完成。联调中发现 DeepSeek 会在 API JSON 前返回
+`<think>...</think>`；适配器已安全移除该推理块，并继续只解析后面的业务 JSON。
+应用 Key 不得写入本文档或任何 Git 文件。
 
 1. 在 Dify 中把版本命名为 `reelfire-chatflow-v1.0.0` 并发布；
 2. 发布后不要继续修改草稿；

@@ -17,6 +17,23 @@ DEFAULT_PROMPT_PATH = ROOT / "agent" / "prompts" / "review_agent_v2.md"
 class ModelProviderError(RuntimeError):
     """Raised when a configured model provider cannot return business JSON."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider_code: str = "model_provider_error",
+        retryable: bool = False,
+        status_code: int | None = None,
+        attempt_count: int = 1,
+        request_id: str | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.provider_code = provider_code
+        self.retryable = retryable
+        self.status_code = status_code
+        self.attempt_count = attempt_count
+        self.request_id = request_id
+
 
 class OllamaChatClient:
     """Generate a business draft through Ollama's local `/api/chat` endpoint."""
@@ -104,18 +121,34 @@ class OllamaChatClient:
         except HTTPError as exc:
             detail = exc.read().decode("utf-8", errors="replace")
             raise ModelProviderError(
-                f"Ollama returned HTTP {exc.code}: {detail[:300]}"
+                f"Ollama returned HTTP {exc.code}: {detail[:300]}",
+                provider_code="ollama_http_error",
+                retryable=exc.code == 429 or 500 <= exc.code < 600,
+                status_code=exc.code,
             ) from exc
         except (URLError, TimeoutError) as exc:
-            raise ModelProviderError(f"Ollama request failed: {exc}") from exc
+            raise ModelProviderError(
+                f"Ollama request failed: {exc}",
+                provider_code="ollama_unavailable",
+                retryable=True,
+            ) from exc
 
         content = payload.get("message", {}).get("content")
         if not isinstance(content, str) or not content.strip():
-            raise ModelProviderError("Ollama returned an empty message")
+            raise ModelProviderError(
+                "Ollama returned an empty message",
+                provider_code="ollama_contract_error",
+            )
         try:
             result = json.loads(content)
         except json.JSONDecodeError as exc:
-            raise ModelProviderError("Ollama returned invalid JSON") from exc
+            raise ModelProviderError(
+                "Ollama returned invalid JSON",
+                provider_code="ollama_contract_error",
+            ) from exc
         if not isinstance(result, dict):
-            raise ModelProviderError("Ollama business output must be an object")
+            raise ModelProviderError(
+                "Ollama business output must be an object",
+                provider_code="ollama_contract_error",
+            )
         return result

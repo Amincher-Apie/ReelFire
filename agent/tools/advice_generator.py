@@ -43,21 +43,36 @@ class AdviceGeneratorTool:
                 )
                 return {
                     "status": "completed",
+                    "attempt_count": int(
+                        getattr(self.model_client, "last_attempt_count", 1)
+                    ),
                     "provider": {
                         "type": self.model_client.provider_type,
                         "model": self.model_client.model,
-                        "request_id": None,
+                        "request_id": getattr(
+                            self.model_client,
+                            "last_request_id",
+                            None,
+                        ),
                     },
                     "draft": draft,
                     "error": None,
                 }
             except Exception as exc:
+                provider_code = str(
+                    getattr(exc, "provider_code", "model_provider_error")
+                )
+                attempt_count = max(
+                    0,
+                    int(getattr(exc, "attempt_count", 1)),
+                )
                 return {
                     "status": "degraded",
+                    "attempt_count": attempt_count,
                     "provider": {
                         "type": "rule_only",
                         "model": "deterministic-v1",
-                        "request_id": None,
+                        "request_id": getattr(exc, "request_id", None),
                     },
                     "draft": self.deterministic_draft(
                         visual_summary,
@@ -67,7 +82,11 @@ class AdviceGeneratorTool:
                         "code": "model_generation_failed",
                         "message": self._safe_error(exc),
                         "stage": self.name,
-                        "retryable": True,
+                        "retryable": bool(
+                            getattr(exc, "retryable", True)
+                        ),
+                        "provider_code": provider_code,
+                        "attempt_count": attempt_count,
                     },
                 }
 
@@ -79,10 +98,13 @@ class AdviceGeneratorTool:
                 "code": "model_provider_not_configured",
                 "message": f"{provider_type} 未配置，已切换规则生成",
                 "stage": self.name,
-                "retryable": True,
+                "retryable": False,
+                "provider_code": f"{provider_type}_not_configured",
+                "attempt_count": 0,
             }
         return {
             "status": status,
+            "attempt_count": 0,
             "provider": {
                 "type": "rule_only",
                 "model": requested_model or "deterministic-v1",

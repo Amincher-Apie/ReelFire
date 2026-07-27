@@ -406,9 +406,13 @@ class AgentService:
         draft = value.get("draft")
         draft = draft if isinstance(draft, dict) else {}
         suggestions = draft.get("suggestions")
+        error = value.get("error")
+        error = error if isinstance(error, dict) else {}
         return (
             f"status={value.get('status', 'unknown')}；"
             f"provider={provider.get('type', 'unknown')}；"
+            f"attempts={value.get('attempt_count', 0)}；"
+            f"provider_error={error.get('provider_code', 'none')}；"
             f"suggestions={len(suggestions) if isinstance(suggestions, list) else 0}"
         )
 

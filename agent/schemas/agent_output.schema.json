@@ -384,6 +384,13 @@
           },
           "retryable": {
             "type": "boolean"
+          },
+          "provider_code": {
+            "type": "string"
+          },
+          "attempt_count": {
+            "type": "integer",
+            "minimum": 0
           }
         }
       }

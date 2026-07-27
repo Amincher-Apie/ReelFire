@@ -22,9 +22,22 @@ def main() -> int:
     try:
         info = client.get_app_info()
     except ModelProviderError as exc:
+        provider_code = str(
+            getattr(exc, "provider_code", "model_provider_error")
+        )
         print(
             json.dumps(
-                {"ok": False, "error": str(exc)},
+                {
+                    "ok": False,
+                    "provider_error_code": provider_code,
+                    "retryable": bool(getattr(exc, "retryable", False)),
+                    "status_code": getattr(exc, "status_code", None),
+                    "attempt_count": int(
+                        getattr(exc, "attempt_count", 1)
+                    ),
+                    "request_id": getattr(exc, "request_id", None),
+                    "error": str(exc),
+                },
                 ensure_ascii=False,
                 indent=2,
             ),
@@ -40,6 +53,14 @@ def main() -> int:
         "expected_mode": EXPECTED_MODE,
         "chat_endpoint": client.api_endpoint("chat-messages"),
     }
+    if not result["ok"]:
+        result.update(
+            {
+                "provider_error_code": "dify_app_mode_mismatch",
+                "retryable": False,
+                "attempt_count": client.last_attempt_count,
+            }
+        )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0 if result["ok"] else 2
 
