@@ -51,9 +51,11 @@ from services.job_service import (
 from services.project_service import (
     ProjectOwnerForbiddenError,
     ProjectValidationError,
+    archive_owned_project,
     create_project,
     get_owned_project,
     list_projects_for_owner,
+    update_owned_project,
 )
 from services.review_service import (
     ReviewPersistenceUnavailableError,
@@ -457,6 +459,41 @@ def list_projects_route():
     )
 
 
+@api_bp.get("/projects/<int:project_id>")
+def get_project_route(project_id: int):
+    owner_id = require_authenticated_user_id()
+    return jsonify(
+        ok=True,
+        project=get_owned_project(project_id, owner_id),
+    )
+
+
+@api_bp.patch("/projects/<int:project_id>")
+def update_project_route(project_id: int):
+    owner_id = require_authenticated_user_id()
+    payload = _json_object()
+    unexpected = set(payload) - {"name"}
+    if unexpected or "name" not in payload:
+        raise ProjectValidationError("Only the name field can be updated")
+    project = update_owned_project(
+        project_id,
+        owner_id,
+        name=payload["name"],
+    )
+    return jsonify(ok=True, project=project)
+
+
+@api_bp.delete("/projects/<int:project_id>")
+def archive_project_route(project_id: int):
+    owner_id = require_authenticated_user_id()
+    project = archive_owned_project(project_id, owner_id)
+    return jsonify(
+        ok=True,
+        deleted_project_id=project["id"],
+        project=project,
+    )
+
+
 @api_bp.post("/jobs")
 def create_job():
     jobs, files, _ = _services()
@@ -558,6 +595,30 @@ def analyze_job(job_id: str):
     jobs, _, analysis = _services()
     require_job_access(job_id)
     jobs.get_job(job_id)
+    analysis.enqueue(job_id)
+    return jsonify(ok=True, job_id=job_id, status="queued"), 202
+
+
+@api_bp.post("/jobs/<job_id>/cancel")
+def cancel_job(job_id: str):
+    jobs, _, _ = _services()
+    require_job_access(job_id)
+    job = jobs.get_job(job_id)
+    if job.get("status") not in {"created", "queued"}:
+        raise JobStateConflictError(
+            "Only created or queued jobs can be cancelled"
+        )
+    jobs.mark_failed(job_id, "Cancelled by user")
+    return jsonify(ok=True, job_id=job_id, status="cancelled")
+
+
+@api_bp.post("/jobs/<job_id>/retry")
+def retry_job(job_id: str):
+    jobs, _, analysis = _services()
+    require_job_access(job_id)
+    job = jobs.get_job(job_id)
+    if job.get("status") != "failed":
+        raise JobStateConflictError("Only failed jobs can be retried")
     analysis.enqueue(job_id)
     return jsonify(ok=True, job_id=job_id, status="queued"), 202
 
@@ -1329,3 +1390,478 @@ def get_editor_contract(job_id: str):
         },
         actions_enabled=report_ready,
     )
+
+
+def _editable_segments(
+    job_id: str,
+) -> tuple[JobService, dict[str, Any], float, list[dict[str, Any]]]:
+    jobs, _, _ = _services()
+    access = require_job_access(job_id)
+    job = jobs.get_job(job_id)
+    if not jobs.report_path(job_id).is_file():
+        raise JobStateConflictError(
+            "The analysis report is not ready for segment editing"
+        )
+    report = jobs.read_report(job_id)
+    duration = _duration(job, report)
+    if duration is None:
+        raise FileValidationError("The report has no valid video duration")
+    try:
+        segments = (
+            adapt_legacy_segments(report.get("segments", []), duration)
+            if access["is_legacy"]
+            else normalize_stored_editor_segments(
+                report.get("segments", []),
+                duration,
+            )
+        )
+    except EditorSegmentValidationError as exc:
+        raise FileValidationError(str(exc)) from exc
+    return jobs, report, duration, segments
+
+
+def _store_editor_segments(
+    jobs: JobService,
+    job_id: str,
+    duration: float,
+    segments: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    ordered = [
+        {**segment, "order": index}
+        for index, segment in enumerate(
+            sorted(segments, key=lambda item: int(item["order"])),
+            start=1,
+        )
+    ]
+    try:
+        normalized = validate_editor_segments(ordered, duration)
+    except EditorSegmentValidationError as exc:
+        raise FileValidationError(str(exc)) from exc
+    updated = jobs.update_report(
+        job_id,
+        lambda current: {**current, "segments": normalized},
+    )
+    jobs.update_job(job_id)
+    return normalized, updated
+
+
+def _find_segment(
+    segments: list[dict[str, Any]],
+    segment_id: str,
+) -> dict[str, Any]:
+    segment = next(
+        (item for item in segments if str(item["id"]) == segment_id),
+        None,
+    )
+    if segment is None:
+        raise FileValidationError("The requested segment does not exist")
+    return segment
+
+
+@api_bp.post("/jobs/<job_id>/segments")
+def add_segment(job_id: str):
+    jobs, _report, duration, segments = _editable_segments(job_id)
+    payload = _json_object()
+    unexpected = set(payload) - {"start", "end"}
+    if unexpected:
+        raise FileValidationError("Only start and end can be supplied")
+    start = _number(
+        payload,
+        "start",
+        0.0,
+        minimum=0.0,
+        maximum=duration,
+    )
+    end = _number(
+        payload,
+        "end",
+        duration,
+        minimum=0.0,
+        maximum=duration,
+    )
+    if start >= end:
+        raise FileValidationError("Segment start must be before end")
+    segment = {
+        "id": f"manual_{uuid4().hex[:12]}",
+        "order": len(segments) + 1,
+        "start": start,
+        "end": end,
+        "duration": end - start,
+        "score": None,
+        "source_keyframes": [],
+        "source": "manual",
+        "source_segment_ids": [],
+        "review": "",
+        "review_note": "",
+    }
+    normalized, updated = _store_editor_segments(
+        jobs,
+        job_id,
+        duration,
+        [*segments, segment],
+    )
+    created = _find_segment(normalized, segment["id"])
+    return jsonify(ok=True, segment=created, report=updated), 201
+
+
+@api_bp.delete("/jobs/<job_id>/segments/<segment_id>")
+def delete_segment(job_id: str, segment_id: str):
+    jobs, _report, duration, segments = _editable_segments(job_id)
+    _find_segment(segments, segment_id)
+    normalized, updated = _store_editor_segments(
+        jobs,
+        job_id,
+        duration,
+        [item for item in segments if str(item["id"]) != segment_id],
+    )
+    return jsonify(
+        ok=True,
+        deleted_segment_id=segment_id,
+        segments=normalized,
+        report=updated,
+    )
+
+
+@api_bp.patch("/jobs/<job_id>/segments/<segment_id>")
+def update_segment(job_id: str, segment_id: str):
+    jobs, _report, duration, segments = _editable_segments(job_id)
+    payload = _json_object()
+    unexpected = set(payload) - {"start", "end", "order"}
+    if unexpected or not payload:
+        raise FileValidationError(
+            "At least one of start, end, or order is required"
+        )
+    segment = _find_segment(segments, segment_id)
+    if "start" in payload:
+        segment["start"] = _number(
+            payload,
+            "start",
+            float(segment["start"]),
+            minimum=0.0,
+            maximum=duration,
+        )
+    if "end" in payload:
+        segment["end"] = _number(
+            payload,
+            "end",
+            float(segment["end"]),
+            minimum=0.0,
+            maximum=duration,
+        )
+    if float(segment["start"]) >= float(segment["end"]):
+        raise FileValidationError("Segment start must be before end")
+    if "order" in payload:
+        requested_order = _integer(
+            payload,
+            "order",
+            int(segment["order"]),
+            minimum=1,
+            maximum=len(segments),
+        )
+        segments.remove(segment)
+        segments.insert(requested_order - 1, segment)
+        for index, item in enumerate(segments, start=1):
+            item["order"] = index
+    normalized, updated = _store_editor_segments(
+        jobs,
+        job_id,
+        duration,
+        segments,
+    )
+    return jsonify(
+        ok=True,
+        segment=_find_segment(normalized, segment_id),
+        report=updated,
+    )
+
+
+@api_bp.post("/jobs/<job_id>/segments/merge")
+def merge_segments_route(job_id: str):
+    jobs, _report, duration, segments = _editable_segments(job_id)
+    payload = _json_object()
+    first_id = str(payload.get("seg_id_1", "")).strip()
+    second_id = str(payload.get("seg_id_2", "")).strip()
+    if not first_id or not second_id or first_id == second_id:
+        raise FileValidationError("Two different segment ids are required")
+    first = _find_segment(segments, first_id)
+    second = _find_segment(segments, second_id)
+    scores = [
+        float(value)
+        for value in (first.get("score"), second.get("score"))
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+    ]
+    source_keyframes = list(
+        dict.fromkeys(
+            [
+                *first.get("source_keyframes", []),
+                *second.get("source_keyframes", []),
+            ]
+        )
+    )
+    merged_id = f"merged_{uuid4().hex[:12]}"
+    merged = {
+        "id": merged_id,
+        "order": min(int(first["order"]), int(second["order"])),
+        "start": min(float(first["start"]), float(second["start"])),
+        "end": max(float(first["end"]), float(second["end"])),
+        "duration": (
+            max(float(first["end"]), float(second["end"]))
+            - min(float(first["start"]), float(second["start"]))
+        ),
+        "score": max(scores) if scores else None,
+        "source_keyframes": source_keyframes,
+        "source": "merged",
+        "source_segment_ids": [first_id, second_id],
+        "review": "",
+        "review_note": "",
+    }
+    remaining = [
+        item
+        for item in segments
+        if str(item["id"]) not in {first_id, second_id}
+    ]
+    remaining.append(merged)
+    normalized, updated = _store_editor_segments(
+        jobs,
+        job_id,
+        duration,
+        remaining,
+    )
+    return jsonify(
+        ok=True,
+        segment=_find_segment(normalized, merged_id),
+        report=updated,
+    )
+
+
+@api_bp.post("/jobs/<job_id>/segments/<segment_id>/split")
+def split_segment_route(job_id: str, segment_id: str):
+    jobs, _report, duration, segments = _editable_segments(job_id)
+    payload = _json_object()
+    split_time = _number(
+        payload,
+        "split_time",
+        0.0,
+        minimum=0.0,
+        maximum=duration,
+    )
+    target = _find_segment(segments, segment_id)
+    if not float(target["start"]) < split_time < float(target["end"]):
+        raise FileValidationError(
+            "split_time must be inside the segment boundaries"
+        )
+    split_token = uuid4().hex[:10]
+    replacements = []
+    for suffix, start, end, order in (
+        ("a", float(target["start"]), split_time, int(target["order"])),
+        ("b", split_time, float(target["end"]), int(target["order"]) + 1),
+    ):
+        replacements.append(
+            {
+                "id": f"split_{split_token}_{suffix}",
+                "order": order,
+                "start": start,
+                "end": end,
+                "duration": end - start,
+                "score": target.get("score"),
+                "source_keyframes": list(
+                    target.get("source_keyframes", [])
+                ),
+                "source": "split",
+                "source_segment_ids": [segment_id],
+                "review": "",
+                "review_note": "",
+            }
+        )
+    remaining = [
+        item
+        for item in segments
+        if str(item["id"]) != segment_id
+    ]
+    remaining.extend(replacements)
+    normalized, updated = _store_editor_segments(
+        jobs,
+        job_id,
+        duration,
+        remaining,
+    )
+    split_ids = {item["id"] for item in replacements}
+    return jsonify(
+        ok=True,
+        segments=[
+            item for item in normalized if item["id"] in split_ids
+        ],
+        report=updated,
+    )
+
+
+def _requested_export_segments(
+    payload: dict[str, Any],
+    segments: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    requested = payload.get("segments")
+    if not isinstance(requested, list) or not requested:
+        raise FileValidationError("segments must be a non-empty array")
+    ids: list[str] = []
+    for index, item in enumerate(requested):
+        if not isinstance(item, dict):
+            raise FileValidationError(
+                f"segments[{index}] must be an object"
+            )
+        segment_id = str(item.get("id", "")).strip()
+        if not segment_id or segment_id in ids:
+            raise FileValidationError(
+                "Every requested segment id must be present and unique"
+            )
+        ids.append(segment_id)
+    selected = [
+        _find_segment(segments, segment_id)
+        for segment_id in ids
+    ]
+    return selected
+
+
+def _export_filename(value: object, fallback: str) -> str:
+    if value is None:
+        return fallback
+    if not isinstance(value, str):
+        raise FileValidationError("filename must be a string")
+    filename = "".join(
+        character
+        for character in value.strip()
+        if character.isascii()
+        and (character.isalnum() or character in {"-", "_"})
+    )
+    return filename[:80] or fallback
+
+
+@api_bp.post("/jobs/<job_id>/export")
+def export_job(job_id: str):
+    jobs, _report, _duration_value, segments = _editable_segments(job_id)
+    job = jobs.get_job(job_id)
+    if job.get("status") != "completed":
+        raise JobStateConflictError("Only completed jobs can be exported")
+    if not is_ffmpeg_available():
+        return jsonify(ok=False, error="FFmpeg is unavailable"), 501
+
+    payload = _json_object()
+    unexpected = set(payload) - {
+        "mode",
+        "segments",
+        "aspect_ratio",
+        "resolution",
+        "keep_audio",
+        "filename",
+    }
+    if unexpected:
+        raise FileValidationError(
+            f"Unsupported export fields: {', '.join(sorted(unexpected))}"
+        )
+    mode = str(payload.get("mode", "collection")).strip()
+    if mode not in {"single", "collection"}:
+        raise FileValidationError("mode must be single or collection")
+    ratio = str(payload.get("aspect_ratio", "16:9")).strip()
+    if ratio not in current_app.config["ALLOWED_OUTPUT_RATIOS"]:
+        raise FileValidationError("aspect_ratio is not supported")
+    resolution = str(payload.get("resolution", "original")).strip()
+    if resolution != "original":
+        raise FileValidationError(
+            "Only original resolution is currently supported"
+        )
+    keep_audio = payload.get("keep_audio", True)
+    if keep_audio is not True:
+        raise FileValidationError(
+            "Audio removal is not supported by the current export service"
+        )
+    selected = _requested_export_segments(payload, segments)
+    filename = _export_filename(
+        payload.get("filename"),
+        f"export_{job_id[:8]}",
+    )
+    job_dir = jobs.job_dir(job_id)
+    result_dir = job_dir / "result"
+    result_dir.mkdir(parents=True, exist_ok=True)
+    input_video = jobs.get_input_video(job_id)
+    ratio_label = ratio.replace(":", "x")
+
+    def render(
+        destination: Path,
+        selected_segments: list[dict[str, Any]],
+    ) -> Path:
+        staging = destination.with_name(
+            f".{destination.stem}.{uuid4().hex}.staged.mp4"
+        )
+        try:
+            if len(selected_segments) == 1:
+                segment = selected_segments[0]
+                rendered = create_rough_cut(
+                    input_video,
+                    staging,
+                    float(segment["start"]),
+                    float(segment["end"]),
+                    ratio,
+                )
+            else:
+                rendered = create_multi_segment_rough_cut(
+                    input_video,
+                    staging,
+                    selected_segments,
+                    ratio,
+                )
+            os.replace(rendered, destination)
+            return destination
+        finally:
+            staging.unlink(missing_ok=True)
+
+    exports: list[dict[str, Any]] = []
+    if mode == "single":
+        for index, segment in enumerate(selected, start=1):
+            destination = (
+                result_dir
+                / f"{filename}_{index}_{ratio_label}.mp4"
+            )
+            render(destination, [segment])
+            exports.append(
+                {
+                    "segment_id": segment["id"],
+                    "output": destination.relative_to(job_dir).as_posix(),
+                    "start": segment["start"],
+                    "end": segment["end"],
+                }
+            )
+        response_payload: dict[str, Any] = {
+            "ok": True,
+            "job_id": job_id,
+            "mode": mode,
+            "exports": exports,
+        }
+    else:
+        destination = result_dir / f"{filename}_{ratio_label}.mp4"
+        render(destination, selected)
+        export_record = {
+            "file": destination.relative_to(job_dir).as_posix(),
+            "segment_count": len(selected),
+            "total_duration": sum(
+                float(segment["end"]) - float(segment["start"])
+                for segment in selected
+            ),
+        }
+        exports.append(export_record)
+        response_payload = {
+            "ok": True,
+            "job_id": job_id,
+            "mode": mode,
+            "export": export_record,
+        }
+
+    def update_exports(current: dict[str, Any]) -> dict[str, Any]:
+        output = current.get("output")
+        output = dict(output) if isinstance(output, dict) else {}
+        history = output.get("exports")
+        history = list(history) if isinstance(history, list) else []
+        output["exports"] = [*history, *exports]
+        return {**current, "output": output}
+
+    jobs.update_report(job_id, update_exports)
+    jobs.update_job(job_id)
+    return jsonify(**response_payload)

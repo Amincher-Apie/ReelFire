@@ -146,7 +146,7 @@ def list_projects_for_owner(owner_id: int) -> list[dict[str, Any]]:
         f"""
         SELECT {PROJECT_FIELDS}
         FROM projects
-        WHERE owner_id = ?
+        WHERE owner_id = ? AND status = 'active'
         ORDER BY created_at DESC, id DESC
         """,
         (_validated_owner_id(owner_id),),
@@ -169,3 +169,54 @@ def get_owned_project(project_id: int, owner_id: int) -> dict[str, Any]:
     if int(row["owner_id"]) != _validated_owner_id(owner_id):
         raise ProjectAccessDeniedError("无权访问该项目")
     return dict(row)
+
+
+def update_owned_project(
+    project_id: int,
+    owner_id: int,
+    *,
+    name: object,
+) -> dict[str, Any]:
+    """Rename an active project owned by the authenticated user."""
+    project = get_owned_project(project_id, owner_id)
+    if project["status"] != "active":
+        raise ProjectValidationError("Archived projects cannot be renamed")
+    timestamp = _utc_now()
+    connection = get_db()
+    try:
+        connection.execute(
+            """
+            UPDATE projects
+            SET name = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (_validated_name(name), timestamp, project["id"]),
+        )
+        connection.commit()
+    except sqlite3.Error:
+        connection.rollback()
+        raise
+    return get_owned_project(project_id, owner_id)
+
+
+def archive_owned_project(project_id: int, owner_id: int) -> dict[str, Any]:
+    """Soft-delete an active project owned by the authenticated user."""
+    project = get_owned_project(project_id, owner_id)
+    if project["status"] == "archived":
+        return project
+    timestamp = _utc_now()
+    connection = get_db()
+    try:
+        connection.execute(
+            """
+            UPDATE projects
+            SET status = 'archived', updated_at = ?
+            WHERE id = ?
+            """,
+            (timestamp, project["id"]),
+        )
+        connection.commit()
+    except sqlite3.Error:
+        connection.rollback()
+        raise
+    return get_owned_project(project_id, owner_id)

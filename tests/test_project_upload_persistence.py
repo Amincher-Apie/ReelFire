@@ -118,6 +118,29 @@ class ProjectUploadPersistenceTestCase(unittest.TestCase):
         self.assertEqual(row["name"], "CS2 教学素材")
         self.assertEqual(row["status"], "active")
 
+    def test_owned_project_can_be_renamed_and_archived(self) -> None:
+        self.register(self.client, "project-lifecycle-owner")
+        project = self.create_project(self.client, "Original project")
+
+        renamed = self.client.patch(
+            f"/api/projects/{project['id']}",
+            json={"name": "Renamed project"},
+        )
+        self.assertEqual(renamed.status_code, 200, renamed.get_json())
+        self.assertEqual(
+            renamed.get_json()["project"]["name"],
+            "Renamed project",
+        )
+
+        archived = self.client.delete(f"/api/projects/{project['id']}")
+        self.assertEqual(archived.status_code, 200, archived.get_json())
+        self.assertEqual(
+            archived.get_json()["project"]["status"],
+            "archived",
+        )
+        listed = self.client.get("/api/projects").get_json()["projects"]
+        self.assertEqual(listed, [])
+
     def test_request_cannot_choose_owner_id(self) -> None:
         user = self.register(self.client, "owner-field-user")
         response = self.client.post(

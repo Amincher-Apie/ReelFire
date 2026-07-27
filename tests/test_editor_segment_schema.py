@@ -864,5 +864,58 @@ class EditorSegmentSchemaApiTestCase(unittest.TestCase):
         )
 
 
+    def test_segment_crud_split_and_merge_preserve_schema(self) -> None:
+        added = self.owner.post(
+            f"/api/jobs/{self.job_id}/segments",
+            json={"start": 6.0, "end": 10.0},
+        )
+        self.assertEqual(added.status_code, 201, added.get_json())
+        manual = added.get_json()["segment"]
+        self.assertEqual(manual["source"], "manual")
+        self.assertEqual(manual["review"], "")
+
+        updated = self.owner.patch(
+            f"/api/jobs/{self.job_id}/segments/{manual['id']}",
+            json={"start": 5.5, "order": 1},
+        )
+        self.assertEqual(updated.status_code, 200, updated.get_json())
+        self.assertEqual(updated.get_json()["segment"]["start"], 5.5)
+        self.assertEqual(updated.get_json()["segment"]["order"], 1)
+
+        split = self.owner.post(
+            f"/api/jobs/{self.job_id}/segments/{manual['id']}/split",
+            json={"split_time": 8.0},
+        )
+        self.assertEqual(split.status_code, 200, split.get_json())
+        split_segments = split.get_json()["segments"]
+        self.assertEqual(len(split_segments), 2)
+        self.assertEqual(
+            {segment["source"] for segment in split_segments},
+            {"split"},
+        )
+
+        merged = self.owner.post(
+            f"/api/jobs/{self.job_id}/segments/merge",
+            json={
+                "seg_id_1": split_segments[0]["id"],
+                "seg_id_2": split_segments[1]["id"],
+            },
+        )
+        self.assertEqual(merged.status_code, 200, merged.get_json())
+        merged_segment = merged.get_json()["segment"]
+        self.assertEqual(merged_segment["source"], "merged")
+        self.assertEqual(
+            set(merged_segment["source_segment_ids"]),
+            {segment["id"] for segment in split_segments},
+        )
+
+        deleted = self.owner.delete(
+            f"/api/jobs/{self.job_id}/segments/{merged_segment['id']}"
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.get_json())
+        remaining = self.jobs.read_report(self.job_id)["segments"]
+        self.assertEqual([segment["id"] for segment in remaining], ["seg_a"])
+
+
 if __name__ == "__main__":
     unittest.main()
