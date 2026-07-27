@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
+from cv_engine.model_registry import ModelRegistry
 from services.job_service import JobService, JobStateConflictError, iso_now
 
 if TYPE_CHECKING:
@@ -186,6 +187,34 @@ def _save_contact_sheet_from_keyframes(
     return written > 0 and bool(cv2.imwrite(str(destination), sheet))
 
 
+def _save_segment_thumbnail(
+    video_path: Path,
+    timestamp: float,
+    objects: list[dict[str, Any]],
+    destination: Path,
+) -> bool:
+    """Seek one source frame so streaming analysis never retains old chunks."""
+    import cv2
+
+    capture = cv2.VideoCapture(str(video_path))
+    try:
+        if not capture.isOpened():
+            return False
+        capture.set(cv2.CAP_PROP_POS_MSEC, max(0.0, timestamp) * 1000.0)
+        ok, frame = capture.read()
+        if not ok:
+            return False
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        return bool(
+            cv2.imwrite(
+                str(destination),
+                _annotate_frame(frame, objects),
+            )
+        )
+    finally:
+        capture.release()
+
+
 def _notify_progress(
     callback: Callable[[dict[str, Any]], None] | None,
     payload: dict[str, Any],
@@ -199,6 +228,7 @@ def analyze_video(
     job_dir: Path,
     settings: dict[str, Any],
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    model_registry: ModelRegistry | None = None,
 ) -> dict[str, Any]:
     """Run bounded chunk sampling, YOLO detection and explainable scoring."""
     import cv2
@@ -223,7 +253,24 @@ def analyze_video(
         int(settings.get("keyframes_per_chunk", 4)),
     )
 
-    model_path = Path(str(settings.get("model_path", "models/yolo11n.pt")))
+    game_type = str(settings.get("game_type", "other")).lower().strip()
+    model_info = None
+    is_fallback = False
+    highlight_strategy = "enemy_engagement"
+    enemy_classes: set[str] | None = None
+    if model_registry is not None:
+        model_info, strategy, is_fallback = (
+            model_registry.resolve_by_game_type(game_type)
+        )
+        model_path = model_info.model_path
+        enemy_classes = set(strategy.get("enemy_classes", set()))
+        highlight_strategy = str(
+            strategy.get("highlight_strategy", "generic_score")
+        )
+    else:
+        model_path = Path(
+            str(settings.get("model_path", "models/yolo11n.pt"))
+        )
     detector = YoloDetector(
         model_path,
         confidence_threshold=float(settings.get("confidence_threshold", 0.35)),
@@ -385,7 +432,9 @@ def analyze_video(
             keyframes.append(keyframe)
             chunk_keyframes.append(keyframe)
 
-        partial_result = HighlightExtractor().extract(
+        partial_result = HighlightExtractor(
+            enemy_classes=enemy_classes,
+        ).extract(
             [
                 {
                     "timestamp": item["timestamp"],
@@ -466,34 +515,65 @@ def analyze_video(
         }
         for s in samples
     ]
-    extractor = HighlightExtractor()
+    extractor = HighlightExtractor(enemy_classes=enemy_classes)
     highlight_result = extractor.extract(frame_results, fps, duration)
     segments = highlight_result.get("segments", [])
 
-    # 向后兼容：如果没有多片段，回退到单片段
-    if not segments:
-        segments = [{
-            "id": "seg_001",
-            "order": 1,
-            "start": start,
-            "end": end,
-            "score": best["highlight_score"],
-            "source_keyframes": [best["id"]],
-            "duration": round(end - start, 3),
-            "peak_enemy_count": 0,
-            "detected_classes": [],
-            "enemy_classes_in_segment": [],
-            "detections_summary": [],
-            "reason": "highlight_score",
-        }]
-
-    # 给 segment 补充 source_keyframes（关联关键帧）
+    segment_thumbnail_dir = job_dir / "result" / "segment_thumbs"
     for seg in segments:
         seg_keyframes = [
-            kf["id"] for kf in keyframes
+            kf for kf in keyframes
             if seg["start"] <= float(kf["timestamp"]) <= seg["end"]
         ]
-        seg["source_keyframes"] = seg_keyframes if seg_keyframes else []
+        seg["source_keyframes"] = [
+            str(keyframe["id"])
+            for keyframe in seg_keyframes
+        ]
+        if seg_keyframes:
+            representative = max(
+                seg_keyframes,
+                key=lambda keyframe: float(
+                    keyframe.get("highlight_score", 0.0)
+                ),
+            )
+            seg["representative_keyframe"] = str(representative["id"])
+            seg["thumbnail"] = representative.get("image")
+        else:
+            segment_samples = [
+                sample
+                for sample in samples
+                if float(seg["start"])
+                <= float(sample["timestamp"])
+                <= float(seg["end"])
+            ]
+            seg["representative_keyframe"] = None
+            seg["thumbnail"] = None
+            if segment_samples:
+                representative_sample = max(
+                    segment_samples,
+                    key=lambda sample: float(
+                        sample.get("highlight_score", 0.0)
+                    ),
+                )
+                thumbnail_name = f"{seg['id']}_thumb.jpg"
+                thumbnail_path = segment_thumbnail_dir / thumbnail_name
+                if _save_segment_thumbnail(
+                    video_path,
+                    float(representative_sample["timestamp"]),
+                    representative_sample.get("objects", []),
+                    thumbnail_path,
+                ):
+                    seg["thumbnail"] = (
+                        f"result/segment_thumbs/{thumbnail_name}"
+                    )
+        evidence = seg.get("evidence")
+        if not isinstance(evidence, dict):
+            evidence = {}
+            seg["evidence"] = evidence
+        evidence["representative_keyframe"] = seg.get(
+            "representative_keyframe"
+        )
+        evidence["thumbnail"] = seg.get("thumbnail")
         seg["provisional"] = False
 
     for chunk in analysis_chunks:
@@ -529,11 +609,38 @@ def analyze_video(
             "video": video,
         },
     )
+    model_report = {
+        "path": model_path.name,
+        "game_type": game_type,
+        "highlight_strategy": highlight_strategy,
+        "is_fallback": is_fallback,
+        "enemy_classes": sorted(enemy_classes or []),
+        "version": (
+            model_info.model_id if model_info is not None else "unknown"
+        ),
+        "confidence_threshold": float(
+            settings.get("confidence_threshold", 0.35)
+        ),
+        "sample_interval": sample_interval,
+    }
+    if model_info is not None:
+        model_report.update(
+            {
+                "id": model_info.model_id,
+                "display_name": model_info.display_name,
+                "is_custom": model_info.is_custom,
+                "num_classes": model_info.num_classes,
+                "class_names": model_info.class_names,
+                "mAP50": model_info.mAP50,
+                "mAP50_95": model_info.mAP50_95,
+            }
+        )
+
     return {
         "video": video,
         "duration": duration,
         "settings": {key: value for key, value in settings.items() if key != "model_path"},
-        "model": {"path": model_path.name},
+        "model": model_report,
         "analysis_mode": "streaming_chunks",
         "chunk_duration": chunk_duration,
         "analysis_chunks": analysis_chunks,
@@ -557,10 +664,11 @@ def analyze_video(
         "segment_tags": segment_tags,
         "ai_cover_prompt": ai_cover_prompt,
         "recommended_clip": {
-            "start_time": segments[0]["start"] if segments else start,
-            "end_time": segments[0]["end"] if segments else end,
+            "start_time": segments[0]["start"] if segments else None,
+            "end_time": segments[0]["end"] if segments else None,
             "output_ratio": output_ratio,
             "segment_count": len(segments),
+            "is_empty": not segments,
         },
         "output": {
             "video": None,
@@ -578,6 +686,10 @@ class AnalysisService:
     ) -> None:
         self.jobs = jobs
         self.model_path = Path(model_path).resolve()
+        self.model_registry = ModelRegistry(
+            Path(__file__).resolve().parent.parent,
+            official_model_path=self.model_path,
+        )
         self._executor = ThreadPoolExecutor(
             max_workers=max(1, int(max_workers)),
             thread_name_prefix="reelfire-analysis",
@@ -634,6 +746,7 @@ class AnalysisService:
             job_dir = self.jobs.job_dir(job_id)
             settings = dict(job["settings"])
             settings["model_path"] = str(self.model_path)
+            settings["game_type"] = str(job.get("game_type") or "other")
             report = analyze_video(
                 video_path,
                 job_dir,
@@ -642,6 +755,7 @@ class AnalysisService:
                     job_id,
                     value,
                 ),
+                model_registry=self.model_registry,
             )
             if not isinstance(report, dict):
                 raise TypeError("analyze_video 必须返回 JSON 对象")

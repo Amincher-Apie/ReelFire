@@ -197,6 +197,8 @@ class HighlightExtractor:
             seg["enemy_classes_in_segment"] = []
             seg["detections_summary"] = []
             seg["reason"] = "enemy_engagement"
+            # P0: 出现帧数（segment 时间范围内有敌人的帧数）
+            seg["frames_with_enemy"] = 0
 
             classes_set: set[str] = set()
             enemy_classes_set: set[str] = set()
@@ -210,6 +212,10 @@ class HighlightExtractor:
                 dets = f.get("detections", []) or []
                 if not dets:
                     continue
+
+                # 统计有敌人的帧
+                if any(str(d.get("class", "")) in self.enemy_classes for d in dets):
+                    seg["frames_with_enemy"] += 1
 
                 for det in dets:
                     cls_name = str(det.get("class", ""))
@@ -270,16 +276,119 @@ class HighlightExtractor:
             seg["detected_classes"] = sorted(classes_set)
             seg["enemy_classes_in_segment"] = sorted(enemy_classes_set)
 
+            # ===== P1: evidence 字段 + 连杀识别 =====
+            # 统计独立敌人 track 数（按 track_id 去重）
+            enemy_tracks = [
+                e for e in seg["detections_summary"]
+                if e.get("class") in self.enemy_classes
+            ]
+            kill_count = len(enemy_tracks)
+            if kill_count <= 1:
+                kill_type = "single_kill"
+            elif kill_count == 2:
+                kill_type = "double_kill"
+            elif kill_count == 3:
+                kill_type = "triple_kill"
+            else:
+                kill_type = "multi_kill"
+
+            # 升级 reason 字段（保留原值作为 triggered_rule）
+            seg["reason"] = f"enemy_engagement_{kill_type}"
+
+            # 计算交火时长（敌人出现到消失）
+            engagement_duration = round(
+                seg.get("enemy_disappear_at", seg["end"])
+                - seg.get("enemy_appear_at", seg["start"]),
+                3,
+            )
+
+            # 置信度统计（所有敌人 track）
+            all_enemy_confs: list[float] = []
+            for e in enemy_tracks:
+                c = e.get("confidence")
+                if isinstance(c, (int, float)):
+                    all_enemy_confs.append(float(c))
+
+            max_conf = max(all_enemy_confs) if all_enemy_confs else 0.0
+            avg_conf = (
+                round(sum(all_enemy_confs) / len(all_enemy_confs), 4)
+                if all_enemy_confs
+                else 0.0
+            )
+
+            # 武器是否被检测到
+            weapon_detected = any(
+                "weapon" in str(e.get("class", "")).lower()
+                or "rifle" in str(e.get("class", "")).lower()
+                or "pistol" in str(e.get("class", "")).lower()
+                for e in seg["detections_summary"]
+            )
+
+            # 构造 tracks 简表（只含敌人，供 Agent 引用）
+            tracks_evidence = [
+                {
+                    "track_id": e.get("track_id"),
+                    "class": e.get("class"),
+                    "avg_confidence": e.get("confidence", 0.0),
+                    "duration_tracked": round(
+                        float(e.get("last_seen", 0)) - float(e.get("first_seen", 0)),
+                        3,
+                    ),
+                }
+                for e in enemy_tracks
+            ]
+
+            seg["evidence"] = {
+                "triggered_rule": "enemy_engagement",
+                "kill_count": kill_count,
+                "kill_type": kill_type,
+                "engagement_duration": engagement_duration,
+                "frames_with_enemy": seg["frames_with_enemy"],
+                "max_confidence": round(max_conf, 4),
+                "avg_confidence": avg_conf,
+                "enemy_classes": sorted(enemy_classes_set),
+                "weapon_detected": weapon_detected,
+                "tracks": tracks_evidence,
+            }
+
         # 补充统一字段（id/order/score/source_keyframes）
-        max_peak = max((s["peak_enemy_count"] for s in segments), default=1) or 1
+        # score 升级：连杀加分（single=0.5, double=0.7, triple=0.85, multi=1.0）
+        kill_type_score = {
+            "single_kill": 0.5,
+            "double_kill": 0.7,
+            "triple_kill": 0.85,
+            "multi_kill": 1.0,
+        }
+        # 先计算 score
+        for seg in segments:
+            seg["source_keyframes"] = []
+            kt = seg["evidence"]["kill_type"]
+            base = kill_type_score.get(kt, 0.5)
+            # 置信度微调（+0~0.1）
+            conf_bonus = min(0.1, seg["evidence"]["max_confidence"] * 0.1)
+            seg["score"] = round(min(1.0, base + conf_bonus), 4)
+
+        # P0: 事件去重 —— 重叠率 > 50% 的片段只保留 score 最高的
+        segments = self._dedup_segments(segments)
+
+        # P0: id 按时间顺序生成（稳定），order 按 score 降序生成（候选排序）
+        # segments 此时已是时间顺序（_build_segments 保证）
         for idx, seg in enumerate(segments, start=1):
             seg["id"] = f"seg_{idx:03d}"
-            seg["order"] = idx
-            seg["source_keyframes"] = []
-            peak = seg.get("peak_enemy_count", 1)
-            seg["score"] = round(0.3 + 0.7 * (peak / max_peak), 4)
+
+        # 按 score 降序生成 order
+        ranked = sorted(enumerate(segments), key=lambda x: x[1]["score"], reverse=True)
+        for order, (orig_idx, seg) in enumerate(ranked, start=1):
+            seg["order"] = order
 
         total_seg_duration = sum(s["duration"] for s in segments)
+        # 连杀统计
+        kill_type_counts = {}
+        total_kills = 0
+        for s in segments:
+            kt = s["evidence"]["kill_type"]
+            kill_type_counts[kt] = kill_type_counts.get(kt, 0) + 1
+            total_kills += s["evidence"]["kill_count"]
         stats = {
             "total_segments": len(segments),
             "total_duration": round(total_seg_duration, 3),
@@ -290,6 +399,8 @@ class HighlightExtractor:
             "enemy_presence_ratio": round(
                 sum(1 for p in presence if p) / max(len(presence), 1), 4
             ),
+            "total_kills": total_kills,
+            "kill_type_counts": kill_type_counts,
         }
 
         return {
@@ -307,6 +418,46 @@ class HighlightExtractor:
             "min_duration": self.min_duration,
             "merge_gap": self.merge_gap,
         }
+
+    def _dedup_segments(
+        self, segments: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """事件去重：时间重叠率 > 50% 的片段只保留 score 最高的。
+
+        用于处理同一波敌人在不同 smoothing 窗口下被重复识别的情况。
+        """
+        if len(segments) <= 1:
+            return list(segments)
+
+        # 按 score 降序，依次保留不与已保留片段高度重叠的
+        ranked = sorted(segments, key=lambda s: s.get("score", 0.0), reverse=True)
+        kept: list[dict[str, Any]] = []
+        for seg in ranked:
+            overlap_too_high = False
+            for k in kept:
+                overlap = self._overlap_ratio(seg, k)
+                if overlap > 0.5:
+                    overlap_too_high = True
+                    break
+            if not overlap_too_high:
+                kept.append(seg)
+
+        # 重新按时间排序，保证 id 生成是时间顺序
+        kept.sort(key=lambda s: float(s.get("start", 0.0)))
+        return kept
+
+    @staticmethod
+    def _overlap_ratio(a: dict[str, Any], b: dict[str, Any]) -> float:
+        """计算两个片段的交叠比例（交集 / 较短片段时长）。"""
+        a_start = float(a.get("start", 0.0))
+        a_end = float(a.get("end", 0.0))
+        b_start = float(b.get("start", 0.0))
+        b_end = float(b.get("end", 0.0))
+        inter = max(0.0, min(a_end, b_end) - max(a_start, b_start))
+        min_dur = min(a_end - a_start, b_end - b_start)
+        if min_dur <= 0:
+            return 0.0
+        return inter / min_dur
 
 
 def _merge_segments_to_video(
@@ -445,6 +596,221 @@ def _merge_segments_no_audio(
     return output_path
 
 
+def export_single_segment(
+    source_video: Path,
+    segment: dict[str, Any],
+    output_path: Path,
+    *,
+    output_ratio: str | None = None,
+    keep_audio: bool = True,
+    crf: int = 23,
+) -> Path:
+    """把单个片段从源视频切片导出为独立 mp4。
+
+    用于“单片段导出”场景：每个高光分别导出成一个 mp4 文件，
+    适合博主分别发布短视频。
+
+    Args:
+        source_video: 原始视频路径
+        segment: 片段字典，需含 start/end（秒）
+        output_path: 输出视频路径（建议 .mp4）
+        output_ratio: 可选，"16:9" / "9:16" / "1:1" / None（原比例）
+        keep_audio: 是否保留原音
+        crf: 编码质量（18~28，越小越清晰，默认 23）
+
+    Returns:
+        输出视频路径
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("FFmpeg 不可用，无法导出单片段")
+
+    source = Path(source_video).resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"输入视频不存在: {source}")
+
+    start = float(segment.get("start", 0.0))
+    end = float(segment.get("end", 0.0))
+    if end <= start:
+        raise ValueError(f"片段起止时间无效: start={start}, end={end}")
+
+    output_path = Path(output_path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 基础命令：精确切片（-ss 放到 -i 后面更精确，但放前面更快；这里用前者保证精度）
+    command: list[str] = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel", "error",
+        "-y",
+        "-ss", f"{start:.3f}",
+        "-to", f"{end:.3f}",
+        "-i", str(source),
+    ]
+
+    # 比例裁剪（如 9:16 竖屏）
+    video_filters: list[str] = []
+    if output_ratio == "9:16":
+        # 以画面中心裁剪为 9:16
+        video_filters.append("crop=ih*9/16:ih")
+    elif output_ratio == "1:1":
+        video_filters.append("crop=ih:ih")
+    elif output_ratio == "16:9":
+        # 16:9 一般就是原比例，不裁剪
+        pass
+
+    if video_filters:
+        command.extend(["-filter:v", ",".join(video_filters)])
+
+    # 视频编码
+    command.extend([
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", str(int(crf)),
+        "-movflags", "+faststart",
+    ])
+
+    # 音频处理
+    if keep_audio:
+        command.extend(["-c:a", "aac", "-b:a", "160k"])
+    else:
+        command.extend(["-an"])
+
+    command.append(str(output_path))
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="backslashreplace",
+    )
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "未知错误").strip()
+        # 若带音频失败，降级为无音频
+        if keep_audio:
+            return export_single_segment(
+                source, segment, output_path,
+                output_ratio=output_ratio,
+                keep_audio=False,
+                crf=crf,
+            )
+        raise RuntimeError(f"FFmpeg 单片段导出失败：{detail[-1000:]}")
+
+    if not output_path.is_file() or output_path.stat().st_size <= 0:
+        output_path.unlink(missing_ok=True)
+        raise RuntimeError("FFmpeg 未生成有效输出文件")
+
+    return output_path
+
+
+def generate_proxy_video(
+    source_video: Path,
+    output_path: Path,
+    *,
+    target_height: int = 480,
+    target_fps: int = 24,
+    video_bitrate: str = "600k",
+    audio_bitrate: str = "64k",
+    max_duration: float | None = None,
+) -> Path:
+    """生成低码率代理视频，用于剪辑台快速预览。
+
+    代理视频特点：
+        - 较低分辨率（默认 480p）
+        - 较低码率（默认 600k）
+        - 较低帧率（默认 24fps）
+        - 保留音频但码率压缩
+        - 可选截取前 N 秒（用于预览片段）
+
+    Args:
+        source_video: 原始视频路径
+        output_path: 代理视频输出路径（建议 .mp4）
+        target_height: 目标高度（像素），默认 480
+        target_fps: 目标帧率，默认 24
+        video_bitrate: 视频码率，默认 "600k"
+        audio_bitrate: 音频码率，默认 "64k"
+        max_duration: 可选，只保留前 N 秒（None 表示完整视频）
+
+    Returns:
+        代理视频路径
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("FFmpeg 不可用，无法生成代理视频")
+
+    source = Path(source_video).resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"输入视频不存在: {source}")
+
+    output_path = Path(output_path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 视频滤镜：缩放（保持宽高比，宽度自动计算）+ 帧率降采样
+    # -2 表示宽度自动按比例计算（必为偶数）
+    scale_filter = f"scale=-2:{int(target_height)}"
+    fps_filter = f"fps={int(target_fps)}"
+    vf = f"{scale_filter},{fps_filter}"
+
+    command: list[str] = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel", "error",
+        "-y",
+    ]
+
+    if max_duration is not None and float(max_duration) > 0:
+        command.extend(["-t", f"{float(max_duration):.3f}"])
+
+    command.extend([
+        "-i", str(source),
+        "-vf", vf,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-b:v", str(video_bitrate),
+        "-maxrate", str(video_bitrate),
+        "-bufsize", f"{video_bitrate}*2",
+        "-movflags", "+faststart",
+    ])
+
+    # 音频处理：audio_bitrate="0k" 视为无音频（降级模式）
+    if audio_bitrate == "0k":
+        command.extend(["-an"])
+    else:
+        command.extend(["-c:a", "aac", "-b:a", str(audio_bitrate)])
+
+    command.append(str(output_path))
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="backslashreplace",
+    )
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "未知错误").strip()
+        # 若带音频失败，降级为无音频版本（仅当当前还在尝试带音频时）
+        if audio_bitrate != "0k":
+            return generate_proxy_video(
+                source, output_path,
+                target_height=target_height,
+                target_fps=target_fps,
+                video_bitrate=video_bitrate,
+                audio_bitrate="0k",
+                max_duration=max_duration,
+            )
+        raise RuntimeError(f"FFmpeg 代理视频生成失败：{detail[-1000:]}")
+
+    if not output_path.is_file() or output_path.stat().st_size <= 0:
+        output_path.unlink(missing_ok=True)
+        raise RuntimeError("FFmpeg 未生成有效输出文件")
+
+    return output_path
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="精彩片段提取器")
     parser.add_argument(
@@ -547,11 +913,16 @@ def main() -> None:
     print(f"片段数: {stats['total_segments']}")
     print(f"精彩总时长: {stats['total_duration']:.2f}s / {duration:.2f}s ({stats['highlight_ratio']*100:.1f}%)")
     print(f"有敌人的帧: {stats['frames_with_enemy']} ({stats['enemy_presence_ratio']*100:.1f}%)")
+    print(f"总击杀数: {stats.get('total_kills', 0)}")
+    print(f"连杀分布: {stats.get('kill_type_counts', {})}")
     print(f"\n片段列表:")
     for i, seg in enumerate(segments, 1):
+        ev = seg.get("evidence", {})
         print(
             f"  [{i}] {seg['start']:.2f}s - {seg['end']:.2f}s "
-            f"(时长 {seg['duration']:.2f}s, 峰值敌人 {seg['peak_enemy_count']})"
+            f"(时长 {seg['duration']:.2f}s | {ev.get('kill_type', '?')} "
+            f"击杀={ev.get('kill_count', 0)} 置信度={ev.get('max_confidence', 0):.2f} "
+            f"分数={seg.get('score', 0):.2f})"
         )
 
     # 保存片段 JSON

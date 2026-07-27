@@ -439,7 +439,7 @@ class ApiTestCase(unittest.TestCase):
         started = threading.Event()
         release = threading.Event()
 
-        def blocking_analysis(*_args):
+        def blocking_analysis(*_args, **_kwargs):
             started.set()
             release.wait(timeout=2)
             raise NotImplementedError("test release")

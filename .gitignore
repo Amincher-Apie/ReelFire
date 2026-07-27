@@ -38,7 +38,7 @@ models/*.engine
 *.whl
 yolo26n.pt
 
-# 训练中间产物：只保留 v3 最终成果，排除 v1/v2 和中间 epoch 权重
+# 训练中间产物：保留各可运行模型的 best.pt，排除临时权重
 runs/detect/custom_fps/
 runs/detect/custom_fps_v2/
 runs/detect/val/
@@ -47,6 +47,12 @@ runs/detect/val-3/
 runs/detect/val-4/
 runs/detect/custom_fps_v3/weights/epoch*.pt
 runs/detect/custom_fps_v3/weights/last.pt
+runs/detect/custom_fps_v5/weights/epoch*.pt
+runs/detect/custom_fps_v5/weights/last.pt
+runs/detect/valorant_v1/weights/epoch*.pt
+runs/detect/valorant_v1/weights/last.pt
+runs/detect/valorant_v2/weights/epoch*.pt
+runs/detect/valorant_v2/weights/last.pt
 
 # Private
 RealName.md

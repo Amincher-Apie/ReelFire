@@ -17,6 +17,7 @@ from cv_engine.video_processor import VideoProcessor
 from cv_engine.yolo_detector import YoloDetector
 from cv_engine.highlight_extractor import HighlightExtractor
 from cv_engine.highlight_scorer import HighlightScorer
+from cv_engine.model_registry import ModelRegistry
 from services.analysis_service import analyze_video
 
 class TestVideoProcessor(unittest.TestCase):
@@ -111,6 +112,37 @@ class TestYoloDetector(unittest.TestCase):
 
         self.assertEqual(detector.model.batch_sizes, [2, 2, 1])
         self.assertEqual(results, [["a"], ["b"], ["c"], ["d"], ["e"]])
+
+
+class TestModelRegistry(unittest.TestCase):
+    def test_game_type_prefers_available_custom_fallback(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            official = root / "models" / "yolo11n.pt"
+            custom_v3 = (
+                root
+                / "runs"
+                / "detect"
+                / "custom_fps_v3"
+                / "weights"
+                / "best.pt"
+            )
+            official.parent.mkdir(parents=True)
+            custom_v3.parent.mkdir(parents=True)
+            official.write_bytes(b"official")
+            custom_v3.write_bytes(b"custom")
+
+            registry = ModelRegistry(root)
+            model, strategy, is_fallback = registry.resolve_by_game_type(
+                "csgo"
+            )
+
+        self.assertEqual(model.model_id, "custom_v3")
+        self.assertEqual(
+            strategy["enemy_classes"],
+            {"character_ct", "character_t"},
+        )
+        self.assertTrue(is_fallback)
 
 class TestHighlightScorer(unittest.TestCase):
     def test_calculate_object_score(self):
@@ -223,8 +255,18 @@ class TestHighlightExtractor(unittest.TestCase):
             [(item['start'], item['end']) for item in segments],
             [(1.0, 3.0), (8.0, 9.0)],
         )
-        self.assertEqual([item['score'] for item in segments], [1.0, 0.65])
+        self.assertGreater(segments[0]['score'], segments[1]['score'])
+        self.assertTrue(
+            all(0.0 <= item['score'] <= 1.0 for item in segments)
+        )
         self.assertTrue(all(item['source_keyframes'] == [] for item in segments))
+        self.assertEqual(
+            [item['frames_with_enemy'] for item in segments],
+            [2, 1],
+        )
+        self.assertTrue(
+            all('kill_type' in item['evidence'] for item in segments)
+        )
         self.assertEqual(result['stats']['total_segments'], 2)
 
     def test_extract_without_enemy_returns_empty_segments(self):
@@ -344,6 +386,17 @@ class TestAnalysisServiceMultiSegment(unittest.TestCase):
         )
         self.assertEqual(report['analysis_mode'], 'streaming_chunks')
         self.assertEqual(len(report['analysis_chunks']), 2)
+        self.assertTrue(
+            all('evidence' in segment for segment in segments)
+        )
+        self.assertTrue(
+            all('representative_keyframe' in segment for segment in segments)
+        )
+        self.assertTrue(all('thumbnail' in segment for segment in segments))
+        self.assertEqual(
+            report['model']['confidence_threshold'],
+            0.35,
+        )
         queued = progress_updates[0]
         self.assertEqual(
             [chunk['status'] for chunk in queued['chunks']],
