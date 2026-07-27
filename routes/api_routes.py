@@ -24,8 +24,11 @@ from services.agent_call_service import (
 )
 from services.agent_execution_service import AgentExecutionUnavailableError
 from services.editor_input_validation import (
+    EDITOR_SEGMENT_SCHEMA_VERSION,
     EditorSegmentValidationError,
     adapt_legacy_segments,
+    merge_editor_segments,
+    normalize_stored_editor_segments,
     validate_editor_segments,
 )
 from services.ffmpeg_service import (
@@ -613,16 +616,24 @@ def review_job(job_id: str):
         )
     if "segments" in payload:
         try:
-            segments = (
-                adapt_legacy_segments(payload["segments"], duration)
-                if access["is_legacy"]
-                else validate_editor_segments(payload["segments"], duration)
+            segments = merge_editor_segments(
+                payload["segments"],
+                report.get("segments", []),
+                duration,
+                legacy=bool(access["is_legacy"]),
             )
         except EditorSegmentValidationError as exc:
             raise ReviewValidationError(str(exc)) from exc
         changes["segments"] = segments
-        if segments:
-            first = segments[0]
+        passed = next(
+            (
+                segment
+                for segment in segments
+                if segment["review"] == "pass"
+            ),
+            None,
+        )
+        if passed is not None:
             existing_clip = report.get("recommended_clip", {})
             ratio = (
                 existing_clip.get("output_ratio", "16:9")
@@ -631,8 +642,8 @@ def review_job(job_id: str):
             )
             changes["recommended_clip"] = _validate_clip(
                 {
-                    "start_time": first["start"],
-                    "end_time": first["end"],
+                    "start_time": passed["start"],
+                    "end_time": passed["end"],
                     "output_ratio": ratio,
                 },
                 duration,
@@ -653,7 +664,7 @@ def review_job(job_id: str):
             segments_snapshot = changes["segments"]
         else:
             try:
-                segments_snapshot = validate_editor_segments(
+                segments_snapshot = normalize_stored_editor_segments(
                     report.get("segments", []),
                     duration,
                 )
@@ -843,14 +854,19 @@ def rough_cut(job_id: str):
         if latest_review["status"] != "approved":
             raise JobStateConflictError("最新审核必须为 approved 才能生成粗剪视频")
         try:
-            segments = validate_editor_segments(
+            segments = normalize_stored_editor_segments(
                 latest_review["segments"],
                 duration,
             )
         except EditorSegmentValidationError as exc:
             raise FileValidationError(f"审核片段快照无效：{exc}") from exc
+        segments = [
+            segment
+            for segment in segments
+            if segment["review"] == "pass"
+        ]
         if not segments:
-            raise JobStateConflictError("最新审核没有可导出的片段")
+            raise JobStateConflictError("没有已通过的片段可以导出")
         review_id = int(latest_review["id"])
     if not is_ffmpeg_available():
         return jsonify(ok=False, error="FFmpeg 不可用，无法生成粗剪视频"), 501
@@ -1169,11 +1185,20 @@ def get_editor_contract(job_id: str):
             for index, segment in enumerate(raw_segments, start=1)
         ]
     try:
-        segments = (
-            adapt_legacy_segments(raw_segments, duration)
-            if report_ready and access["is_legacy"]
-            else validate_editor_segments(raw_segments, duration)
-        )
+        if report_ready:
+            segments = (
+                adapt_legacy_segments(raw_segments, duration)
+                if access["is_legacy"]
+                else normalize_stored_editor_segments(
+                    raw_segments,
+                    duration,
+                )
+            )
+        else:
+            segments = validate_editor_segments(
+                raw_segments,
+                duration,
+            )
     except EditorSegmentValidationError as exc:
         raise FileValidationError(f"分析报告中的 {exc}") from exc
     highlights = []
@@ -1187,16 +1212,17 @@ def get_editor_contract(job_id: str):
                 "order": int(segment["order"]),
                 "start": float(segment["start"]),
                 "end": float(segment["end"]),
-                "duration": round(
-                    float(segment["end"]) - float(segment["start"]),
-                    6,
-                ),
+                "duration": float(segment["duration"]),
                 "score": score,
                 "source_keyframes": [
                     str(frame_id)
                     for frame_id in segment.get("source_keyframes", [])
                     if isinstance(frame_id, str)
                 ],
+                "source": segment["source"],
+                "source_segment_ids": segment["source_segment_ids"],
+                "review": segment["review"],
+                "review_note": segment["review_note"],
                 "agent_comment": agent["comment"] if agent else None,
                 "agent_comment_status": (
                     "ready" if agent else missing_comment_status
@@ -1256,6 +1282,7 @@ def get_editor_contract(job_id: str):
     return jsonify(
         ok=True,
         contract_version="1.0",
+        segment_schema_version=EDITOR_SEGMENT_SCHEMA_VERSION,
         job={
             "job_id": job_id,
             "project_name": str(job.get("project_name", "")),
