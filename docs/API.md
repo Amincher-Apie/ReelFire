@@ -303,8 +303,10 @@ output_ratio
 
 兼容流程：
 
-- 表单中没有 `project_id` 时，不要求登录，继续按 `project_name` 创建仅由文件系统管理的任务，不写入 SQLite `assets` 和 `jobs`；
+- 上传接口要求登录；表单中没有 `project_id` 时，按 `project_name` 自动创建属于
+  当前用户的 `active` 项目，并正常写入 SQLite `assets` 和 `jobs`；
 - 表单中存在 `project_id` 时（包括空值），必须登录且该项目必须属于当前用户；空值或非正整数返回 `400 PROJECT_INPUT_INVALID`；
+- 指定项目已归档时返回 `409 PROJECT_ARCHIVED`，不会创建工作目录、asset 或 job；
 - 项目型上传以 SQLite 项目的 `name` 作为 `job.json` 中可信的 `project_name`，请求中的冲突值不能改变项目归属；
 - 项目型上传在同一事务中先写入 `assets`、再写入 `jobs`，数据库失败时回滚并清理本次尚未成功返回的任务目录；
 - `jobs.public_job_id` 与响应中的字符串 `job_id` 完全相同。
@@ -957,16 +959,22 @@ output.rough_cut_url
 
 ---
 
-## 9. 已实现：SQLite 项目与上传任务归属
+## 9. 已实现：SQLite 项目生命周期与上传任务归属
 
 已实现接口：
 
 ```http
 POST /api/projects
 GET  /api/projects
+GET  /api/projects/<project_id>
+PATCH /api/projects/<project_id>
+GET  /api/projects/<project_id>/jobs
+DELETE /api/projects/<project_id>
 ```
 
-两个接口均要求登录。`owner_id` 只来自当前 Session，客户端不得指定。
+所有项目接口均要求登录，并且只能访问当前用户自己的项目。`owner_id` 只来自
+当前 Session，客户端不得指定或修改；不存在的项目返回 404，其他用户的项目
+返回 403。
 
 `POST /api/projects` 接收：
 
@@ -980,6 +988,61 @@ GET  /api/projects
 
 成功返回 `201`，其中 `status` 固定为 `active`。`GET /api/projects`
 仅返回当前登录用户自己的项目。
+
+`GET /api/projects/<project_id>` 返回项目基础字段，以及直接从 SQLite `jobs`
+统计的 `job_count` 和固定状态键 `jobs_by_status`：
+
+```json
+{
+  "ok": true,
+  "project": {
+    "id": 1,
+    "name": "CS2 教学素材",
+    "description": "课程演示项目",
+    "game_type": "cs2",
+    "status": "active",
+    "created_at": "2026-07-27T12:00:00+00:00",
+    "updated_at": "2026-07-27T12:00:00+00:00",
+    "job_count": 2,
+    "jobs_by_status": {
+      "created": 0,
+      "queued": 0,
+      "running": 0,
+      "completed": 2,
+      "failed": 0
+    }
+  }
+}
+```
+
+`PATCH /api/projects/<project_id>` 只允许提交 `name/description/game_type/status`：
+`name` 去空白后长度为 1–100；`description` 为字符串或 null、最多 1000；
+`game_type` 为字符串或 null、最多 50；`status` 只支持 `active/archived`。
+请求必须是非空 JSON 对象，未知字段返回 400。更新使用 SQLite
+`BEGIN IMMEDIATE` 短事务并刷新 `updated_at`，不会修改项目内任务。
+
+`archived` 只阻止向该项目新增上传，`POST /api/jobs` 返回
+`409 PROJECT_ARCHIVED`；历史任务仍可读取、审核和下载。PATCH 恢复为
+`active` 后可继续上传。自动创建项目仍默认为 `active`。
+
+`GET /api/projects/<project_id>/jobs` 只查询 SQLite，不扫描 outputs。支持：
+
+```text
+status = created | queued | running | completed | failed（可选）
+limit  = 1..100（默认 50）
+offset = >= 0（默认 0）
+```
+
+响应包含 `jobs/total/limit/offset`。任务摘要公开 `job_id/status`、生命周期
+时间、错误码/错误信息，以及由 SQLite 路径是否非空计算的
+`report_available/rough_cut_available`；不公开内部存储路径。
+
+`DELETE /api/projects/<project_id>` 只允许删除没有任何 jobs 的项目。服务在
+`BEGIN IMMEDIATE` 事务内再次统计 jobs，非空返回
+`409 PROJECT_NOT_EMPTY` 并提示先逐个删除任务。空项目删除不扫描或删除任意
+文件目录，不删除用户，也不影响其他项目。该接口不会级联批量删除项目任务，
+因此不能绕过 JobService 的 tombstone 任务删除流程；当前未实现批量删除项目
+任务。
 
 当前数据关系：
 
@@ -1003,6 +1066,9 @@ GET  /api/projects
 | 401 | `AUTH_REQUIRED` | 项目接口或项目型上传未登录 |
 | 403 | `PROJECT_ACCESS_DENIED` | 项目属于其他用户 |
 | 404 | `PROJECT_NOT_FOUND` | 项目不存在 |
+| 409 | `PROJECT_ARCHIVED` | 归档项目禁止新增任务 |
+| 409 | `PROJECT_NOT_EMPTY` | 项目仍包含任务，必须先逐个删除任务 |
+| 409 | `PROJECT_STATE_CONFLICT` | 项目状态并发变化，需要刷新重试 |
 
 旧文件型任务可能没有 SQLite `jobs` 索引，并继续保留兼容访问。
 
@@ -1435,8 +1501,8 @@ reject 表示不采用。
 最新审核非 approved 仍返回 409；approved 但无 pass 时不调用 FFmpeg，
 返回 `409 没有已通过的片段可以导出`。
 
-本节不表示已实现前端自动保存、拖动边界、撤销恢复、后台导出、项目重命名/
-删除、任务取消/重试或单片段导出接口。
+本节不表示已实现前端自动保存、拖动边界、撤销恢复、后台导出、任务取消/重试
+或单片段导出接口。
 
 ## Job 文件与 SQLite 索引一致性
 

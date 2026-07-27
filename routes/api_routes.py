@@ -50,11 +50,16 @@ from services.job_service import (
     JobStateConflictError,
 )
 from services.project_service import (
+    ProjectArchivedError,
     ProjectOwnerForbiddenError,
     ProjectValidationError,
     create_project,
+    delete_empty_project,
     get_owned_project,
+    get_project_detail,
+    list_project_jobs,
     list_projects_for_owner,
+    update_project,
 )
 from services.review_service import (
     ReviewPersistenceUnavailableError,
@@ -410,6 +415,31 @@ def _positive_project_id(raw_value: object) -> int:
     return project_id
 
 
+def _project_query_integer(
+    field: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    raw_value = request.args.get(field)
+    if raw_value is None:
+        return default
+    value = raw_value.strip()
+    if not value.isascii() or not value.isdecimal():
+        raise ProjectValidationError(f"{field} 必须是整数")
+    parsed = int(value)
+    if parsed < minimum or (maximum is not None and parsed > maximum):
+        if maximum is None:
+            raise ProjectValidationError(
+                f"{field} 必须大于或等于 {minimum}"
+            )
+        raise ProjectValidationError(
+            f"{field} 必须在 {minimum} 到 {maximum} 之间"
+        )
+    return parsed
+
+
 def _positive_agent_call_id(raw_value: object) -> int:
     if isinstance(raw_value, bool) or not isinstance(raw_value, str):
         raise AgentCallValidationError("agent_call_id 必须是正整数")
@@ -460,6 +490,64 @@ def list_projects_route():
     )
 
 
+@api_bp.get("/projects/<int:project_id>")
+def get_project_route(project_id: int):
+    owner_id = require_authenticated_user_id()
+    return jsonify(
+        ok=True,
+        project=get_project_detail(project_id, owner_id),
+    )
+
+
+@api_bp.patch("/projects/<int:project_id>")
+def update_project_route(project_id: int):
+    owner_id = require_authenticated_user_id()
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise ProjectValidationError("请求体必须是合法的 JSON 对象")
+    return jsonify(
+        ok=True,
+        project=update_project(project_id, owner_id, payload),
+    )
+
+
+@api_bp.get("/projects/<int:project_id>/jobs")
+def list_project_jobs_route(project_id: int):
+    owner_id = require_authenticated_user_id()
+    status = request.args.get("status")
+    if status == "":
+        raise ProjectValidationError("status 不是合法的任务状态")
+    limit = _project_query_integer(
+        "limit",
+        50,
+        minimum=1,
+        maximum=100,
+    )
+    offset = _project_query_integer("offset", 0, minimum=0)
+    jobs, total = list_project_jobs(
+        project_id,
+        owner_id,
+        status=status,
+        limit=limit,
+        offset=offset,
+    )
+    return jsonify(
+        ok=True,
+        project_id=project_id,
+        jobs=jobs,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@api_bp.delete("/projects/<int:project_id>")
+def delete_project_route(project_id: int):
+    owner_id = require_authenticated_user_id()
+    delete_empty_project(project_id, owner_id)
+    return jsonify(ok=True, deleted_project_id=project_id)
+
+
 @api_bp.post("/jobs")
 def create_job():
     jobs, files, _ = _services()
@@ -469,6 +557,10 @@ def create_job():
     if "project_id" in request.form:
         project_id = _positive_project_id(request.form.get("project_id"))
         project = get_owned_project(project_id, owner_id)
+        if project["status"] == "archived":
+            raise ProjectArchivedError(
+                "项目已归档，请恢复为 active 后再上传新任务"
+            )
     else:
         requested_name = request.form.get(
             "project_name", current_app.config["DEFAULT_PROJECT_NAME"]

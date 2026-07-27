@@ -42,8 +42,11 @@ from services.job_service import (
 from services.job_index_service import JobIndexRepository
 from services.project_service import (
     ProjectAccessDeniedError,
+    ProjectArchivedError,
     ProjectNotFoundError,
+    ProjectNotEmptyError,
     ProjectOwnerForbiddenError,
+    ProjectStateConflictError,
     ProjectValidationError,
 )
 from services.review_service import (
@@ -283,6 +286,30 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
             error=str(exc),
             error_code="PROJECT_ACCESS_DENIED",
         ), 403
+
+    @app.errorhandler(ProjectArchivedError)
+    def handle_project_archived(exc: ProjectArchivedError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="PROJECT_ARCHIVED",
+        ), 409
+
+    @app.errorhandler(ProjectNotEmptyError)
+    def handle_project_not_empty(exc: ProjectNotEmptyError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="PROJECT_NOT_EMPTY",
+        ), 409
+
+    @app.errorhandler(ProjectStateConflictError)
+    def handle_project_state_conflict(exc: ProjectStateConflictError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="PROJECT_STATE_CONFLICT",
+        ), 409
 
     @app.errorhandler(JobAccessDeniedError)
     def handle_job_access_denied(exc: JobAccessDeniedError):
