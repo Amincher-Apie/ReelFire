@@ -35,6 +35,10 @@ _SEGMENT_FIELDS = (
     "score",
     "source_keyframes",
     "duration",
+    "source",
+    "source_segment_ids",
+    "review",
+    "review_note",
     "peak_enemy_count",
     "detected_classes",
     "enemy_classes_in_segment",
@@ -230,24 +234,34 @@ def _public_agent(
         return _empty_agent("invalid", call_statistics)
 
 
-def _assert_no_private_data(value: Any) -> None:
+def _assert_no_private_data(
+    value: Any,
+    *,
+    allow_path_text: bool = False,
+) -> None:
     if isinstance(value, dict):
         for key, item in value.items():
             if key.lower() in _FORBIDDEN_KEYS:
                 raise ReportDataValidationError(
                     "report data contains a private field"
                 )
-            _assert_no_private_data(item)
+            _assert_no_private_data(
+                item,
+                allow_path_text=(key == "review_note"),
+            )
         return
     if isinstance(value, list):
         for item in value:
-            _assert_no_private_data(item)
+            _assert_no_private_data(
+                item,
+                allow_path_text=allow_path_text,
+            )
         return
     if isinstance(value, float) and not math.isfinite(value):
         raise ReportDataValidationError(
             "report data contains a non-finite number"
         )
-    if isinstance(value, str) and (
+    if not allow_path_text and isinstance(value, str) and (
         _WINDOWS_ABSOLUTE_PATH.search(value)
         or _UNIX_PRIVATE_PATH.search(value)
     ):

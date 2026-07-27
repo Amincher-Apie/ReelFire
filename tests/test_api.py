@@ -496,6 +496,7 @@ class ApiTestCase(unittest.TestCase):
                         "order": 1,
                         "score": 0.8,
                         "source_keyframes": [],
+                        "review": "pass",
                     }
                 ],
                 "keyframes": [
