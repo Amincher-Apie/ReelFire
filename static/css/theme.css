@@ -1,0 +1,90 @@
+/* ===================================================================
+   ReelFire — CSS Custom Properties & Theme Overrides
+   =================================================================== */
+
+:root {
+  color-scheme: dark;
+  --bg: #080b14;
+  --bg-elevated: #0d1220;
+  --panel: rgba(18, 24, 40, 0.94);
+  --panel-strong: #151c2e;
+  --panel-soft: #101727;
+  --text: #f7f8fc;
+  --text-muted: #9ba6bc;
+  --text-faint: #6e7890;
+  --border: rgba(255, 255, 255, 0.1);
+  --border-strong: rgba(255, 255, 255, 0.18);
+  --primary: #ff4d70;
+  --primary-strong: #e83258;
+  --primary-soft: rgba(255, 77, 112, 0.14);
+  --accent: #66a6ff;
+  --accent-soft: rgba(102, 166, 255, 0.14);
+  --success: #35d399;
+  --warning: #f5bd4f;
+  --danger: #ff667d;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  --radius-xl: 22px;
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 9px;
+  --header-height: 74px;
+  --font: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f2f4f9;
+  --bg-elevated: #ffffff;
+  --panel: rgba(255, 255, 255, 0.96);
+  --panel-strong: #f8f9fc;
+  --panel-soft: #f2f4f9;
+  --text: #171b27;
+  --text-muted: #5f687a;
+  --text-faint: #80889a;
+  --border: rgba(25, 31, 45, 0.11);
+  --border-strong: rgba(25, 31, 45, 0.19);
+  --primary: #e93660;
+  --primary-strong: #c9254c;
+  --primary-soft: rgba(233, 54, 96, 0.1);
+  --accent: #367ee8;
+  --accent-soft: rgba(54, 126, 232, 0.1);
+  --shadow: 0 24px 60px rgba(38, 45, 66, 0.11);
+}
+
+[data-theme="ocean"] {
+  color-scheme: dark;
+  --bg: #06131d;
+  --bg-elevated: #091b29;
+  --panel: rgba(9, 28, 42, 0.95);
+  --panel-strong: #0d2638;
+  --panel-soft: #0a202f;
+  --text: #eefaff;
+  --text-muted: #9ac0d1;
+  --text-faint: #6f98aa;
+  --border: rgba(139, 216, 244, 0.13);
+  --border-strong: rgba(139, 216, 244, 0.23);
+  --primary: #1fc8db;
+  --primary-strong: #10aabe;
+  --primary-soft: rgba(31, 200, 219, 0.14);
+  --accent: #64a8ff;
+  --accent-soft: rgba(100, 168, 255, 0.14);
+}
+
+[data-theme="forest"] {
+  color-scheme: dark;
+  --bg: #08130e;
+  --bg-elevated: #0d1d14;
+  --panel: rgba(14, 31, 22, 0.95);
+  --panel-strong: #14291d;
+  --panel-soft: #102219;
+  --text: #f2fbf4;
+  --text-muted: #a4c0aa;
+  --text-faint: #78947f;
+  --border: rgba(166, 222, 177, 0.13);
+  --border-strong: rgba(166, 222, 177, 0.22);
+  --primary: #55cf84;
+  --primary-strong: #34b568;
+  --primary-soft: rgba(85, 207, 132, 0.14);
+  --accent: #d4a855;
+  --accent-soft: rgba(212, 168, 85, 0.14);
+}

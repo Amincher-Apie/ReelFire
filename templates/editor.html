@@ -6,9 +6,11 @@
   <meta name="color-scheme" content="dark light">
   <title>ReelFire - 剪辑预览工作台</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='editor.css') }}">
-  <script defer src="{{ url_for('static', filename='editor.js') }}"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/charts.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/editor.css') }}">
+  <script type="module" src="{{ url_for('static', filename='js/editor.js') }}"></script>
 </head>
 <body data-page="editor" data-theme="dark">
 
@@ -97,6 +99,12 @@
               <button id="timeline-play" class="timeline-play-button" type="button" aria-label="播放">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
               </button>
+              <div class="timeline-zoom-controls" role="group" aria-label="时间轴缩放">
+                <button class="timeline-zoom-btn timeline-zoom-out" type="button" aria-label="缩小时间轴" title="缩小 (Ctrl+滚轮)">−</button>
+                <span id="timeline-zoom-label" class="timeline-zoom-label">1.0x</span>
+                <button class="timeline-zoom-btn timeline-zoom-in" type="button" aria-label="放大时间轴" title="放大 (Ctrl+滚轮)">+</button>
+                <button class="timeline-zoom-btn timeline-zoom-reset" type="button" aria-label="重置缩放" title="重置缩放">↺</button>
+              </div>
             </div>
           </div>
           <div class="timeline-track-wrapper">
@@ -293,6 +301,9 @@
 
       <!-- 底部工具栏 -->
       <footer class="editor-toolbar" role="toolbar" aria-label="编辑操作">
+        <button id="undo-button" class="button ghost small" type="button" title="撤销 (Ctrl+Z)">↩ 撤销</button>
+        <button id="redo-button" class="button ghost small" type="button" title="重做 (Ctrl+Y)">↪ 重做</button>
+        <span class="toolbar-sep" aria-hidden="true"></span>
         <button id="save-review-button" class="button secondary" type="button">
           <span class="save-dirty-dot" hidden aria-hidden="true">●</span>
           保存审核
@@ -301,7 +312,6 @@
         <button id="view-report-button" class="button ghost" type="button">查看 JSON 报告</button>
         <button id="export-review-button" class="button ghost" type="button">导出审核</button>
         <a id="back-workbench-link" href="/" class="button ghost">返回工作台</a>
-      </footer>
       </footer>
     </div>
 
