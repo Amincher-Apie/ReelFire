@@ -11,7 +11,12 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/charts.css') }}">
   <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
 </head>
-<body data-page="app" data-theme="dark" data-initial-view="{{ initial_view }}" data-job-id="{{ job_id or '' }}">
+<body
+  data-page="app"
+  data-theme="dark"
+  data-initial-view="{{ initial_view|default('projects') }}"
+  data-job-id="{{ job_id|default('', true) }}"
+>
 <a class="skip-link" href="#main-content">跳到主要内容</a>
 
 <div id="app" class="app-shell">
@@ -25,23 +30,17 @@
     </a>
 
     <nav class="header-nav" aria-label="主导航">
-      <button id="nav-projects" class="nav-button active" type="button" data-view="projects">
+      <a id="nav-projects" class="nav-button active" href="/" data-view="projects"{% if initial_view == 'projects' %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
         项目
-      </button>
-      <button id="nav-upload" class="nav-button" type="button" data-view="analysis">
-        上传
-      </button>
-      <button id="nav-analysis" class="nav-button" type="button" data-view="analysis">
+      </a>
+      <a id="nav-analysis" class="nav-button{% if initial_view == 'analysis' %} active{% endif %}{% if not job_id %} disabled{% endif %}" href="{% if job_id %}/jobs/{{ job_id }}/analysis{% else %}#{% endif %}" data-view="analysis"{% if initial_view == 'analysis' %} aria-current="page"{% endif %}{% if not job_id %} aria-disabled="true" tabindex="-1" title="请先上传视频或从历史记录选择任务"{% endif %}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
         分析工作台
-      </button>
-      <button id="nav-history" class="nav-button" type="button" data-view="history">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>
-        历史记录
-      </button>
-      <a id="nav-editor" class="nav-button disabled" href="#" aria-disabled="true" tabindex="-1">
-        剪辑
+      </a>
+      <a id="nav-editor" class="nav-button{% if not job_id %} disabled{% endif %}" href="{% if job_id %}/jobs/{{ job_id }}/editor{% else %}#{% endif %}" data-view="editor"{% if not job_id %} aria-disabled="true" tabindex="-1" title="请先完成视频分析"{% endif %}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 18h16M8 3v6m8 6v6"/><rect x="7" y="9" width="10" height="6" rx="1"/></svg>
+        剪辑工作台
       </a>
     </nav>
 
@@ -106,13 +105,41 @@
           <h1 id="project-detail-heading">
             <span id="project-detail-name"></span>
             <span id="project-detail-game" class="project-game-badge"></span>
+            <span id="project-detail-status" class="status-badge active" hidden></span>
           </h1>
           <p id="project-detail-date"></p>
         </div>
-        <button id="project-start-analysis" class="button primary" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="M12 5v14M5 12h14"/></svg>
-          新建分析任务
-        </button>
+        <div class="section-heading-actions">
+          <button id="project-archive-button" class="button ghost small" type="button" hidden>归档项目</button>
+          <button id="project-start-analysis" class="button primary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="M12 5v14M5 12h14"/></svg>
+            新建分析任务
+          </button>
+        </div>
+      </div>
+
+      <!-- 项目状态概览 -->
+      <div class="project-stats-bar" id="project-stats-bar">
+        <div class="project-stat-card">
+          <span class="project-stat-label">总任务</span>
+          <strong id="project-job-count">—</strong>
+        </div>
+        <div class="project-stat-card">
+          <span class="project-stat-label">排队中</span>
+          <strong id="project-stat-created">0</strong>
+        </div>
+        <div class="project-stat-card">
+          <span class="project-stat-label">运行中</span>
+          <strong id="project-stat-running">0</strong>
+        </div>
+        <div class="project-stat-card">
+          <span class="project-stat-label">已完成</span>
+          <strong id="project-stat-completed">0</strong>
+        </div>
+        <div class="project-stat-card">
+          <span class="project-stat-label">失败</span>
+          <strong id="project-stat-failed">0</strong>
+        </div>
       </div>
 
       <div class="project-detail-panel panel">
@@ -134,6 +161,11 @@
             <thead><tr><th>任务名称</th><th>视频文件</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
             <tbody id="project-jobs-body"></tbody>
           </table>
+        </div>
+        <div id="project-jobs-pagination" class="pagination-bar" hidden>
+          <button class="button ghost small pagination-prev" type="button">← 上一页</button>
+          <span class="pagination-info"></span>
+          <button class="button ghost small pagination-next" type="button">下一页 →</button>
         </div>
       </div>
     </section>
@@ -279,7 +311,7 @@
             <h3>正在分析</h3>
             <p id="loading-message">任务正在排队，请稍候。</p>
             <!-- Enhanced progress info -->
-            <section id="analysis-progress-panel" class="analysis-progress-panel">
+            <section id="analysis-progress-panel" class="analysis-progress-panel" hidden aria-labelledby="analysis-chunk-heading">
             <div id="analysis-progress-detail" class="analysis-progress-detail" hidden>
               <div class="progress-stat">
                 <span class="progress-stat-label">处理帧数</span>
@@ -295,12 +327,25 @@
               </div>
             </div>
             <div class="progress-heading">
-              <span id="analysis-progress-count">0 / 0</span>
+              <div>
+                <strong id="analysis-chunk-heading">分块分析进度</strong>
+                <span id="analysis-progress-count">0 / 0</span>
+              </div>
               <strong id="analysis-progress-percent">0%</strong>
             </div>
             <progress id="analysis-progress-bar" max="100" value="0">0%</progress>
-            <p id="analysis-progress-message" class="muted-label"></p>
-            <div id="analysis-chunk-track" class="analysis-chunk-track"></div>
+            <p id="analysis-progress-detail-text" aria-live="polite">等待后台返回分析分块。</p>
+            <div id="analysis-chunk-track" class="analysis-chunk-track" role="list" aria-label="视频分析分块"></div>
+            <div id="partial-results" class="partial-results" hidden>
+              <div>
+                <h4>已产生的候选片段</h4>
+                <div id="partial-segment-list" class="partial-segment-list"></div>
+              </div>
+              <div>
+                <h4>已产生的关键帧</h4>
+                <div id="partial-keyframe-list" class="partial-keyframe-list"></div>
+              </div>
+            </div>
             </section>
           </div>
 
@@ -393,7 +438,7 @@
           </div>
         </section>
 
-        <aside class="panel agent-panel" aria-labelledby="agent-heading">
+        <aside id="analysis-agent-panel" class="panel agent-panel" aria-labelledby="agent-heading">
           <div class="panel-header">
             <div>
               <p class="panel-kicker">WORKFLOW</p>
@@ -402,12 +447,14 @@
             <span id="agent-provider-badge" class="capability-badge neutral">等待 Agent</span>
           </div>
 
-          <p id="agent-run-note" class="panel-note" aria-live="polite">YOLO 完成后会自动启动 Agent，并在这里显示调用状态。</p>
+          <p id="agent-run-note" class="panel-note" aria-live="polite">
+            YOLO 完成后会自动启动 Agent，并在这里显示排队、运行、完成或降级状态。
+          </p>
 
           <ol id="agent-flow" class="agent-flow">
             <li class="agent-node pending" data-step="1"><span>1</span><div><strong>视觉报告解析</strong><small>等待任务完成</small></div></li>
             <li class="agent-node pending" data-step="2"><span>2</span><div><strong>检测标签汇总</strong><small>等待真实检测</small></div></li>
-            <li class="agent-node pending" data-step="3"><span>3</span><div><strong>知识检索与建议</strong><small>独立 Agent 待接入</small></div></li>
+            <li class="agent-node pending" data-step="3"><span>3</span><div><strong>知识检索与建议</strong><small>等待 Agent 调用</small></div></li>
             <li class="agent-node pending" data-step="4"><span>4</span><div><strong>人工审核与输出</strong><small>等待复核</small></div></li>
           </ol>
 

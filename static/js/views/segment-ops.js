@@ -1,4 +1,10 @@
 // ReelFire — segment operations: add, delete, merge, split, playhead markers
+//
+// ⚠ 后端依赖说明：
+// 以下 CRUD 端点（/segments、/segments/<id>、/segments/merge、/segments/<id>/split）
+// 是否在新后端中保留需由最新 backend 分支确认。
+// 正式的片段写回路径为 PATCH /api/jobs/<job_id>/review（完整 Segment Schema 快照）。
+// 若独立 CRUD 端点被移除，对应 UI 按钮仍会显示但操作将返回错误提示。
 import { editorState } from "../state/editor-state.js";
 import api from "../api/client.js";
 import { byId, createElement } from "../utils/dom.js";
@@ -55,25 +61,10 @@ export async function deleteSegment(segId) {
       "/api/jobs/" + encodeURIComponent(editorState.jobId) + "/segments/" + encodeURIComponent(segId)
     );
     pushUndo();
-    editorState.segments = editorState.segments.filter((s) => s.id !== segId);
-    if (editorState.selectedSegmentId === segId) {
-      editorState.selectedSegmentId = null;
-    }
-    markDirty();
-    renderSegmentList();
-    renderTimeline();
-    renderStatsDashboard();
     showToast("片段已删除", "success");
+    await loadEditorData(editorState.jobId);
   } catch (err) {
     showToast(err.message || "删除片段失败", "error");
-    // Fallback: remove from local state anyway
-    editorState.segments = editorState.segments.filter((s) => s.id !== segId);
-    if (editorState.selectedSegmentId === segId) {
-      editorState.selectedSegmentId = null;
-    }
-    renderSegmentList();
-    renderTimeline();
-    renderStatsDashboard();
   }
 }
 
@@ -154,28 +145,6 @@ export async function mergeSelectedSegments() {
     }
   } catch (err) {
     showToast(err.message || "合并失败", "error");
-    // Fallback: merge locally
-    const merged = {
-      id: "merged_" + seg1.id + "_" + seg2.id,
-      start: Math.min(seg1.start, seg2.start),
-      end: Math.max(seg1.end, seg2.end),
-      score: Math.max(seg1.score || 0, seg2.score || 0),
-      order: Math.min(seg1.order || 0, seg2.order || 0),
-      source_keyframes: [
-        ...(seg1.source_keyframes || []),
-        ...(seg2.source_keyframes || []),
-      ],
-      type: "merged",
-    };
-    editorState.segments = [
-      ...editorState.segments.filter((s) => s.id !== seg1.id && s.id !== seg2.id),
-      merged,
-    ].sort((a, b) => (a.order || 0) - (b.order || 0));
-    editorState.selectedSegmentId = merged.id;
-    markDirty();
-    renderSegmentList();
-    renderTimeline();
-    renderStatsDashboard();
   }
 }
 
@@ -216,47 +185,29 @@ export async function splitSegment(segId, splitTime) {
     }
   } catch (err) {
     showToast(err.message || "拆分失败", "error");
-    // Fallback: split locally
-    const seg = editorState.segments.find((s) => s.id === segId);
-    if (!seg) return;
-    const segA = {
-      id: segId + "_a",
-      start: seg.start,
-      end: splitTime,
-      score: seg.score || 0,
-      order: seg.order || 0,
-      source_keyframes: [...(seg.source_keyframes || [])],
-      type: "split",
-    };
-    const segB = {
-      id: segId + "_b",
-      start: splitTime,
-      end: seg.end,
-      score: seg.score || 0,
-      order: (seg.order || 0) + 1,
-      source_keyframes: [...(seg.source_keyframes || [])],
-      type: "split",
-    };
-    editorState.segments = [
-      ...editorState.segments.filter((s) => s.id !== segId),
-      segA,
-      segB,
-    ].sort((a, b) => (a.order || 0) - (b.order || 0));
-    editorState.selectedSegmentId = segA.id;
-    markDirty();
-    renderSegmentList();
-    renderTimeline();
-    renderStatsDashboard();
   }
 }
 
 // ── segment playback ────────────────────────────────────────────────────
+
+let _activePlaybackListener = null;
+
+function _clearPlaybackListener(video) {
+  if (_activePlaybackListener && video) {
+    video.removeEventListener("timeupdate", _activePlaybackListener);
+    _activePlaybackListener = null;
+  }
+}
 
 export function playSegment(segId) {
   const seg = editorState.segments.find((s) => s.id === segId);
   if (!seg || !editorState.videoElement) return;
 
   const video = editorState.videoElement;
+
+  // Remove any previous playback listener
+  _clearPlaybackListener(video);
+
   video.currentTime = seg.start;
   selectSegment(segId);
 
@@ -266,9 +217,10 @@ export function playSegment(segId) {
   const onTimeUpdate = () => {
     if (video.currentTime >= seg.end) {
       video.pause();
-      video.removeEventListener("timeupdate", onTimeUpdate);
+      _clearPlaybackListener(video);
     }
   };
+  _activePlaybackListener = onTimeUpdate;
   video.addEventListener("timeupdate", onTimeUpdate);
 }
 

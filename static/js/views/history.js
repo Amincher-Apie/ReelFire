@@ -7,6 +7,7 @@ import { showToast } from "../utils/ui.js";
 import {
   setView, setResultState, stopPolling,
   loadReport, pollJob, logTool,
+  renderAnalysisProgress, updateJobNavigation,
 } from "./analysis.js";
 
 export function historyStatus(status) {
@@ -72,6 +73,8 @@ export async function openHistoryJob(jobId) {
     appState.currentJob = payload.job;
     appState.toolCalls = [];
     logTool("GET", `/api/jobs/${jobId}`, "从历史记录打开任务");
+    updateJobNavigation(jobId, payload.job.status === "completed");
+    if (payload.job.progress) renderAnalysisProgress(payload.job.progress);
     setView("analysis");
     if (payload.job.status === "completed") {
       await loadReport(jobId);

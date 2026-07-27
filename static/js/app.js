@@ -7,7 +7,7 @@ import api from "./api/client.js";
 import { showToast } from "./utils/ui.js";
 import { appState } from "./state/app-state.js";
 import { initUpload } from "./views/upload.js";
-import { pollJob, setView, submitAnalysis, stopPolling, showRuleOutput, showReportDialog } from "./views/analysis.js";
+import { setView, submitAnalysis, stopPolling, stopAgentPolling, showRuleOutput, showReportDialog, hydrateAnalysisJob } from "./views/analysis.js";
 import { saveReview, createRoughCut } from "./views/review.js";
 import { loadHistory, openHistoryJob, deleteHistoryJob } from "./views/history.js";
 import {
@@ -17,9 +17,15 @@ import {
 } from "./views/projects.js";
 
 function initApp() {
-  // Navigation buttons
+  // Navigation buttons — prevent default link navigation, handle disabled state
   document.querySelectorAll("[data-view]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      // Always prevent default <a> navigation to keep SPA routing
+      event.preventDefault();
+      if (button.getAttribute("aria-disabled") === "true") {
+        showToast(button.title || "该工作台当前不可用。", "info");
+        return;
+      }
       const view = button.dataset.view;
       if (view === "projects") showProjectsView();
       else if (view === "analysis") startAnalysisInProject();
@@ -38,6 +44,16 @@ function initApp() {
   // Empty state create button
   const emptyCreate = byId("projects-empty-create");
   if (emptyCreate) emptyCreate.addEventListener("click", () => byId("project-dialog").showModal());
+
+  // Project archive/restore button on detail page
+  const archiveBtn = byId("project-archive-button");
+  if (archiveBtn) {
+    archiveBtn.addEventListener("click", async () => {
+      const { appState: st } = await import("./state/app-state.js");
+      const { toggleArchiveProject } = await import("./views/projects.js");
+      if (st.currentProject) toggleArchiveProject(st.currentProject);
+    });
+  }
 
   // Projects retry
   const projectsRetry = byId("projects-retry-button");
@@ -98,14 +114,14 @@ function initApp() {
   initProjectDialog();
   loadUser();
 
-  const initialView = document.body.dataset.initialView;
-  const initialJobId = document.body.dataset.jobId;
-  if (initialView === "history") {
-    showHistoryView();
-  } else if (initialView === "analysis" && initialJobId) {
+  const initialView = document.body.dataset.initialView || "projects";
+  const initialJobId = document.body.dataset.jobId || "";
+  if (initialView === "analysis" && initialJobId) {
     appState.currentJobId = initialJobId;
     startAnalysisInProject();
-    pollJob(initialJobId);
+    hydrateAnalysisJob(initialJobId);
+  } else if (initialView === "history") {
+    showHistoryView();
   } else {
     showProjectsView();
   }
@@ -123,6 +139,7 @@ async function logout() {
 
 window.addEventListener("beforeunload", () => {
   stopPolling();
+  stopAgentPolling();
   if (appState.previewUrl) URL.revokeObjectURL(appState.previewUrl);
 });
 

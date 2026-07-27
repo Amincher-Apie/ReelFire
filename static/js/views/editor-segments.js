@@ -122,9 +122,9 @@ function renderSegmentCard(seg, idx) {
 
   // Header: type badge + confidence
   const header = createElement("div", "segment-card-header");
-  const segType = seg.type || "auto";
-  const typeLabel = segType === "manual" ? "手动" : segType === "merged" ? "合并" : segType === "split" ? "拆分" : "自动";
-  const typeBadge = createElement("span", "segment-type-badge " + segType, typeLabel);
+  const segSource = seg.source || seg.type || "cv";
+  const typeLabel = segSource === "manual" ? "手动" : segSource === "merged" ? "合并" : segSource === "split" ? "拆分" : "自动";
+  const typeBadge = createElement("span", "segment-type-badge " + segSource, typeLabel);
   const confidence = createElement("span", "segment-confidence " + confidenceClass(seg.score), formatNumber(Number(seg.score) * 100, 0) + "%");
   header.append(typeBadge, confidence);
 
@@ -201,7 +201,8 @@ export function renderSegmentDetail(segmentId) {
   const seg = editorState.segments.find((s) => s.id === segmentId);
   if (!seg) return;
 
-  const comment = findAgentComment(segmentId);
+  // 逐片段评论 — 按 segment_id 匹配
+  const segmentComment = findAgentComment(segmentId);
 
   byId("detail-placeholder").hidden = true;
   byId("detail-content").hidden = false;
@@ -210,11 +211,12 @@ export function renderSegmentDetail(segmentId) {
   byId("detail-time").textContent = formatTime(seg.start) + " – " + formatTime(seg.end);
   byId("detail-duration").textContent = formatDuration(seg.end - seg.start);
   byId("detail-keyframes").textContent = (seg.source_keyframes || []).join("、");
-  byId("detail-type").textContent = seg.type === "manual" ? "手动添加" : seg.type === "merged" ? "合并片段" : seg.type === "split" ? "拆分片段" : "自动检测";
+  const src = seg.source || seg.type || "cv";
+  byId("detail-type").textContent = src === "manual" ? "手动添加" : src === "merged" ? "合并片段" : src === "split" ? "拆分片段" : "自动检测";
   byId("detail-confidence").textContent = formatNumber(Number(seg.score) * 100, 0) + "%";
 
-  const agentStatus = comment ? comment.status : "pending";
-  renderAgentComment(agentStatus, comment);
+  // Agent 状态来自整体 agentReport，不再从单条 segmentComment.status 读取
+  renderAgentComment(segmentComment);
 }
 
 export function findAgentComment(segmentId) {
@@ -223,98 +225,125 @@ export function findAgentComment(segmentId) {
   );
 }
 
-export function renderAgentComment(status, comment) {
+export function renderAgentComment(segmentComment) {
+  const agent = editorState.agentReport;
+  const avail = agent ? agent.availability : null;
+  // availability 值域：ready | unavailable | invalid | pending（无 agent 对象视为 pending）
+  const agentStatus = !agent
+    ? "pending"
+    : (avail === "unavailable" || avail === "invalid")
+      ? "unavailable"
+      : "completed";
+
+  // ── 状态徽标 ──
   const badge = byId("agent-status-badge");
-  badge.className = "agent-status-badge " + status;
+  badge.className = "agent-status-badge " + agentStatus;
   const badgeText =
-    status === "completed"
+    agentStatus === "completed"
       ? "Agent 已完成"
-      : status === "pending"
+      : agentStatus === "pending"
       ? "待 Agent 分析"
-      : "Agent 不可用";
+      : avail === "invalid"
+        ? "Agent 结果无效"
+        : "Agent 不可用";
   badge.textContent = badgeText;
 
+  // ── 切换内容区 ──
   byId("agent-completed-content").hidden = true;
   byId("agent-pending-content").hidden = true;
   byId("agent-unavailable-content").hidden = true;
 
-  if (status === "completed" && comment) {
-    renderAgentCompleted(comment);
+  if (agentStatus === "completed" && agent) {
+    // 整体 Agent 面板 — 读取 agentReport（summary/tags/suggestions/review/evidences/knowledges）
+    renderAgentOverall(agent);
+    // 逐片段评论 — 读取 segmentComment（comment/review_status/action_recommendation/explanation/boundary_suggestion/evidence_refs）
+    renderSegmentCommentDetail(segmentComment);
     byId("agent-completed-content").hidden = false;
-  } else if (status === "pending") {
+  } else if (agentStatus === "pending") {
     byId("agent-pending-content").hidden = false;
   } else {
     const msg =
-      comment && comment.error
-        ? comment.error
-        : "Agent 服务当前不可用，以下为基于 CV 检测的规则输出。";
+      agent && agent.error
+        ? agent.error
+        : avail === "invalid"
+          ? "Agent 返回了无效结果，请检查分析参数或联系管理员。"
+          : "Agent 服务当前不可用，以下为基于 CV 检测的规则输出。";
     byId("agent-unavailable-message").textContent = msg;
     byId("agent-unavailable-content").hidden = false;
   }
 }
 
-export function renderAgentCompleted(comment) {
-  byId("agent-summary").textContent = comment.summary || "Agent 未生成摘要。";
+// ── 整体 Agent 报告（agent-level） ──
 
+function renderAgentOverall(agent) {
+  // 摘要：来自 agent.summary
+  byId("agent-summary").textContent = agent.summary || "Agent 未生成摘要。";
+
+  // 标签：来自 agent.tags
   const tagsContainer = byId("agent-tags");
   clearChildren(tagsContainer);
-  (comment.tags || []).forEach((tag) => {
-    const t = createElement("span", "agent-tag", tag.name);
-    t.title = tag.description || "";
+  (agent.tags || []).forEach((tag) => {
+    const tagName = typeof tag === "string" ? tag : (tag.name || tag.label || "");
+    const tagDesc = typeof tag === "object" ? (tag.description || "") : "";
+    const t = createElement("span", "agent-tag", tagName);
+    if (tagDesc) t.title = tagDesc;
     tagsContainer.append(t);
   });
-  if (!comment.tags || !comment.tags.length) {
+  if (!agent.tags || !agent.tags.length) {
     tagsContainer.append(createElement("span", "agent-tag", "无标签"));
   }
 
+  // 建议：来自 agent.suggestions
   const suggestionsContainer = byId("agent-suggestions");
   clearChildren(suggestionsContainer);
-  (comment.suggestions || []).forEach((sug) => {
+  (agent.suggestions || []).forEach((sug) => {
     const item = createElement("div", "agent-suggestion-item");
     const titleSpan = createElement("strong");
-    titleSpan.textContent = sug.title;
+    titleSpan.textContent = sug.title || sug.action || "";
     const prioritySpan = createElement(
       "span",
       "agent-suggestion-priority " + (sug.priority || "low"),
       sug.priority === "high" ? "高" : sug.priority === "medium" ? "中" : "低"
     );
     titleSpan.append(prioritySpan);
-    const actionP = createElement("p", "", sug.action || "");
+    const actionP = createElement("p", "", sug.action || sug.description || "");
     item.append(titleSpan, actionP);
     suggestionsContainer.append(item);
   });
-  if (!comment.suggestions || !comment.suggestions.length) {
+  if (!agent.suggestions || !agent.suggestions.length) {
     suggestionsContainer.append(
       createElement("p", "agent-field-value", "无建议。")
     );
   }
 
+  // 审核意见：来自 agent.review
   const reviewContainer = byId("agent-review");
   clearChildren(reviewContainer);
-  if (comment.review) {
-    const rec = comment.review.recommendation || "needs_review";
+  if (agent.review) {
+    const rec = agent.review.recommendation || "needs_review";
     const recLabel =
       rec === "pass" ? "通过" : rec === "reject" ? "不通过" : "待复核";
     const recSpan = createElement("span", "agent-review-rec " + rec, recLabel);
     const confSpan = createElement(
       "span",
       "agent-review-confidence",
-      "置信度 " + formatNumber(Number(comment.review.confidence) * 100, 0) + "%"
+      "置信度 " + formatNumber(Number(agent.review.confidence) * 100, 0) + "%"
     );
     reviewContainer.append(recSpan, confSpan);
 
-    if (comment.review.reasons && comment.review.reasons.length) {
+    if (agent.review.reasons && agent.review.reasons.length) {
       const reasonsList = createElement("ul", "agent-review-reasons");
-      comment.review.reasons.forEach((r) => {
+      agent.review.reasons.forEach((r) => {
         reasonsList.append(createElement("li", "", r));
       });
       reviewContainer.append(reasonsList);
     }
   }
 
+  // 证据引用：来自 agent.evidence_refs
   const evidenceContainer = byId("agent-evidence");
   clearChildren(evidenceContainer);
-  (comment.evidence_refs || []).forEach((ref) => {
+  (agent.evidence_refs || []).forEach((ref) => {
     const item = createElement("div", "agent-evidence-item");
     item.append(
       createElement("span", "agent-evidence-type", ref.type || "ref"),
@@ -322,15 +351,16 @@ export function renderAgentCompleted(comment) {
     );
     evidenceContainer.append(item);
   });
-  if (!comment.evidence_refs || !comment.evidence_refs.length) {
+  if (!agent.evidence_refs || !agent.evidence_refs.length) {
     evidenceContainer.append(
       createElement("p", "agent-field-value", "无证据引用。")
     );
   }
 
+  // 知识库引用：来自 agent.knowledge_refs
   const knowledgeContainer = byId("agent-knowledge");
   clearChildren(knowledgeContainer);
-  (comment.knowledge_refs || []).forEach((ref) => {
+  (agent.knowledge_refs || []).forEach((ref) => {
     const item = createElement("div", "agent-evidence-item");
     item.append(
       createElement("span", "agent-evidence-type", "知识库"),
@@ -338,11 +368,153 @@ export function renderAgentCompleted(comment) {
     );
     knowledgeContainer.append(item);
   });
-  if (!comment.knowledge_refs || !comment.knowledge_refs.length) {
+  if (!agent.knowledge_refs || !agent.knowledge_refs.length) {
     knowledgeContainer.append(
       createElement("p", "agent-field-value", "无知识库引用。")
     );
   }
+}
+
+// ── 逐片段 Agent 评论（per-segment） ──
+
+function renderSegmentCommentDetail(segmentComment) {
+  const container = byId("agent-segment-comment");
+  if (!container) return;
+
+  if (!segmentComment) {
+    container.innerHTML = '<p class="agent-field-value">该片段暂无 Agent 评论。</p>';
+    return;
+  }
+
+  const parts = [];
+
+  // review_status
+  if (segmentComment.review_status) {
+    const statusMap = { pass: "通过", reject: "不通过", needs_review: "待复核" };
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">审核决策</span>' +
+      '<span class="agent-review-rec ' + segmentComment.review_status + '">' +
+      (statusMap[segmentComment.review_status] || segmentComment.review_status) +
+      '</span></div>'
+    );
+  }
+
+  // action_recommendation
+  if (segmentComment.action_recommendation) {
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">操作建议</span>' +
+      '<p class="agent-field-value">' + escapeHtml(segmentComment.action_recommendation) + '</p></div>'
+    );
+  }
+
+  // comment
+  if (segmentComment.comment) {
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">评论</span>' +
+      '<p class="agent-field-value">' + escapeHtml(segmentComment.comment) + '</p></div>'
+    );
+  }
+
+  // explanation — 结构化对象 { highlight_type, trigger_rule, time_range, detections, keyframe_refs, detection_box_refs }
+  if (segmentComment.explanation) {
+    let explanationHtml = "";
+    if (typeof segmentComment.explanation === "object") {
+      const ex = segmentComment.explanation;
+      if (ex.highlight_type || ex.trigger_rule) {
+        explanationHtml += '<p class="agent-field-value">' +
+          '<strong>' + escapeHtml(ex.highlight_type || "") + '</strong>' +
+          (ex.trigger_rule ? ' · 触发规则: ' + escapeHtml(ex.trigger_rule) : '') +
+          '</p>';
+      }
+      if (ex.time_range && typeof ex.time_range === "object") {
+        explanationHtml += '<p class="agent-field-value">时间区间: ' +
+          (ex.time_range.start != null ? ex.time_range.start + 's' : '—') +
+          ' – ' + (ex.time_range.end != null ? ex.time_range.end + 's' : '—') +
+          '</p>';
+      }
+      if (ex.detections && ex.detections.length) {
+        explanationHtml += '<p class="agent-field-value">检测目标: ' +
+          ex.detections.map(function(d) {
+            return escapeHtml(d.class_name || "unknown") + " (置信度 " +
+              (d.average_confidence != null ? (d.average_confidence * 100).toFixed(0) + "%)" : "—)");
+          }).join("、") + '</p>';
+      }
+      if (ex.keyframe_refs && ex.keyframe_refs.length) {
+        explanationHtml += '<p class="agent-field-value">关键帧引用: ' +
+          escapeHtml(ex.keyframe_refs.slice(0, 5).join(", ")) +
+          (ex.keyframe_refs.length > 5 ? " …" : "") + '</p>';
+      }
+    } else {
+      explanationHtml = '<p class="agent-field-value">' + escapeHtml(String(segmentComment.explanation)) + '</p>';
+    }
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">解释</span>' + explanationHtml + '</div>'
+    );
+  }
+
+  // boundary_suggestion — 字段为 suggested_start / suggested_end
+  if (segmentComment.boundary_suggestion && typeof segmentComment.boundary_suggestion === "object") {
+    const bs = segmentComment.boundary_suggestion;
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">边界建议</span>' +
+      '<p class="agent-field-value">起始: ' + (bs.suggested_start != null ? bs.suggested_start + 's' : '—') +
+      ' · 结束: ' + (bs.suggested_end != null ? bs.suggested_end + 's' : '—') + '</p></div>'
+    );
+  }
+
+  // per-segment evidence_refs — 字符串数组，不做 ref.type/ref.source_id 解构
+  if (segmentComment.evidence_refs && segmentComment.evidence_refs.length) {
+    const refsHtml = segmentComment.evidence_refs.map((ref) =>
+      '<span class="agent-evidence-item">' + escapeHtml(typeof ref === "string" ? ref : String(ref)) + '</span>'
+    ).join("");
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">相关证据</span>' +
+      '<div class="agent-evidence-list">' + refsHtml + '</div></div>'
+    );
+  }
+
+  container.innerHTML = parts.length ? parts.join("") : '<p class="agent-field-value">该片段暂无 Agent 评论。</p>';
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = String(text);
+  return div.innerHTML;
+}
+
+// ── Agent report loading (independent from /editor) ───────────────────
+
+export function loadAgentReport(jobId) {
+  if (!jobId) return;
+
+  api.get("/api/jobs/" + encodeURIComponent(jobId) + "/report-data").then(
+    (payload) => {
+      // 新后端契约：payload.report_data.agent.{segment_comments, summary, tags, ...}
+      const reportData = payload.report_data || {};
+      const agent = reportData.agent || {};
+
+      // 整体 Agent 数据（availability/status/summary/tags/suggestions/review/evidences/knowledges）
+      editorState.agentReport = agent;
+
+      // 逐片段评论（segment_id/comment/review_status/action_recommendation/explanation/boundary_suggestion/evidence_refs）
+      editorState.agentComments = Array.isArray(agent.segment_comments)
+        ? agent.segment_comments.map((c) => Object.assign({}, c))
+        : [];
+
+      // 刷新当前选中片段的 Agent 面板
+      if (editorState.selectedSegmentId) {
+        renderSegmentDetail(editorState.selectedSegmentId);
+      }
+    },
+    (error) => {
+      // Agent 报告不可用不阻塞编辑 — 面板显示 pending 状态
+      editorState.agentReport = null;
+      editorState.agentComments = [];
+      if (editorState.selectedSegmentId) {
+        renderSegmentDetail(editorState.selectedSegmentId);
+      }
+    }
+  );
 }
 
 // ── data loading ──────────────────────────────────────────────────────
@@ -389,34 +561,27 @@ export function normalizeEditorData(payload) {
   if (!payload || typeof payload !== "object") {
     throw new Error("服务端返回了无法识别的数据格式。");
   }
-  const job = payload.job && typeof payload.job === "object"
-    ? payload.job
-    : {};
-  const jobId = payload.job_id || job.job_id;
+  // ── 新后端契约（project-lifecycle）：payload.job.{job_id,status}, payload.highlights[], payload.video.url ──
+  // ── 旧后端契约（feature/frontend）：payload.{job_id,status,segments,agent_comments,keyframes} ──
+  const jobContainer = payload.job || payload;
+  const jobId = jobContainer.job_id;
   if (!jobId) {
     throw new Error("剪辑预览数据缺少任务编号。");
   }
+  const status = jobContainer.status || "unknown";
 
-  const rawSegments = Array.isArray(payload.segments)
-    ? payload.segments
-    : Array.isArray(payload.highlights)
-      ? payload.highlights
-      : [];
-  const agentComments = Array.isArray(payload.agent_comments)
-    ? payload.agent_comments.map((c) => Object.assign({}, c))
-    : rawSegments
-      .filter((seg) => seg && seg.agent_comment)
-      .map((seg) => ({
-        segment_id: seg.id,
-        comment: seg.agent_comment,
-        status: seg.agent_comment_status || "ready",
-        review_status: seg.agent_review_status || null,
-        evidence_refs: Array.isArray(seg.agent_evidence_refs)
-          ? seg.agent_evidence_refs
-          : [],
-      }));
-
+  // video：新后端返回 video.url（直接可用）+ video.duration_seconds，旧后端返回 video.path + video.duration
   const rawVideo = payload.video || {};
+  const videoUrl = rawVideo.url || null;
+  const videoPath = rawVideo.path || null;
+  const videoDuration = Number(rawVideo.duration_seconds || rawVideo.duration) || 0;
+
+  // highlights → segments（新后端）；segments → segments（旧后端回退）
+  const rawSegments = Array.isArray(payload.highlights)
+    ? payload.highlights
+    : Array.isArray(payload.segments)
+      ? payload.segments
+      : [];
 
   const segments = rawSegments
     .filter((seg) => seg && typeof seg === "object")
@@ -428,13 +593,24 @@ export function normalizeEditorData(payload) {
         order: seg.order != null ? Number(seg.order) : 0,
         start: Number.isFinite(start) && start >= 0 ? start : 0,
         end: Number.isFinite(end) && end >= start ? end : start,
+        duration: seg.duration != null ? Number(seg.duration) : (Number.isFinite(end) ? end - start : 0),
         score: seg.score != null ? Number(seg.score) : 0,
         source_keyframes: Array.isArray(seg.source_keyframes) ? seg.source_keyframes : [],
-        type: seg.type || seg.source || "auto",
+        source: seg.source || seg.type || "cv",
+        source_segment_ids: Array.isArray(seg.source_segment_ids) ? seg.source_segment_ids : [],
+        review: seg.review || "",
+        review_note: seg.review_note || "",
+        // /editor 内嵌的 Agent 预览（/report-data 加载前用于快速展示）
+        _agentPreview: {
+          comment: seg.agent_comment || null,
+          commentStatus: seg.agent_comment_status || null,
+          reviewStatus: seg.agent_review_status || null,
+          evidenceRefs: Array.isArray(seg.agent_evidence_refs) ? seg.agent_evidence_refs : [],
+        },
       };
     });
 
-  // Restore saved reviews from server-side segment data
+  // Restore saved reviews from server-side segment/highlight data
   const reviews = {};
   rawSegments
     .filter((seg) => seg && typeof seg === "object" && seg.review)
@@ -447,17 +623,17 @@ export function normalizeEditorData(payload) {
 
   return {
     job_id: jobId,
-    status: payload.status || job.status || "unknown",
+    status: status,
     video: {
-      duration: Number(rawVideo.duration) || 0,
+      duration: videoDuration,
       filename: rawVideo.filename || "",
-      path: rawVideo.path || rawVideo.url || null,
+      // 新后端：video.url 直接可用；旧后端：video.path 需拼接
+      url: videoUrl,
+      path: videoPath,
     },
     segments: segments,
-    agent_comments: agentComments,
-    keyframes: Array.isArray(payload.keyframes)
-      ? payload.keyframes.filter((kf) => kf && typeof kf === "object")
-      : [],
+    // agent_comments 不再从 /editor 聚合数据中读取 — 由 /report-data 独立加载
+    agent_comments: [],
     output: payload.output || {},
     reviews: reviews,
     actions_enabled: payload.actions_enabled !== false,
@@ -477,8 +653,9 @@ export function applyEditorData(payload) {
   editorState.editorData = data;
   editorState.video = data.video || null;
   editorState.segments = Array.isArray(data.segments) ? data.segments : [];
-  editorState.agentComments = Array.isArray(data.agent_comments) ? data.agent_comments : [];
-  editorState.keyframes = Array.isArray(data.keyframes) ? data.keyframes : [];
+  editorState.agentReport = null;
+  editorState.agentComments = [];
+  editorState.keyframes = [];
   editorState.output = data.output || null;
   editorState.reviews = data.reviews || {};
   editorState.dirty = false;
@@ -534,6 +711,9 @@ export function applyEditorData(payload) {
 
   // Check for auto-saved draft
   checkDraft();
+
+  // 独立加载完整 Agent 报告（新后端 /report-data，不再从 /editor 聚合数据中内嵌）
+  loadAgentReport(editorState.jobId);
 
   if (editorState.segments.length > 0) {
     selectSegment(editorState.segments[0].id);

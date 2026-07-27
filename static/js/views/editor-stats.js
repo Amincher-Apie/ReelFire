@@ -3,6 +3,11 @@ import { editorState } from "../state/editor-state.js";
 import { byId } from "../utils/dom.js";
 import { getCanvasColors, setupHiDPI } from "../utils/canvas.js";
 
+// Canvas-friendly font stack that renders crisply at small sizes
+const CHART_FONT = "600 11px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+const CHART_FONT_SM = "600 10px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+const CHART_FONT_EMPTY = "13px -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
+
 // ── stats dashboard ───────────────────────────────────────────────────
 
 export function renderStatsDashboard() {
@@ -61,39 +66,42 @@ export function showStatsDialog() {
 export function drawScoreDistribution(canvas) {
   if (!canvas) return;
   const W = canvas.parentElement ? canvas.parentElement.clientWidth - 32 : 380;
-  const H = 200;
+  const H = 220;
   const ctx = setupHiDPI(canvas, W, H);
   const colors = getCanvasColors();
   const segs = editorState.segments;
   if (!segs.length) {
     ctx.fillStyle = colors.textFaint;
-    ctx.font = "12px " + getComputedStyle(document.body).fontFamily;
+    ctx.font = CHART_FONT_EMPTY;
     ctx.textAlign = "center";
     ctx.fillText("无片段数据", W / 2, H / 2);
     return;
   }
 
   const barMaxW = Math.min(40, (W - 80) / segs.length);
-  const gap = Math.max(4, (W - 80 - barMaxW * segs.length) / (segs.length + 1));
-  const chartBottom = H - 28;
-  const chartTop = 20;
+  const gap = Math.max(6, (W - 80 - barMaxW * segs.length) / (segs.length + 1));
+  const chartBottom = H - 32;
+  const chartTop = 24;
 
   segs.forEach((seg, i) => {
     const x = 40 + gap + i * (barMaxW + gap);
-    const barH = ((chartBottom - chartTop) * (Number(seg.score) || 0));
+    const barH = Math.max(2, (chartBottom - chartTop) * (Number(seg.score) || 0));
     const y = chartBottom - barH;
 
     ctx.fillStyle = colors.accent;
     ctx.fillRect(x, y, barMaxW, barH);
 
+    // Segment ID label — truncate long names
+    const label = (seg.id || ("#" + (i + 1)));
+    const displayLabel = label.length > 8 ? label.slice(0, 7) + "…" : label;
     ctx.fillStyle = colors.textFaint;
-    ctx.font = "9px " + getComputedStyle(document.body).fontFamily;
+    ctx.font = CHART_FONT_SM;
     ctx.textAlign = "center";
-    ctx.fillText(seg.id || ("#" + (i + 1)), x + barMaxW / 2, chartBottom + 14);
+    ctx.fillText(displayLabel, x + barMaxW / 2, chartBottom + 15);
 
     ctx.fillStyle = colors.textMuted;
-    ctx.font = "600 9px " + getComputedStyle(document.body).fontFamily;
-    ctx.fillText(Math.round((Number(seg.score) || 0) * 100), x + barMaxW / 2, y - 4);
+    ctx.font = CHART_FONT_SM;
+    ctx.fillText(Math.round((Number(seg.score) || 0) * 100), x + barMaxW / 2, y - 5);
   });
 
   ctx.strokeStyle = colors.border;
@@ -106,13 +114,13 @@ export function drawScoreDistribution(canvas) {
 export function drawDurationChart(canvas) {
   if (!canvas) return;
   const W = canvas.parentElement ? canvas.parentElement.clientWidth - 32 : 380;
-  const H = 200;
+  const H = 220;
   const ctx = setupHiDPI(canvas, W, H);
   const colors = getCanvasColors();
   const segs = editorState.segments;
   if (!segs.length) {
     ctx.fillStyle = colors.textFaint;
-    ctx.font = "12px " + getComputedStyle(document.body).fontFamily;
+    ctx.font = CHART_FONT_EMPTY;
     ctx.textAlign = "center";
     ctx.fillText("无片段数据", W / 2, H / 2);
     return;
@@ -123,26 +131,28 @@ export function drawDurationChart(canvas) {
   if (maxDur <= 0) maxDur = 1;
 
   const barMaxW = Math.min(40, (W - 80) / segs.length);
-  const gap = Math.max(4, (W - 80 - barMaxW * segs.length) / (segs.length + 1));
-  const chartBottom = H - 28;
-  const chartTop = 20;
+  const gap = Math.max(6, (W - 80 - barMaxW * segs.length) / (segs.length + 1));
+  const chartBottom = H - 32;
+  const chartTop = 24;
 
   segs.forEach((seg, i) => {
     const x = 40 + gap + i * (barMaxW + gap);
-    const barH = ((chartBottom - chartTop) * (durations[i] / maxDur));
+    const barH = Math.max(2, (chartBottom - chartTop) * (durations[i] / maxDur));
     const y = chartBottom - barH;
 
     ctx.fillStyle = colors.primary;
     ctx.fillRect(x, y, barMaxW, barH);
 
+    const label = (seg.id || ("#" + (i + 1)));
+    const displayLabel = label.length > 8 ? label.slice(0, 7) + "…" : label;
     ctx.fillStyle = colors.textFaint;
-    ctx.font = "9px " + getComputedStyle(document.body).fontFamily;
+    ctx.font = CHART_FONT_SM;
     ctx.textAlign = "center";
-    ctx.fillText(seg.id || ("#" + (i + 1)), x + barMaxW / 2, chartBottom + 14);
+    ctx.fillText(displayLabel, x + barMaxW / 2, chartBottom + 15);
 
     ctx.fillStyle = colors.textMuted;
-    ctx.font = "600 9px " + getComputedStyle(document.body).fontFamily;
-    ctx.fillText(durations[i].toFixed(1) + "s", x + barMaxW / 2, y - 4);
+    ctx.font = CHART_FONT_SM;
+    ctx.fillText(durations[i].toFixed(1) + "s", x + barMaxW / 2, y - 5);
   });
 
   ctx.strokeStyle = colors.border;
@@ -162,7 +172,7 @@ export function drawReviewPieChart(canvas, counts) {
 
   if (total === 0) {
     ctx.fillStyle = colors.textFaint;
-    ctx.font = "12px " + getComputedStyle(document.body).fontFamily;
+    ctx.font = CHART_FONT_EMPTY;
     ctx.textAlign = "center";
     ctx.fillText("暂无审核数据", cx, cy);
     return;
