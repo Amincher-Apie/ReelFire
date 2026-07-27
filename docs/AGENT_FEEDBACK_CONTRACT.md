@@ -9,6 +9,7 @@ Agent 继续沿用 `agent_report.json.segment_comments[]`，不会另建前端�
 | 字段 | 语义 | 来源 |
 |---|---|---|
 | `segment_id` | 稳定候选片段 ID | CV `segments[].id` |
+| `comment` | 供剪辑者继续润色的片段内容描述初稿；只含时间和可验证画面事实 | 规则校验器依据受控 CV 摘要重建 |
 | `review_status` | `pass/needs_review/reject` | 规则校验器 |
 | `action_recommendation` | `adopt/needs_review/reject` | 与三态审核一一映射 |
 | `explanation.highlight_type` | 可证明的高光候选类型 | CV `reason` 与检测类别 |
@@ -26,9 +27,23 @@ Agent 继续沿用 `agent_report.json.segment_comments[]`，不会另建前端�
 
 - 没有 `kill`、`kill_feed` 或 `kill_notification` 等明确类别时，不生成“击杀”“连续击杀”等事实。
 - 没有检测、没有评分、知识库未命中、置信度不足、模型超时或服务不可用时，片段进入 `needs_review`。
-- CV 精彩度低于 `0.25`、检测证据充分且不属于低置信度时，规则可建议 `reject`；其他低分情况保持 `needs_review`。
+- `segments[].score` 仅作为 CV 候选排序分，不作为具体游戏事件已发生的证明。分数低于 `0.25`、检测证据充分且不属于低置信度时，规则可建议 `reject`；只有角色、阵营或武器检测时，即使分数很高也保持 `needs_review`。
 - 边界附近存在目标证据时，只提示检查起点、终点或两侧，不猜测新的秒数；证据不足时返回 `manual_review`。
 - 模型草稿不能覆盖逐片段事实。最终 `segment_comments[]` 由 `RuleValidatorTool` 从受控 CV 摘要重建。
+- `comment` 与审核决策分离：正文不写候选分、规则名或“建议保留/删除/复核”；这些判断只进入 `score_reason`、`review_status`、`action_recommendation` 和 `explanation`。
+
+### 2.1 评论口吻
+
+评论正文采用简短、自然、有情绪的评论区口吻，并按证据强度分层：
+
+- 有独立 `kill/kill_notification` 事件及时间：可写“8.4 秒出现击杀提示，nice，这波很干净”。
+- 同一片段有两个及以上独立击杀事件：可写“8.4—10.2 秒两次击杀提示紧接着出现，这波连杀节奏完全没断，漂亮”。
+- 有 `clutch/clutch_event`：可写“残局节点出现，压力感拉满，太极限了”。
+- 同时有 CT/T 独立轨迹：按唯一 `track_id` 写“2 名 CT 对 3 名 T、形成 2 打 3”；`enemy_engagement` 可写交火，其余情况只写对峙。武器没有队伍归属字段时只描述“画面中出现 AWP/步枪”，不猜由哪一方使用。
+- 只有人物、武器和高候选分：可写“节奏拉满、这段很有看点”，但不得写击杀、连杀、爆头、残局或胜负。
+- 中低候选分使用“节奏顺畅”“更像过渡段”等语气；候选分只控制表达强弱，不成为事件事实。
+
+同一 `segment_id` 使用稳定模板选择，同一输入重复运行应得到相同评论。
 
 ## 3. CV 必须提供的字段
 

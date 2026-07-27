@@ -1,7 +1,16 @@
 import copy
+import json
+import os
 import unittest
+from io import BytesIO
+from unittest.mock import patch
 
-from agent.tools.knowledge_retriever import KnowledgeRetrieverTool
+from agent.tools.knowledge_retriever import (
+    KnowledgeRetrieverTool,
+    OllamaEmbedder,
+    OpenAICompatibleEmbedder,
+    build_embedder_from_env,
+)
 from agent.tools.report_parser import ReportParserTool, ReportValidationError
 
 
@@ -233,6 +242,102 @@ class KeywordAwareEmbedder:
 class BrokenEmbedder:
     def __call__(self, texts: list[str]) -> list[list[float]]:
         raise TimeoutError("local embedding timed out")
+
+
+class FakeEmbeddingResponse(BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()
+        return False
+
+
+class EmbeddingConfigurationTests(unittest.TestCase):
+    def test_openai_compatible_embedder_uses_shared_api_contract(self) -> None:
+        response = FakeEmbeddingResponse(
+            json.dumps(
+                {
+                    "data": [
+                        {"index": 1, "embedding": [0.3, 0.4]},
+                        {"index": 0, "embedding": [0.1, 0.2]},
+                    ]
+                }
+            ).encode("utf-8")
+        )
+        embedder = OpenAICompatibleEmbedder(
+            api_base="https://embedding.example/v1",
+            api_key="test-only-key",
+            model="team-embedding-model",
+            timeout=5,
+        )
+
+        with patch(
+            "agent.tools.knowledge_retriever.urlopen",
+            return_value=response,
+        ) as mocked_urlopen:
+            vectors = embedder(["first", "second"])
+
+        self.assertEqual(vectors, [[0.1, 0.2], [0.3, 0.4]])
+        request = mocked_urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "https://embedding.example/v1/embeddings")
+        self.assertEqual(request.get_header("Authorization"), "Bearer test-only-key")
+        self.assertEqual(
+            json.loads(request.data.decode("utf-8")),
+            {
+                "model": "team-embedding-model",
+                "input": ["first", "second"],
+            },
+        )
+
+    def test_provider_requires_explicit_selection_and_safe_fallback(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "EMBEDDING_PROVIDER": "",
+                "OLLAMA_EMBED_MODEL": "machine-specific-model",
+            },
+            clear=True,
+        ):
+            self.assertIsNone(build_embedder_from_env())
+
+        with patch.dict(
+            os.environ,
+            {
+                "EMBEDDING_PROVIDER": "openai_compatible",
+                "EMBEDDING_API_BASE": "https://embedding.example/v1",
+                "EMBEDDING_API_KEY": "",
+                "EMBEDDING_MODEL": "team-model",
+            },
+            clear=True,
+        ):
+            self.assertIsNone(build_embedder_from_env())
+
+    def test_provider_builds_api_or_explicit_ollama_adapter(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "EMBEDDING_PROVIDER": "openai_compatible",
+                "EMBEDDING_API_BASE": "https://embedding.example/v1",
+                "EMBEDDING_API_KEY": "test-only-key",
+                "EMBEDDING_MODEL": "team-model",
+            },
+            clear=True,
+        ):
+            self.assertIsInstance(
+                build_embedder_from_env(),
+                OpenAICompatibleEmbedder,
+            )
+
+        with patch.dict(
+            os.environ,
+            {
+                "EMBEDDING_PROVIDER": "ollama",
+                "OLLAMA_EMBED_MODEL": "local-model",
+            },
+            clear=True,
+        ):
+            self.assertIsInstance(build_embedder_from_env(), OllamaEmbedder)
 
 
 class KnowledgeRetrieverToolTests(unittest.TestCase):

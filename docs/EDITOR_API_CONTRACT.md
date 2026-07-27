@@ -64,7 +64,7 @@ Accept: application/json
       "duration": 7.6,
       "score": 0.86,
       "source_keyframes": ["kf_001", "kf_003"],
-      "agent_comment": "该区间的运动变化与场景变化评分较高，建议优先复核。",
+      "agent_comment": "14.2—21.8秒：画面中出现了人物和步枪，其中人物主要出现在 15.0—20.9秒。这段节奏感很强，很有看点，nice！具体事件与本人/队友归属还要结合原片确认。",
       "agent_comment_status": "ready",
       "agent_review_status": "needs_review",
       "agent_evidence_refs": ["ev:segment:seg_001"]
@@ -108,9 +108,9 @@ Accept: application/json
 | `start` | number | 否 | 起始秒数 |
 | `end` | number | 否 | 结束秒数，必须大于 `start` |
 | `duration` | number | 否 | `end - start`，由后端计算 |
-| `score` | number | 是 | YOLO/CV 最终精彩度，范围 `0..1` |
+| `score` | number | 是 | YOLO/CV 候选排序分，范围 `0..1`；不表示已确认的精彩事件 |
 | `source_keyframes` | string[] | 否 | 片段关联关键帧编号 |
-| `agent_comment` | string | 是 | Agent 最终评论；前端不得自行生成替代文本 |
+| `agent_comment` | string | 是 | Agent 生成的片段内容描述初稿，供剪辑者润色；不混入评分和审核建议 |
 | `agent_comment_status` | string | 否 | `ready`、`pending` 或 `unavailable` |
 | `agent_review_status` | string | 是 | Agent 逐片段结论：`pass`、`needs_review`、`reject`；评论未就绪时为 `null` |
 | `agent_evidence_refs` | string[] | 否 | Agent 评论引用的证据编号 |
@@ -128,7 +128,7 @@ Agent 评论状态：
 
 | 状态 | `agent_comment` | 前端行为 |
 | --- | --- | --- |
-| `ready` | 非空字符串 | 显示最终评论 |
+| `ready` | 非空字符串 | 显示片段描述初稿 |
 | `pending` | `null` | 显示“Agent 评论尚未生成” |
 | `unavailable` | `null` | 显示“Agent 评论不可用” |
 
@@ -165,7 +165,7 @@ Editor 1.0 仍只按照上述 `agent_report.json.segment_comments[]` 和带可�
   "segment_comments": [
     {
       "segment_id": "seg_001",
-      "comment": "该区间的运动变化与场景变化评分较高，建议优先复核。",
+      "comment": "12.4—20.8秒：画面中出现了人物和步枪，其中人物主要出现在 13.1—19.8秒。这段节奏感很强，很有看点，nice！具体事件与本人/队友归属还要结合原片确认。",
       "review_status": "needs_review",
       "action_recommendation": "needs_review",
       "explanation": {

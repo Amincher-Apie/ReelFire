@@ -7,6 +7,8 @@ import math
 import os
 from pathlib import Path
 from typing import Any, Callable
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from agent.retrieval.ollama_topk import (
     build_entry_text,
@@ -18,6 +20,97 @@ from agent.retrieval.ollama_topk import (
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_KNOWLEDGE_PATH = ROOT / "agent" / "knowledge" / "media_review_rules.json"
 Embedder = Callable[[list[str]], list[list[float]]]
+
+
+class EmbeddingAPIError(RuntimeError):
+    """Raised when a remote embedding API cannot return usable vectors."""
+
+
+class OpenAICompatibleEmbedder:
+    """Embedding adapter for shared OpenAI-compatible `/embeddings` APIs."""
+
+    provider = "openai_compatible"
+
+    def __init__(
+        self,
+        *,
+        api_base: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        self.api_base = (
+            api_base if api_base is not None else os.getenv("EMBEDDING_API_BASE", "")
+        ).strip()
+        self.api_key = (
+            api_key if api_key is not None else os.getenv("EMBEDDING_API_KEY", "")
+        ).strip()
+        self.model = (
+            model if model is not None else os.getenv("EMBEDDING_MODEL", "")
+        ).strip()
+        self.timeout = (
+            timeout
+            if timeout is not None
+            else _positive_float_env("EMBEDDING_TIMEOUT_SECONDS", 30.0)
+        )
+        if not self.api_base:
+            raise ValueError("Set EMBEDDING_API_BASE for API embeddings.")
+        if not self.api_key:
+            raise ValueError("Set EMBEDDING_API_KEY for API embeddings.")
+        if not self.model:
+            raise ValueError("Set EMBEDDING_MODEL for API embeddings.")
+        if self.timeout <= 0:
+            raise ValueError("Embedding timeout must be positive.")
+
+    @property
+    def endpoint(self) -> str:
+        base = self.api_base.rstrip("/")
+        return base if base.endswith("/embeddings") else f"{base}/embeddings"
+
+    def __call__(self, texts: list[str]) -> list[list[float]]:
+        request = Request(
+            self.endpoint,
+            data=json.dumps(
+                {"model": self.model, "input": texts},
+                ensure_ascii=False,
+            ).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                payload = json.load(response)
+        except HTTPError as exc:
+            raise EmbeddingAPIError(
+                f"embedding_api_http_{exc.code}"
+            ) from exc
+        except (URLError, TimeoutError) as exc:
+            raise EmbeddingAPIError("embedding_api_unavailable") from exc
+
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, list):
+            raise EmbeddingAPIError("embedding_api_invalid_response")
+        try:
+            ordered = sorted(data, key=lambda item: int(item.get("index", 0)))
+            return [item["embedding"] for item in ordered]
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise EmbeddingAPIError("embedding_api_invalid_response") from exc
+
+
+def _positive_float_env(name: str, default: float) -> float:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive number.") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive number.")
+    return value
 
 
 class OllamaEmbedder:
@@ -47,6 +140,35 @@ class OllamaEmbedder:
             texts,
             timeout=self.timeout,
         )
+
+
+def build_embedder_from_env() -> Embedder | None:
+    """Build the explicitly selected embedding provider.
+
+    Local Ollama is never selected implicitly because its installed model and
+    endpoint vary by workstation. Missing shared-API credentials intentionally
+    return ``None`` so retrieval falls back to deterministic rules.
+    """
+
+    provider = os.getenv("EMBEDDING_PROVIDER", "disabled").strip().casefold()
+    if provider in {"", "disabled", "none", "off", "rule_only"}:
+        return None
+    if provider in {"openai_compatible", "api", "remote"}:
+        required = (
+            os.getenv("EMBEDDING_API_BASE", "").strip(),
+            os.getenv("EMBEDDING_API_KEY", "").strip(),
+            os.getenv("EMBEDDING_MODEL", "").strip(),
+        )
+        if not all(required):
+            return None
+        return OpenAICompatibleEmbedder()
+    if provider == "ollama":
+        if not os.getenv("OLLAMA_EMBED_MODEL", "").strip():
+            return None
+        return OllamaEmbedder()
+    raise ValueError(
+        "EMBEDDING_PROVIDER must be openai_compatible, ollama, or disabled."
+    )
 
 
 class KnowledgeRetrieverTool:

@@ -76,7 +76,23 @@ class ReelFireContractTests(unittest.TestCase):
             result["segment_comments"][0]["segment_id"],
             "seg_001",
         )
-        self.assertIn("0.735", result["segment_comments"][0]["comment"])
+        self.assertIn("2.0—10.0秒", result["segment_comments"][0]["comment"])
+        self.assertIn(
+            "画面",
+            result["segment_comments"][0]["comment"],
+        )
+        self.assertIn(
+            "具体事件与本人/队友归属还要结合原片确认",
+            result["segment_comments"][0]["comment"],
+        )
+        self.assertNotIn("候选排序分", result["segment_comments"][0]["comment"])
+        self.assertNotIn("建议", result["segment_comments"][0]["comment"])
+        self.assertNotIn("置信度", result["segment_comments"][0]["comment"])
+        self.assertNotIn("帧", result["segment_comments"][0]["comment"])
+        self.assertEqual(
+            result["segment_comments"][0]["review_status"],
+            "needs_review",
+        )
 
     def test_backend_mapping_uses_backend_status_and_tool_fields(self) -> None:
         result = self.service.run_analysis_report(
@@ -185,12 +201,7 @@ class ReelFireContractTests(unittest.TestCase):
         self.assertIn("敌方角色", comments[0]["comment"])
         self.assertIn("CT角色", comments[1]["comment"])
         self.assertIn("步枪", comments[1]["comment"])
-        self.assertTrue(
-            all(
-                "未提供可验证的片段评分" in item["comment"]
-                for item in comments
-            )
-        )
+        self.assertTrue(all("建议" not in item["comment"] for item in comments))
         serialized = json.dumps(comments, ensure_ascii=False)
         self.assertNotIn("击杀", serialized)
         self.assertNotIn("爆头", serialized)
@@ -227,6 +238,201 @@ class ReelFireContractTests(unittest.TestCase):
                     "manual_review",
                 },
             )
+
+    def test_track_count_is_not_presented_as_kill_or_confirmed_highlight(self) -> None:
+        highlights = cv_highlight_report()
+        segment = highlights["segments"][1]
+        segment["score"] = 1.0
+        segment["reason"] = "enemy_engagement_multi_kill"
+
+        result = self.service.run_analysis_report(
+            cv_analysis_report(),
+            provider={"type": "rule_only"},
+            highlight_report=highlights,
+        )
+        comment = result["segment_comments"][1]
+
+        self.assertEqual(comment["review_status"], "needs_review")
+        self.assertEqual(
+            comment["explanation"]["highlight_type"],
+            "角色目标出现候选",
+        )
+        self.assertEqual(
+            comment["explanation"]["trigger_rule"],
+            "enemy_engagement",
+        )
+        self.assertTrue(comment["comment"].startswith("7.0—11.5秒："))
+        self.assertIn("具体事件与本人/队友归属还要结合原片确认", comment["comment"])
+        self.assertNotIn("候选排序分", comment["comment"])
+        self.assertNotIn("建议", comment["comment"])
+        self.assertNotIn("优先", comment["comment"])
+        self.assertNotIn("multi_kill", comment["comment"])
+        self.assertNotIn("连杀", comment["comment"])
+
+    def test_explicit_kill_events_generate_comment_style_multi_kill_copy(self) -> None:
+        highlights = cv_highlight_report()
+        segment = highlights["segments"][1]
+        segment["score"] = 0.95
+        segment["reason"] = "kill_notification"
+        segment["detected_classes"].append("kill_notification")
+        segment["detections_summary"].extend(
+            [
+                {
+                    "track_id": 31,
+                    "class": "kill_notification",
+                    "first_seen": 8.4,
+                    "last_seen": 8.6,
+                    "detection_count": 2,
+                    "confidence": 0.96,
+                    "confidence_max": 0.98,
+                    "confidence_min": 0.94,
+                },
+                {
+                    "track_id": 32,
+                    "class": "kill_notification",
+                    "first_seen": 10.2,
+                    "last_seen": 10.4,
+                    "detection_count": 2,
+                    "confidence": 0.95,
+                    "confidence_max": 0.97,
+                    "confidence_min": 0.93,
+                },
+            ]
+        )
+
+        result = self.service.run_analysis_report(
+            cv_analysis_report(),
+            provider={"type": "rule_only"},
+            highlight_report=highlights,
+        )
+        comment = result["segment_comments"][1]
+
+        self.assertEqual(comment["review_status"], "pass")
+        self.assertIn("8.4—10.2秒", comment["comment"])
+        self.assertTrue(
+            any(
+                term in comment["comment"]
+                for term in ("2次击杀提示", "两次击杀提示")
+            )
+        )
+        self.assertIn("连杀", comment["comment"])
+        self.assertTrue(
+            any(term in comment["comment"] for term in ("nice", "漂亮", "拉满"))
+        )
+
+    def test_single_kill_and_clutch_events_use_distinct_emotional_copy(self) -> None:
+        cases = (
+            (
+                "kill_notification",
+                9.1,
+                ("击杀", "nice"),
+                ("连杀",),
+            ),
+            (
+                "clutch_event",
+                9.4,
+                ("残局",),
+                ("击杀", "连杀"),
+            ),
+        )
+        for event_class, timestamp, required, forbidden in cases:
+            with self.subTest(event_class=event_class):
+                highlights = cv_highlight_report()
+                segment = highlights["segments"][1]
+                segment["score"] = 0.95
+                segment["reason"] = event_class
+                segment["detected_classes"].append(event_class)
+                segment["detections_summary"].append(
+                    {
+                        "track_id": 40,
+                        "class": event_class,
+                        "first_seen": timestamp,
+                        "last_seen": timestamp + 0.2,
+                        "detection_count": 2,
+                        "confidence": 0.96,
+                        "confidence_max": 0.98,
+                        "confidence_min": 0.94,
+                    }
+                )
+
+                result = self.service.run_analysis_report(
+                    cv_analysis_report(),
+                    provider={"type": "rule_only"},
+                    highlight_report=highlights,
+                )
+                text = result["segment_comments"][1]["comment"]
+
+                self.assertIn(f"{timestamp:.1f}秒", text)
+                self.assertTrue(all(term in text for term in required))
+                self.assertTrue(all(term not in text for term in forbidden))
+
+    def test_team_tracks_generate_timed_ct_vs_t_engagement_comment(self) -> None:
+        highlights = cv_highlight_report()
+        segment = highlights["segments"][1]
+        segment["score"] = 0.91
+        segment["reason"] = "enemy_engagement"
+        segment["detected_classes"].append("character_t")
+        segment["detections_summary"].extend(
+            [
+                {
+                    "track_id": 23,
+                    "class": "character_ct",
+                    "first_seen": 7.5,
+                    "last_seen": 10.4,
+                    "detection_count": 12,
+                    "confidence": 0.78,
+                    "confidence_max": 0.93,
+                    "confidence_min": 0.61,
+                },
+                {
+                    "track_id": 24,
+                    "class": "character_t",
+                    "first_seen": 7.8,
+                    "last_seen": 10.5,
+                    "detection_count": 11,
+                    "confidence": 0.8,
+                    "confidence_max": 0.94,
+                    "confidence_min": 0.63,
+                },
+                {
+                    "track_id": 25,
+                    "class": "character_t",
+                    "first_seen": 8.0,
+                    "last_seen": 10.7,
+                    "detection_count": 10,
+                    "confidence": 0.79,
+                    "confidence_max": 0.92,
+                    "confidence_min": 0.62,
+                },
+                {
+                    "track_id": 26,
+                    "class": "character_t",
+                    "first_seen": 8.3,
+                    "last_seen": 10.1,
+                    "detection_count": 8,
+                    "confidence": 0.77,
+                    "confidence_max": 0.9,
+                    "confidence_min": 0.6,
+                },
+            ]
+        )
+
+        result = self.service.run_analysis_report(
+            cv_analysis_report(),
+            provider={"type": "rule_only"},
+            highlight_report=highlights,
+        )
+        text = result["segment_comments"][1]["comment"]
+
+        self.assertIn("7.8—10.7秒", text)
+        self.assertIn("2名CT", text)
+        self.assertIn("3名T", text)
+        self.assertIn("2打3", text)
+        self.assertIn("交火", text)
+        self.assertNotIn("画面中还出现了步枪", text)
+        self.assertIn("T一侧人更多", text)
+        self.assertIn("CT这波压力不小", text)
+        self.assertNotIn("击杀", text)
 
     def test_explanation_maps_keyframes_boxes_and_low_confidence(self) -> None:
         report = cv_analysis_report()

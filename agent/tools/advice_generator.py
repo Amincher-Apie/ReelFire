@@ -194,14 +194,14 @@ class AdviceGeneratorTool:
             )
             summary = (
                 f"共采样 {visual_summary.get('total_sampled_frames', 0)} 帧，"
-                f"检测到 {class_text}；最高精彩度 {max_highlight:.3f}，"
+                f"检测到 {class_text}；最高候选排序分 {max_highlight:.3f}，"
                 f"候选片段 {visual_summary.get('segment_count', 0)} 个。"
             )
         else:
             summary = (
                 f"共采样 {visual_summary.get('total_sampled_frames', 0)} 帧，"
                 "没有可靠目标类别证据；"
-                f"最高精彩度 {max_highlight:.3f}，需人工复核。"
+                f"最高候选排序分 {max_highlight:.3f}，需人工复核。"
             )
 
         active_recommendations = [

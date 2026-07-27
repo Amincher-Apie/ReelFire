@@ -120,9 +120,22 @@ Dify 部署、应用类型、输入输出契约、版本、DSL 和跨电脑验�
 
 1. Day 01 验收使用本地 Ollama 对 12 个媒体审核条目生成真实 Embedding；
 2. 检索参数冻结为 Top-K `5`、最低分 `0.45`，相似度算法为 Cosine；
-3. Ollama 模型名从 `OLLAMA_EMBED_MODEL` 读取，小数据量直接在内存中计算余弦相似度；
-4. 向量服务不可用时降级为关键词、类别和指标条件检索，并把调用状态标为 `degraded`；
-5. 最终结果必须返回 `knowledge_id`、相似度和具体命中原因，保证检索可验证。
+3. Day 01 的 Ollama 记录只作为真实验收证据；团队运行由 `EMBEDDING_PROVIDER` 显式选择 `openai_compatible`、`ollama` 或 `disabled`，不会因为某台电脑碰巧安装了 Ollama 就自动启用；
+4. 跨电脑联调推荐所有成员使用相同的 `EMBEDDING_API_BASE`、`EMBEDDING_MODEL` 和分别安全配置的 `EMBEDDING_API_KEY`；真实 Key 不进入 Git；
+5. 向量服务未配置或不可用时降级为关键词、类别和指标条件检索，并把调用状态标为 `degraded`；
+6. 最终结果必须返回 `knowledge_id`、相似度和具体命中原因，保证检索可验证。
+
+团队共享 API 配置示例：
+
+```dotenv
+EMBEDDING_PROVIDER=openai_compatible
+EMBEDDING_API_BASE=https://your-provider.example/v1
+EMBEDDING_API_KEY=
+EMBEDDING_MODEL=your-embedding-model
+EMBEDDING_TIMEOUT_SECONDS=30
+```
+
+仅需离线规则检索时设置 `EMBEDDING_PROVIDER=disabled`。只有明确接受每台电脑模型可能不同的本地开发场景，才设置 `EMBEDDING_PROVIDER=ollama` 并填写 `OLLAMA_EMBED_MODEL`。
 
 知识来源表位于 `agent/knowledge/SOURCES.md`，可选的 Dify 上传源位于
 `agent/knowledge/dify_media_review_rules.md`，真实检索记录位于

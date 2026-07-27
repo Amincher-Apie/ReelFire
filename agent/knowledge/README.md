@@ -30,7 +30,7 @@ Score Threshold：0.45
 `docs/evidence/ollama_topk_results.json`。结果由
 `agent/retrieval/ollama_topk.py` 调用 `/api/embed` 生成，禁止手工伪造相似度。
 
-本地 Embedding 配置从环境变量读取：
+Day 01 的本地 Embedding 配置从环境变量读取：
 
 ```text
 OLLAMA_BASE_URL=http://127.0.0.1:11434
@@ -39,6 +39,19 @@ OLLAMA_EMBED_MODEL=<本机实际安装的 Embedding 模型>
 
 不提交模型文件。可使用 `qwen3-embedding`、`bge-m3` 或其他实际可运行的
 Embedding 模型，但最终报告必须记录真实模型名称。
+
+团队部署不隐式复用本机 Ollama。运行时必须显式选择：
+
+```text
+EMBEDDING_PROVIDER=openai_compatible  # 推荐，所有机器使用同一 API 和模型
+EMBEDDING_API_BASE=<OpenAI-compatible API 的 /v1 基础地址>
+EMBEDDING_API_KEY=<只写在各自 .env，不提交>
+EMBEDDING_MODEL=<团队统一的 Embedding 模型名>
+```
+
+若暂时没有共享 API，设置 `EMBEDDING_PROVIDER=disabled`，系统会明确标记
+`degraded` 并使用关键词、类别和指标规则检索；不会伪装成向量检索成功。
+`EMBEDDING_PROVIDER=ollama` 只用于成员主动选择的本机开发环境。
 
 Dify 或 Coze 的平台结果仍要转换为统一的 `knowledge_id`、相似度和命中原因。
 

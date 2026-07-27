@@ -98,7 +98,25 @@ python -m agent.check_dify
 `retryable=false`，重复点击不会解决问题，应先修复 Key、应用类型或 Answer
 输出；网络、429 和 5xx 才允许有限重试。
 
-## 4. 输入契约
+## 4. Embedding 与 Dify 应用 Key 的边界
+
+`DIFY_API_KEY` 只用于调用已发布的 ReelFire Chatflow，不能当作 Embedding
+服务的 Key。知识库向量检索由后端独立配置，团队机器必须显式选择同一种方式：
+
+```dotenv
+EMBEDDING_PROVIDER=openai_compatible
+EMBEDDING_API_BASE=https://your-provider.example/v1
+EMBEDDING_API_KEY=
+EMBEDDING_MODEL=your-embedding-model
+EMBEDDING_TIMEOUT_SECONDS=30
+```
+
+- 推荐所有成员使用同一 API 地址和模型；真实 Key 分别放在各自被 Git 忽略的 `.env`。
+- 暂无共享 Embedding API 时设置 `EMBEDDING_PROVIDER=disabled`，系统会明确降级为规则检索。
+- `EMBEDDING_PROVIDER=ollama` 只适合主动选择的本机开发，不作为团队默认值。
+- 代码不会再因为电脑上存在 `OLLAMA_EMBED_MODEL` 就自动切换到本机 Ollama。
+
+## 5. 输入契约
 
 适配器向 Chatflow 发送：
 
@@ -121,7 +139,7 @@ python -m agent.check_dify
 `用户输入.query`；它对应 API 请求体中的顶层 `query` 字段，不是自定义
 `inputs` 字段。`直接回复` 只引用 `LLM.text`，不添加解释、标题或 Markdown。
 
-## 5. 输出契约
+## 6. 输出契约
 
 Dify HTTP 响应的 `answer` 必须是可解析的 JSON 对象字符串。业务草稿至少包含：
 
@@ -158,7 +176,7 @@ Dify HTTP 响应的 `answer` 必须是可解析的 JSON 对象字符串。业务
 模型输出的 `segment_comments` 不作为最终事实；本地 `RuleValidatorTool` 会根据
 CV 的真实 `segments[]` 和 `ev:segment:<segment_id>` 重新生成最终评论。
 
-## 6. 真实运行
+## 7. 真实运行
 
 先找到 CV 生成的真实报告，然后执行：
 
@@ -181,7 +199,7 @@ python -m agent.run_agent `
 验收完整的 `completed` 链路，还需启动 Ollama 并准备 `.env.example` 中指定的
 Embedding 模型。
 
-## 7. 平台实测与版本交付
+## 8. 平台实测与版本交付
 
 2026-07-27 已在 Dify Cloud 创建上述真实 Chatflow，并在平台预览中使用
 `seg_001`、时间区间 `10.2-16.8`、类别 `person`、置信度 `0.82`、轨迹编号

@@ -24,6 +24,7 @@ PROMPT_PATH = ROOT / "agent" / "prompts" / "review_agent_v3.md"
 WORKFLOW_PATH = ROOT / "docs" / "AGENT_WORKFLOW.md"
 ENV_EXAMPLE_PATH = ROOT / ".env.example"
 DIFY_HANDOFF_PATH = ROOT / "docs" / "DIFY_CONFIGURATION_HANDOFF.md"
+DIFY_DSL_PATH = ROOT / "agent" / "dify" / "reelfire_chatflow_v1.0.0.yml"
 
 
 def load_json(path: Path) -> dict:
@@ -168,10 +169,21 @@ class AgentSchemaAndPromptTests(unittest.TestCase):
         self.assertIn("DIFY_BASE_URL=https://api.dify.ai", lines)
         self.assertIn("DIFY_API_KEY=", lines)
         self.assertIn("DIFY_MODEL_LABEL=reelfire-chatflow-v1.0.0", lines)
+        self.assertIn("EMBEDDING_PROVIDER=openai_compatible", lines)
+        self.assertIn("EMBEDDING_API_BASE=", lines)
+        self.assertIn("EMBEDDING_API_KEY=", lines)
+        self.assertIn("EMBEDDING_MODEL=", lines)
         self.assertFalse(
             any(
                 line.startswith("DIFY_API_KEY=")
                 and line != "DIFY_API_KEY="
+                for line in lines
+            )
+        )
+        self.assertFalse(
+            any(
+                line.startswith("EMBEDDING_API_KEY=")
+                and line != "EMBEDDING_API_KEY="
                 for line in lines
             )
         )
@@ -187,6 +199,8 @@ class AgentSchemaAndPromptTests(unittest.TestCase):
             "python -m agent.check_dify",
             '"inputs": {}',
             '"response_mode": "blocking"',
+            "EMBEDDING_PROVIDER=openai_compatible",
+            "DIFY_API_KEY` 只用于调用已发布的 ReelFire Chatflow",
         ):
             self.assertIn(expected, handoff)
         for line in handoff.splitlines():
@@ -288,7 +302,17 @@ class AgentSchemaAndPromptTests(unittest.TestCase):
         self.assertIn("检测框", prompt)
         self.assertIn("边界建议", prompt)
         self.assertIn("needs_review", prompt)
+        self.assertIn("片段内容描述初稿", prompt)
+        self.assertIn("不得写候选分、规则名、审核状态", prompt)
+        self.assertIn("高候选分只能影响语气强弱，不能补造事件", prompt)
+        self.assertIn("按唯一 `track_id` 写“几打几”", prompt)
         self.assertRegex(prompt, re.compile(r"禁止生成.*击杀.*爆头"))
+
+        dsl = DIFY_DSL_PATH.read_text(encoding="utf-8")
+        self.assertIn("片段内容描述初稿", dsl)
+        self.assertIn("不得写候选分、规则名、审核状态", dsl)
+        self.assertIn("高候选分只能影响语气强弱，不能补造事件", dsl)
+        self.assertIn("按唯一 `track_id` 写“几打几”", dsl)
 
         workflow = WORKFLOW_PATH.read_text(encoding="utf-8").casefold()
         for provider in ("ollama", "dify", "coze", "rule_only"):

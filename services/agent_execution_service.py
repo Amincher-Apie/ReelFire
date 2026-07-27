@@ -17,7 +17,11 @@ from typing import TYPE_CHECKING, Any, Callable
 from agent.integrations import to_backend_agent_call
 from agent.providers import DifyChatClient, OllamaChatClient
 from agent.service import AgentService
-from agent.tools import AdviceGeneratorTool, KnowledgeRetrieverTool, OllamaEmbedder
+from agent.tools import (
+    AdviceGeneratorTool,
+    KnowledgeRetrieverTool,
+    build_embedder_from_env,
+)
 from services.agent_call_service import (
     complete_agent_call,
     fail_agent_call,
@@ -213,9 +217,8 @@ class AgentExecutionService:
         elif self.provider == "ollama":
             client = OllamaChatClient()
         embedder = (
-            OllamaEmbedder()
+            build_embedder_from_env()
             if self.provider != "rule_only"
-            and os.getenv("OLLAMA_EMBED_MODEL")
             else None
         )
         model = client.model if client is not None else "deterministic-v1"

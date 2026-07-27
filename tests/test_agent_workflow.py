@@ -140,6 +140,13 @@ class EmptyRetriever:
         }
 
 
+class EmptyTagsModelClient(ValidModelClient):
+    def generate(self, job_id, visual_summary, knowledge_context):
+        result = super().generate(job_id, visual_summary, knowledge_context)
+        result["tags"] = []
+        return result
+
+
 class BrokenGenerator:
     def run(self, visual_summary, retrieval, *, requested_provider):
         raise RuntimeError("generation backend crashed")
@@ -190,10 +197,35 @@ class AgentWorkflowTests(unittest.TestCase):
             ],
         )
         self.assertTrue(
-            all(item["status"] == "completed" for item in result["trace"]["tools"])
+            all(
+                item["status"] == "completed"
+                for item in result["trace"]["tools"]
+            )
         )
         self.assertFalse(result["trace"]["degraded"])
         self.assertEqual(len(result["trace"]["input_summary_hash"]), 64)
+
+    def test_empty_model_tags_are_rebuilt_from_detection_evidence(self) -> None:
+        payload = agent_input()
+        payload["provider"] = {
+            "type": "ollama",
+            "model": "test-chat-model",
+        }
+
+        result = self.completed_service(EmptyTagsModelClient()).run(payload)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertTrue(result["tags"])
+        self.assertEqual(
+            {item["name"] for item in result["tags"]},
+            {"person", "car"},
+        )
+        self.assertTrue(
+            all(
+                "不代表具体游戏事件" in item["description"]
+                for item in result["tags"]
+            )
+        )
 
     def test_valid_model_draft_is_used(self) -> None:
         result = self.completed_service(ValidModelClient()).run(agent_input())

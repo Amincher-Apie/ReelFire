@@ -85,7 +85,21 @@ Key 为空、Dify 超时、返回非 JSON 或引用不合法时，工作流会�
 兼容错误码之外保存提供方错误类型和实际尝试次数，但不会保存 API Key 或完整
 请求头。Day 04 验收矩阵见 `docs/evidence/DAY04_AGENT_ACCEPTANCE.md`。
 
-本地 Ollama 调用示例：
+团队运行推荐通过统一工厂选择 Embedding：
+
+```python
+from agent.tools import KnowledgeRetrieverTool, build_embedder_from_env
+
+retrieval = KnowledgeRetrieverTool(
+    embedder=build_embedder_from_env()
+).run(visual_summary)
+```
+
+共享 API 使用 `EMBEDDING_PROVIDER=openai_compatible`，并在各自 `.env` 中配置
+相同的 `EMBEDDING_API_BASE`、`EMBEDDING_MODEL` 和有效 `EMBEDDING_API_KEY`。
+Key 为空时会安全降级为规则检索，不会自动改用某台机器上的 Ollama。
+
+本地 Ollama 仅用于显式选择的开发环境：
 
 ```python
 from agent.tools import KnowledgeRetrieverTool, OllamaEmbedder, ReportParserTool
@@ -101,6 +115,7 @@ retrieval = KnowledgeRetrieverTool(embedder=OllamaEmbedder()).run(
 ```powershell
 $env:OLLAMA_BASE_URL='http://127.0.0.1:11434'
 $env:OLLAMA_EMBED_MODEL='qwen3-embedding:0.6b'
+$env:EMBEDDING_PROVIDER='ollama'
 ```
 
 工具不会把 `ai_cover_prompt` 中未被检测模型证明的事件提升为事实。可引用事实只能来自受控摘要的 `evidence_refs` 和检索结果中的 `knowledge_id`。
@@ -112,10 +127,10 @@ from pathlib import Path
 
 from agent.providers import OllamaChatClient
 from agent.service import AgentService
-from agent.tools import AdviceGeneratorTool, KnowledgeRetrieverTool, OllamaEmbedder
+from agent.tools import AdviceGeneratorTool, KnowledgeRetrieverTool, build_embedder_from_env
 
 service = AgentService(
-    knowledge_retriever=KnowledgeRetrieverTool(embedder=OllamaEmbedder()),
+    knowledge_retriever=KnowledgeRetrieverTool(embedder=build_embedder_from_env()),
     advice_generator=AdviceGeneratorTool(model_client=OllamaChatClient()),
 )
 agent_report = service.run(agent_input, output_dir=Path("outputs/job_id"))
