@@ -291,6 +291,13 @@
                 "type": "integer",
                 "minimum": 0
               },
+              "consecutive_frame_count": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
               "confidence": {
                 "type": "number",
                 "minimum": 0,

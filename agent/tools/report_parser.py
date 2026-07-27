@@ -242,7 +242,11 @@ class ReportParserTool:
                 lambda: {
                     "detection_count": 0,
                     "track_ids": set(),
+                    "confidence_sum": 0.0,
                     "max_confidence": 0.0,
+                    "first_seen": None,
+                    "last_seen": None,
+                    "consecutive_frame_count": None,
                     "evidence_refs": [],
                 }
             )
@@ -253,9 +257,20 @@ class ReportParserTool:
                 for detection_index, detected in enumerate(frame["objects"]):
                     stats = segment_classes[detected["class"]]
                     stats["detection_count"] += 1
+                    stats["confidence_sum"] += detected["confidence"]
                     stats["max_confidence"] = max(
                         stats["max_confidence"],
                         detected["confidence"],
+                    )
+                    stats["first_seen"] = (
+                        frame["timestamp"]
+                        if stats["first_seen"] is None
+                        else min(stats["first_seen"], frame["timestamp"])
+                    )
+                    stats["last_seen"] = (
+                        frame["timestamp"]
+                        if stats["last_seen"] is None
+                        else max(stats["last_seen"], frame["timestamp"])
                     )
                     stats["evidence_refs"].append(
                         f"ev:detection:{source_id}:{detection_index:03d}"
@@ -268,10 +283,29 @@ class ReportParserTool:
                 )
                 if detected["track_id"] is not None:
                     stats["track_ids"].add(detected["track_id"])
+                stats["confidence_sum"] = max(
+                    stats["confidence_sum"],
+                    detected["confidence"] * detected["detection_count"],
+                )
                 stats["max_confidence"] = max(
                     stats["max_confidence"],
                     detected["confidence_max"],
                 )
+                stats["first_seen"] = (
+                    detected["first_seen"]
+                    if stats["first_seen"] is None
+                    else min(stats["first_seen"], detected["first_seen"])
+                )
+                stats["last_seen"] = (
+                    detected["last_seen"]
+                    if stats["last_seen"] is None
+                    else max(stats["last_seen"], detected["last_seen"])
+                )
+                if detected.get("consecutive_frame_count") is not None:
+                    stats["consecutive_frame_count"] = max(
+                        stats["consecutive_frame_count"] or 0,
+                        detected["consecutive_frame_count"],
+                    )
                 stats["evidence_refs"].append(ref_id)
             for class_name in item["detected_classes"]:
                 segment_classes[class_name]["evidence_refs"].append(ref_id)
@@ -281,7 +315,17 @@ class ReportParserTool:
                     "name": class_name,
                     "detection_count": details["detection_count"],
                     "track_count": len(details["track_ids"]),
+                    "first_seen": details["first_seen"],
+                    "last_seen": details["last_seen"],
+                    "average_confidence": _round(
+                        details["confidence_sum"] / details["detection_count"]
+                        if details["detection_count"]
+                        else 0.0
+                    ),
                     "max_confidence": _round(details["max_confidence"]),
+                    "consecutive_frame_count": details[
+                        "consecutive_frame_count"
+                    ],
                     "evidence_refs": list(
                         dict.fromkeys(details["evidence_refs"])
                     ),
@@ -605,6 +649,20 @@ class ReportParserTool:
                 raise ReportValidationError(
                     f"{field}.detection_count 必须是非负整数"
                 )
+            consecutive_frame_count = item.get("consecutive_frame_count")
+            if (
+                isinstance(consecutive_frame_count, bool)
+                or (
+                    consecutive_frame_count is not None
+                    and (
+                        not isinstance(consecutive_frame_count, int)
+                        or consecutive_frame_count < 0
+                    )
+                )
+            ):
+                raise ReportValidationError(
+                    f"{field}.consecutive_frame_count 必须是非负整数或 null"
+                )
             confidence = _number(
                 item.get("confidence", 0),
                 f"{field}.confidence",
@@ -637,6 +695,7 @@ class ReportParserTool:
                     "first_seen": _round(first_seen),
                     "last_seen": _round(last_seen),
                     "detection_count": detection_count,
+                    "consecutive_frame_count": consecutive_frame_count,
                     "confidence": _round(confidence),
                     "confidence_max": _round(confidence_max),
                     "confidence_min": _round(confidence_min),

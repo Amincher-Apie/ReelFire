@@ -150,6 +150,9 @@
           "comment",
           "score_reason",
           "review_status",
+          "action_recommendation",
+          "explanation",
+          "boundary_suggestion",
           "evidence_refs"
         ],
         "properties": {
@@ -175,6 +178,176 @@
               "needs_review",
               "reject"
             ]
+          },
+          "action_recommendation": {
+            "enum": [
+              "adopt",
+              "needs_review",
+              "reject"
+            ]
+          },
+          "explanation": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "highlight_type",
+              "trigger_rule",
+              "time_range",
+              "detections",
+              "keyframe_refs",
+              "detection_box_refs"
+            ],
+            "properties": {
+              "highlight_type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "trigger_rule": {
+                "type": "string",
+                "minLength": 1
+              },
+              "time_range": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "start",
+                  "end"
+                ],
+                "properties": {
+                  "start": {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  "end": {
+                    "type": "number",
+                    "exclusiveMinimum": 0
+                  }
+                }
+              },
+              "detections": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "class_name",
+                    "track_id",
+                    "first_seen",
+                    "last_seen",
+                    "observed_frame_count",
+                    "consecutive_frame_count",
+                    "average_confidence",
+                    "max_confidence",
+                    "evidence_refs"
+                  ],
+                  "properties": {
+                    "class_name": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "track_id": {
+                      "type": [
+                        "string",
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "first_seen": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "last_seen": {
+                      "type": [
+                        "number",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "observed_frame_count": {
+                      "type": "integer",
+                      "minimum": 0
+                    },
+                    "consecutive_frame_count": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ],
+                      "minimum": 0
+                    },
+                    "average_confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "max_confidence": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 1
+                    },
+                    "evidence_refs": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              },
+              "keyframe_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "detection_box_refs": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "boundary_suggestion": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "action",
+              "suggested_start",
+              "suggested_end",
+              "reason"
+            ],
+            "properties": {
+              "action": {
+                "enum": [
+                  "keep",
+                  "review_start",
+                  "review_end",
+                  "review_both",
+                  "manual_review"
+                ]
+              },
+              "suggested_start": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "suggested_end": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "exclusiveMinimum": 0
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
           },
           "evidence_refs": {
             "type": "array",

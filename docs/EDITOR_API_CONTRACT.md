@@ -166,11 +166,30 @@ Editor 1.0 仍只按照上述 `agent_report.json.segment_comments[]` 和带可�
     {
       "segment_id": "seg_001",
       "comment": "该区间的运动变化与场景变化评分较高，建议优先复核。",
+      "review_status": "needs_review",
+      "action_recommendation": "needs_review",
+      "explanation": {
+        "highlight_type": "高运动强度候选",
+        "trigger_rule": "high_motion",
+        "time_range": {"start": 12.4, "end": 20.8},
+        "detections": [],
+        "keyframe_refs": ["ev:keyframe:kf_001"],
+        "detection_box_refs": []
+      },
+      "boundary_suggestion": {
+        "action": "manual_review",
+        "suggested_start": null,
+        "suggested_end": null,
+        "reason": "缺少可验证的目标出现时间，无法自动建议边界"
+      },
       "evidence_refs": ["ev:segment:seg_001", "ev:score:kf_001"]
     }
   ]
 }
 ```
+
+前端可以展示这些新增字段，但不得根据 `comment` 反推类别、连续帧数或检测框。
+反馈提交字段与后端待实现接口见 `docs/AGENT_FEEDBACK_CONTRACT.md`。
 
 ## 5. 错误响应
 

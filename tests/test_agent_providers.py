@@ -87,7 +87,7 @@ class DifyProviderTests(unittest.TestCase):
         self.assertIn("model_generation_failed", risk_flags)
         self.assertIn("dify_not_configured", risk_flags)
 
-    def test_blocking_chat_request_uses_prompt_v2_and_parses_fenced_json(
+    def test_blocking_chat_request_uses_prompt_v3_and_parses_fenced_json(
         self,
     ) -> None:
         class FakeResponse:

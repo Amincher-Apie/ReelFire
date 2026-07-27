@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 
 ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PROMPT_PATH = ROOT / "agent" / "prompts" / "review_agent_v2.md"
+DEFAULT_PROMPT_PATH = ROOT / "agent" / "prompts" / "review_agent_v3.md"
 
 
 class ModelProviderError(RuntimeError):

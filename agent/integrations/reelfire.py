@@ -129,7 +129,7 @@ def merge_highlight_report(
 def to_backend_agent_call(
     result: dict[str, Any],
     *,
-    prompt_version: str = "v2",
+    prompt_version: str = "v3",
     result_path: str = "agent_report.json",
 ) -> dict[str, Any]:
     """Map an Agent result to the backend ``agent_calls`` JSON contract."""

@@ -16,7 +16,11 @@ OLLAMA_ACCEPTANCE_PATH = (
 OLLAMA_RESULTS_PATH = ROOT / "docs" / "evidence" / "ollama_topk_results.json"
 INPUT_SCHEMA_PATH = ROOT / "agent" / "schemas" / "agent_input.schema.json"
 OUTPUT_SCHEMA_PATH = ROOT / "agent" / "schemas" / "agent_output.schema.json"
-PROMPT_PATH = ROOT / "agent" / "prompts" / "review_agent_v2.md"
+FEEDBACK_SCHEMA_PATH = ROOT / "agent" / "schemas" / "agent_feedback.schema.json"
+FEEDBACK_SUMMARY_SCHEMA_PATH = (
+    ROOT / "agent" / "schemas" / "agent_feedback_summary.schema.json"
+)
+PROMPT_PATH = ROOT / "agent" / "prompts" / "review_agent_v3.md"
 WORKFLOW_PATH = ROOT / "docs" / "AGENT_WORKFLOW.md"
 ENV_EXAMPLE_PATH = ROOT / ".env.example"
 DIFY_HANDOFF_PATH = ROOT / "docs" / "DIFY_CONFIGURATION_HANDOFF.md"
@@ -206,6 +210,10 @@ class AgentSchemaAndPromptTests(unittest.TestCase):
             schema["properties"]["provider"]["properties"]["type"]["enum"]
         )
         self.assertEqual(provider_types, {"ollama", "dify", "coze", "rule_only"})
+        detection = schema["$defs"]["segment"]["properties"][
+            "detections_summary"
+        ]["items"]["properties"]
+        self.assertIn("consecutive_frame_count", detection)
 
     def test_output_schema_contains_required_business_and_trace_fields(self) -> None:
         schema = load_json(OUTPUT_SCHEMA_PATH)
@@ -227,6 +235,14 @@ class AgentSchemaAndPromptTests(unittest.TestCase):
             schema["properties"]["review"]["properties"]["recommendation"]["enum"]
         )
         self.assertEqual(review_states, {"pass", "needs_review", "reject"})
+        comment = schema["properties"]["segment_comments"]["items"]
+        self.assertTrue(
+            {
+                "action_recommendation",
+                "explanation",
+                "boundary_suggestion",
+            }.issubset(comment["required"])
+        )
         tool_names = set(
             schema["properties"]["trace"]["properties"]["tools"]["items"]["properties"][
                 "name"
@@ -242,6 +258,23 @@ class AgentSchemaAndPromptTests(unittest.TestCase):
             },
         )
 
+    def test_feedback_schemas_freeze_editor_and_statistics_contracts(self) -> None:
+        feedback = load_json(FEEDBACK_SCHEMA_PATH)
+        summary = load_json(FEEDBACK_SUMMARY_SCHEMA_PATH)
+
+        self.assertEqual(feedback["properties"]["schema_version"]["const"], "1.0")
+        self.assertEqual(
+            set(feedback["properties"]["decision"]["enum"]),
+            {"adopted", "needs_review", "rejected"},
+        )
+        self.assertIn("original_boundary", feedback["required"])
+        self.assertIn("final_boundary", feedback["required"])
+        self.assertIn("reexported", feedback["required"])
+        self.assertIn("adoption_rate", summary["required"])
+        self.assertIn("common_rejection_reasons", summary["required"])
+        self.assertIn("boundary_adjustments", summary["required"])
+        self.assertIn("rule_optimization_suggestions", summary["required"])
+
     def test_prompt_is_portable_and_enforces_evidence_boundaries(self) -> None:
         prompt = PROMPT_PATH.read_text(encoding="utf-8")
         self.assertIn("{{job_id}}", prompt)
@@ -251,6 +284,9 @@ class AgentSchemaAndPromptTests(unittest.TestCase):
         self.assertIn("knowledge_refs", prompt)
         self.assertIn("segment_comments", prompt)
         self.assertIn("segment_id", prompt)
+        self.assertIn("consecutive_frame_count", prompt)
+        self.assertIn("检测框", prompt)
+        self.assertIn("边界建议", prompt)
         self.assertIn("needs_review", prompt)
         self.assertRegex(prompt, re.compile(r"禁止生成.*击杀.*爆头"))
 
