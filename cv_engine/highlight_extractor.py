@@ -197,6 +197,8 @@ class HighlightExtractor:
             seg["enemy_classes_in_segment"] = []
             seg["detections_summary"] = []
             seg["reason"] = "enemy_engagement"
+            # P0: 出现帧数（segment 时间范围内有敌人的帧数）
+            seg["frames_with_enemy"] = 0
 
             classes_set: set[str] = set()
             enemy_classes_set: set[str] = set()
@@ -210,6 +212,10 @@ class HighlightExtractor:
                 dets = f.get("detections", []) or []
                 if not dets:
                     continue
+
+                # 统计有敌人的帧
+                if any(str(d.get("class", "")) in self.enemy_classes for d in dets):
+                    seg["frames_with_enemy"] += 1
 
                 for det in dets:
                     cls_name = str(det.get("class", ""))
@@ -337,6 +343,7 @@ class HighlightExtractor:
                 "kill_count": kill_count,
                 "kill_type": kill_type,
                 "engagement_duration": engagement_duration,
+                "frames_with_enemy": seg["frames_with_enemy"],
                 "max_confidence": round(max_conf, 4),
                 "avg_confidence": avg_conf,
                 "enemy_classes": sorted(enemy_classes_set),
@@ -352,15 +359,27 @@ class HighlightExtractor:
             "triple_kill": 0.85,
             "multi_kill": 1.0,
         }
-        for idx, seg in enumerate(segments, start=1):
-            seg["id"] = f"seg_{idx:03d}"
-            seg["order"] = idx
+        # 先计算 score
+        for seg in segments:
             seg["source_keyframes"] = []
             kt = seg["evidence"]["kill_type"]
             base = kill_type_score.get(kt, 0.5)
             # 置信度微调（+0~0.1）
             conf_bonus = min(0.1, seg["evidence"]["max_confidence"] * 0.1)
             seg["score"] = round(min(1.0, base + conf_bonus), 4)
+
+        # P0: 事件去重 —— 重叠率 > 50% 的片段只保留 score 最高的
+        segments = self._dedup_segments(segments)
+
+        # P0: id 按时间顺序生成（稳定），order 按 score 降序生成（候选排序）
+        # segments 此时已是时间顺序（_build_segments 保证）
+        for idx, seg in enumerate(segments, start=1):
+            seg["id"] = f"seg_{idx:03d}"
+
+        # 按 score 降序生成 order
+        ranked = sorted(enumerate(segments), key=lambda x: x[1]["score"], reverse=True)
+        for order, (orig_idx, seg) in enumerate(ranked, start=1):
+            seg["order"] = order
 
         total_seg_duration = sum(s["duration"] for s in segments)
         # 连杀统计
@@ -399,6 +418,46 @@ class HighlightExtractor:
             "min_duration": self.min_duration,
             "merge_gap": self.merge_gap,
         }
+
+    def _dedup_segments(
+        self, segments: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """事件去重：时间重叠率 > 50% 的片段只保留 score 最高的。
+
+        用于处理同一波敌人在不同 smoothing 窗口下被重复识别的情况。
+        """
+        if len(segments) <= 1:
+            return list(segments)
+
+        # 按 score 降序，依次保留不与已保留片段高度重叠的
+        ranked = sorted(segments, key=lambda s: s.get("score", 0.0), reverse=True)
+        kept: list[dict[str, Any]] = []
+        for seg in ranked:
+            overlap_too_high = False
+            for k in kept:
+                overlap = self._overlap_ratio(seg, k)
+                if overlap > 0.5:
+                    overlap_too_high = True
+                    break
+            if not overlap_too_high:
+                kept.append(seg)
+
+        # 重新按时间排序，保证 id 生成是时间顺序
+        kept.sort(key=lambda s: float(s.get("start", 0.0)))
+        return kept
+
+    @staticmethod
+    def _overlap_ratio(a: dict[str, Any], b: dict[str, Any]) -> float:
+        """计算两个片段的交叠比例（交集 / 较短片段时长）。"""
+        a_start = float(a.get("start", 0.0))
+        a_end = float(a.get("end", 0.0))
+        b_start = float(b.get("start", 0.0))
+        b_end = float(b.get("end", 0.0))
+        inter = max(0.0, min(a_end, b_end) - max(a_start, b_start))
+        min_dur = min(a_end - a_start, b_end - b_start)
+        if min_dur <= 0:
+            return 0.0
+        return inter / min_dur
 
 
 def _merge_segments_to_video(

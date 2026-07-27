@@ -277,13 +277,46 @@ def analyze_video(
     if not segments:
         segments = []
 
-    # 给 segment 补充 source_keyframes（关联关键帧）
+    # 给 segment 补充 source_keyframes（关联关键帧）+ 代表关键帧 + 缩略图
+    # P0: 分工要求"代表关键帧、缩略图、对应关键帧截图"
+    seg_thumb_dir = job_dir / "result" / "segment_thumbs"
+    seg_thumb_dir.mkdir(parents=True, exist_ok=True)
+
     for seg in segments:
         seg_keyframes = [
-            kf["id"] for kf in keyframes
+            kf for kf in keyframes
             if seg["start"] <= float(kf["timestamp"]) <= seg["end"]
         ]
-        seg["source_keyframes"] = seg_keyframes if seg_keyframes else []
+        seg["source_keyframes"] = [kf["id"] for kf in seg_keyframes] if seg_keyframes else []
+
+        # 代表关键帧：优先从 source_keyframes 中选 score 最高的
+        if seg_keyframes:
+            rep_kf = max(seg_keyframes, key=lambda kf: kf.get("highlight_score", 0.0))
+            seg["representative_keyframe"] = rep_kf["id"]
+            seg["thumbnail"] = rep_kf.get("image")
+        else:
+            # 没有关键帧时，从 segment 时间范围内选 score 最高的 sample 生成缩略图
+            seg_samples = [
+                s for s in samples
+                if seg["start"] <= float(s["timestamp"]) <= seg["end"]
+            ]
+            rep_id = None
+            thumb_rel = None
+            if seg_samples:
+                best_sample = max(seg_samples, key=lambda s: s.get("highlight_score", 0.0))
+                frame_idx = int(best_sample["frame_index"])
+                if 0 <= frame_idx < len(frames):
+                    thumb_name = f"{seg['id']}_thumb.jpg"
+                    thumb_path = seg_thumb_dir / thumb_name
+                    annotated = _annotate_frame(frames[frame_idx], best_sample.get("objects", []))
+                    if cv2.imwrite(str(thumb_path), annotated):
+                        thumb_rel = f"result/segment_thumbs/{thumb_name}"
+            seg["representative_keyframe"] = rep_id
+            seg["thumbnail"] = thumb_rel
+
+        # 在 evidence 中引用代表关键帧（供 Agent 引用）
+        seg["evidence"]["representative_keyframe"] = seg.get("representative_keyframe")
+        seg["evidence"]["thumbnail"] = seg.get("thumbnail")
 
     segment_tags = scorer.calculate_segment_tags(samples, segments)
     ai_cover_prompt = scorer.generate_cover_prompt(best)
@@ -304,11 +337,15 @@ def analyze_video(
             "mAP50_95": model_info.mAP50_95,
         })
     # P0-1: 报告中记录游戏类型和分析策略，让前端可见
+    # P0-3: 报告中保存模型版本和阈值（分工要求"模型 ID、模型版本、阈值和类别表"）
     model_report.update({
         "game_type": game_type,
         "highlight_strategy": highlight_strategy,
         "is_fallback": is_fallback,
         "enemy_classes": sorted(enemy_classes) if enemy_classes else [],
+        "version": model_info.model_id if model_info else "unknown",
+        "confidence_threshold": float(settings.get("confidence_threshold", 0.35)),
+        "sample_interval": sample_interval,
     })
 
     return {
