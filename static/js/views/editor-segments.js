@@ -202,7 +202,12 @@ export function findAgentComment(segmentId) {
 export function renderAgentComment(segmentComment) {
   const agent = editorState.agentReport;
   const avail = agent ? agent.availability : null;
-  const agentStatus = !agent ? "pending" : avail === "unavailable" ? "unavailable" : "completed";
+  // availability 值域：ready | unavailable | invalid | pending（无 agent 对象视为 pending）
+  const agentStatus = !agent
+    ? "pending"
+    : (avail === "unavailable" || avail === "invalid")
+      ? "unavailable"
+      : "completed";
 
   // ── 状态徽标 ──
   const badge = byId("agent-status-badge");
@@ -212,7 +217,9 @@ export function renderAgentComment(segmentComment) {
       ? "Agent 已完成"
       : agentStatus === "pending"
       ? "待 Agent 分析"
-      : "Agent 不可用";
+      : avail === "invalid"
+        ? "Agent 结果无效"
+        : "Agent 不可用";
   badge.textContent = badgeText;
 
   // ── 切换内容区 ──
@@ -232,7 +239,9 @@ export function renderAgentComment(segmentComment) {
     const msg =
       agent && agent.error
         ? agent.error
-        : "Agent 服务当前不可用，以下为基于 CV 检测的规则输出。";
+        : avail === "invalid"
+          ? "Agent 返回了无效结果，请检查分析参数或联系管理员。"
+          : "Agent 服务当前不可用，以下为基于 CV 检测的规则输出。";
     byId("agent-unavailable-message").textContent = msg;
     byId("agent-unavailable-content").hidden = false;
   }
@@ -380,31 +389,57 @@ function renderSegmentCommentDetail(segmentComment) {
     );
   }
 
-  // explanation
+  // explanation — 结构化对象 { highlight_type, trigger_rule, time_range, detections, keyframe_refs, detection_box_refs }
   if (segmentComment.explanation) {
+    let explanationHtml = "";
+    if (typeof segmentComment.explanation === "object") {
+      const ex = segmentComment.explanation;
+      if (ex.highlight_type || ex.trigger_rule) {
+        explanationHtml += '<p class="agent-field-value">' +
+          '<strong>' + escapeHtml(ex.highlight_type || "") + '</strong>' +
+          (ex.trigger_rule ? ' · 触发规则: ' + escapeHtml(ex.trigger_rule) : '') +
+          '</p>';
+      }
+      if (ex.time_range && typeof ex.time_range === "object") {
+        explanationHtml += '<p class="agent-field-value">时间区间: ' +
+          (ex.time_range.start != null ? ex.time_range.start + 's' : '—') +
+          ' – ' + (ex.time_range.end != null ? ex.time_range.end + 's' : '—') +
+          '</p>';
+      }
+      if (ex.detections && ex.detections.length) {
+        explanationHtml += '<p class="agent-field-value">检测目标: ' +
+          ex.detections.map(function(d) {
+            return escapeHtml(d.class_name || "unknown") + " (置信度 " +
+              (d.average_confidence != null ? (d.average_confidence * 100).toFixed(0) + "%)" : "—)");
+          }).join("、") + '</p>';
+      }
+      if (ex.keyframe_refs && ex.keyframe_refs.length) {
+        explanationHtml += '<p class="agent-field-value">关键帧引用: ' +
+          escapeHtml(ex.keyframe_refs.slice(0, 5).join(", ")) +
+          (ex.keyframe_refs.length > 5 ? " …" : "") + '</p>';
+      }
+    } else {
+      explanationHtml = '<p class="agent-field-value">' + escapeHtml(String(segmentComment.explanation)) + '</p>';
+    }
     parts.push(
-      '<div class="agent-field"><span class="agent-field-label">解释</span>' +
-      '<p class="agent-field-value">' + escapeHtml(segmentComment.explanation) + '</p></div>'
+      '<div class="agent-field"><span class="agent-field-label">解释</span>' + explanationHtml + '</div>'
     );
   }
 
-  // boundary_suggestion
+  // boundary_suggestion — 字段为 suggested_start / suggested_end
   if (segmentComment.boundary_suggestion && typeof segmentComment.boundary_suggestion === "object") {
     const bs = segmentComment.boundary_suggestion;
     parts.push(
       '<div class="agent-field"><span class="agent-field-label">边界建议</span>' +
-      '<p class="agent-field-value">起始: ' + (bs.start != null ? bs.start + 's' : '—') +
-      ' · 结束: ' + (bs.end != null ? bs.end + 's' : '—') + '</p></div>'
+      '<p class="agent-field-value">起始: ' + (bs.suggested_start != null ? bs.suggested_start + 's' : '—') +
+      ' · 结束: ' + (bs.suggested_end != null ? bs.suggested_end + 's' : '—') + '</p></div>'
     );
   }
 
-  // per-segment evidence_refs
+  // per-segment evidence_refs — 字符串数组，不做 ref.type/ref.source_id 解构
   if (segmentComment.evidence_refs && segmentComment.evidence_refs.length) {
     const refsHtml = segmentComment.evidence_refs.map((ref) =>
-      '<span class="agent-evidence-item">' +
-      '<span class="agent-evidence-type">' + (ref.type || "ref") + '</span> ' +
-      '<span class="agent-evidence-source">' + (ref.source_id || ref.ref_id || "") + '</span>' +
-      '</span>'
+      '<span class="agent-evidence-item">' + escapeHtml(typeof ref === "string" ? ref : String(ref)) + '</span>'
     ).join("");
     parts.push(
       '<div class="agent-field"><span class="agent-field-label">相关证据</span>' +
@@ -510,10 +545,11 @@ export function normalizeEditorData(payload) {
   }
   const status = jobContainer.status || "unknown";
 
-  // video：新后端返回 video.url（直接可用），旧后端返回 video.path（需拼接 /outputs/）
+  // video：新后端返回 video.url（直接可用）+ video.duration_seconds，旧后端返回 video.path + video.duration
   const rawVideo = payload.video || {};
   const videoUrl = rawVideo.url || null;
   const videoPath = rawVideo.path || null;
+  const videoDuration = Number(rawVideo.duration_seconds || rawVideo.duration) || 0;
 
   // highlights → segments（新后端）；segments → segments（旧后端回退）
   const rawSegments = Array.isArray(payload.highlights)
@@ -532,13 +568,20 @@ export function normalizeEditorData(payload) {
         order: seg.order != null ? Number(seg.order) : 0,
         start: Number.isFinite(start) && start >= 0 ? start : 0,
         end: Number.isFinite(end) && end >= start ? end : start,
-        duration: seg.duration != null ? Number(seg.duration) : 0,
+        duration: seg.duration != null ? Number(seg.duration) : (Number.isFinite(end) ? end - start : 0),
         score: seg.score != null ? Number(seg.score) : 0,
         source_keyframes: Array.isArray(seg.source_keyframes) ? seg.source_keyframes : [],
         source: seg.source || seg.type || "cv",
         source_segment_ids: Array.isArray(seg.source_segment_ids) ? seg.source_segment_ids : [],
         review: seg.review || "",
         review_note: seg.review_note || "",
+        // /editor 内嵌的 Agent 预览（/report-data 加载前用于快速展示）
+        _agentPreview: {
+          comment: seg.agent_comment || null,
+          commentStatus: seg.agent_comment_status || null,
+          reviewStatus: seg.agent_review_status || null,
+          evidenceRefs: Array.isArray(seg.agent_evidence_refs) ? seg.agent_evidence_refs : [],
+        },
       };
     });
 
@@ -557,7 +600,7 @@ export function normalizeEditorData(payload) {
     job_id: jobId,
     status: status,
     video: {
-      duration: Number(rawVideo.duration) || 0,
+      duration: videoDuration,
       filename: rawVideo.filename || "",
       // 新后端：video.url 直接可用；旧后端：video.path 需拼接
       url: videoUrl,
