@@ -158,13 +158,31 @@ def analyze_video(
         raise ValueError("视频中没有可分析的画面")
 
     # Resolve model path using registry if available
+    # P0-1: 根据 game_type 动态选择模型和分析策略
+    game_type = str(settings.get("game_type", "other")).lower().strip()
+    is_fallback = False
+    highlight_strategy = "generic_score"
+    enemy_classes: set[str] = set()
+
     if model_registry:
-        model_id = settings.get("model_id", "custom_v5")
-        model_path = model_registry.resolve_model_path(model_id)
-        model_info = model_registry.get(model_id)
+        # 优先按 game_type 选择（P0-1 核心改动）
+        model_info, strategy, is_fallback = model_registry.resolve_by_game_type(game_type)
+        model_path = model_info.model_path
+        enemy_classes = set(strategy.get("enemy_classes", set()))
+        highlight_strategy = str(strategy.get("highlight_strategy", "generic_score"))
     else:
         model_path = Path(str(settings.get("model_path", "models/yolo11n.pt")))
         model_info = None
+        # 无 registry 时，按 game_type 设置默认 enemy_classes
+        if game_type == "csgo":
+            enemy_classes = {"character_ct", "character_t"}
+            highlight_strategy = "enemy_engagement"
+        elif game_type == "valorant":
+            enemy_classes = {"enemy"}
+            highlight_strategy = "enemy_engagement"
+        else:
+            enemy_classes = {"person"}
+            highlight_strategy = "generic_score"
 
     detector = YoloDetector(
         model_path,
@@ -241,6 +259,7 @@ def analyze_video(
     output_ratio = str(settings.get("output_ratio", "16:9"))
 
     # 使用 HighlightExtractor 生成多片段（基于敌人出现/消失事件）
+    # P0-1: 根据 game_type 传入对应的 enemy_classes
     fps = float(video.get("fps", 24.0))
     frame_results = [
         {
@@ -249,7 +268,7 @@ def analyze_video(
         }
         for s in samples
     ]
-    extractor = HighlightExtractor()
+    extractor = HighlightExtractor(enemy_classes=enemy_classes if enemy_classes else None)
     highlight_result = extractor.extract(frame_results, fps, duration)
     segments = highlight_result.get("segments", [])
 
@@ -296,6 +315,13 @@ def analyze_video(
             "mAP50": model_info.mAP50,
             "mAP50_95": model_info.mAP50_95,
         })
+    # P0-1: 报告中记录游戏类型和分析策略，让前端可见
+    model_report.update({
+        "game_type": game_type,
+        "highlight_strategy": highlight_strategy,
+        "is_fallback": is_fallback,
+        "enemy_classes": sorted(enemy_classes) if enemy_classes else [],
+    })
 
     return {
         "video": video,
@@ -364,8 +390,12 @@ class AnalysisService:
             video_path = self.jobs.get_input_video(job_id)
             job_dir = self.jobs.job_dir(job_id)
             settings = dict(job["settings"])
-            settings["model_path"] = str(self.model_path)
-            report = analyze_video(video_path, job_dir, settings)
+            # P0-1: 不再固定使用全局 model_path，改为按 game_type 动态选择
+            # settings["model_path"] = str(self.model_path)  # 已弃用
+            settings["game_type"] = job.get("game_type", "other")
+            report = analyze_video(
+                video_path, job_dir, settings, model_registry=self.model_registry
+            )
             if not isinstance(report, dict):
                 raise TypeError("analyze_video 必须返回 JSON 对象")
             report.setdefault("job_id", job_id)

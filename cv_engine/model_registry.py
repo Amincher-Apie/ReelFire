@@ -7,6 +7,33 @@ from pathlib import Path
 from typing import Optional
 
 
+# 游戏类型 → 模型与分析策略映射
+# 解决 P0-1：让 game_type 真正决定模型选择
+GAME_MODEL_MAPPING: dict[str, dict] = {
+    "csgo": {
+        "model_id": "custom_v5",
+        "fallback_model_id": "official",
+        "enemy_classes": {"character_ct", "character_t"},
+        "highlight_strategy": "enemy_engagement",
+        "description": "CS2 自定义模型（CT/T/Rifle/Pistol 4 类）",
+    },
+    "valorant": {
+        "model_id": "valorant_v2",
+        "fallback_model_id": "official",
+        "enemy_classes": {"enemy"},
+        "highlight_strategy": "enemy_engagement",
+        "description": "Valorant 自定义模型（enemy/weapon 2 类）",
+    },
+    "other": {
+        "model_id": "official",
+        "fallback_model_id": None,
+        "enemy_classes": {"person"},  # COCO 80 类中的 person 作为"敌人"
+        "highlight_strategy": "generic_score",  # 降级到通用评分
+        "description": "官方 COCO 模型 + 通用评分（降级模式）",
+    },
+}
+
+
 @dataclass
 class ModelInfo:
     """Information about a registered YOLO model."""
@@ -141,3 +168,39 @@ class ModelRegistry:
                 raise ValueError(f"Unknown model: {model_id}. Available: {list(self._models.keys())}")
             return model.model_path
         return self.get_default().model_path
+
+    def resolve_by_game_type(
+        self, game_type: Optional[str]
+    ) -> tuple[ModelInfo, dict, bool]:
+        """根据游戏类型选择模型和分析策略。
+
+        解决 P0-1：让 game_type 真正决定模型选择。
+
+        Args:
+            game_type: 游戏类型（csgo/valorant/other），None 时视为 other
+
+        Returns:
+            (model_info, strategy_config, is_fallback)
+            - model_info: 选中的模型信息
+            - strategy_config: 包含 enemy_classes/highlight_strategy 等
+            - is_fallback: 是否使用了降级模型（自定义模型不可用时回退到官方）
+        """
+        game_type = (game_type or "other").lower().strip()
+        strategy = GAME_MODEL_MAPPING.get(game_type, GAME_MODEL_MAPPING["other"])
+
+        # 尝试首选模型
+        model = self.get(strategy["model_id"])
+        if model is not None:
+            return model, strategy, False
+
+        # 首选不可用，尝试降级
+        fallback_id = strategy.get("fallback_model_id")
+        if fallback_id:
+            fallback_model = self.get(fallback_id)
+            if fallback_model is not None:
+                # 降级到官方模型时，使用 other 策略（person + generic_score）
+                fallback_strategy = GAME_MODEL_MAPPING["other"]
+                return fallback_model, fallback_strategy, True
+
+        # 全部不可用，返回默认模型 + other 策略
+        return self.get_default(), GAME_MODEL_MAPPING["other"], True
