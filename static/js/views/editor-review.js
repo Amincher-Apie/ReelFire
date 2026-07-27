@@ -1,8 +1,8 @@
 // ReelFire — editor review editor, boundary editor, sorting, undo/redo
 import { editorState } from "../state/editor-state.js";
 import { byId } from "../utils/dom.js";
-import { renderTimeline, renderSegmentList } from "./editor-video.js";
-import { renderSegmentList as refreshSegmentList } from "./editor-segments.js";
+import { renderTimeline } from "./editor-video.js";
+import { renderSegmentList, renderSegmentList as refreshSegmentList } from "./editor-segments.js";
 import { renderStatsDashboard } from "./editor-stats.js";
 import { selectSegment } from "./editor-segments.js";
 
@@ -167,6 +167,14 @@ export function renderSortButtons(segmentId) {
   const downBtn = container.querySelector(".sort-down");
   if (upBtn) upBtn.disabled = idx <= 0;
   if (downBtn) downBtn.disabled = idx < 0 || idx >= editorState.segments.length - 1;
+
+  // Show segment ops bar (merge/split)
+  const opsBar = byId("segment-ops-bar");
+  if (opsBar) opsBar.hidden = false;
+
+  // Enable merge button only if there's an adjacent segment
+  const mergeBtn = byId("merge-segments-button");
+  if (mergeBtn) mergeBtn.disabled = idx < 0 || idx >= editorState.segments.length - 1;
 }
 
 export function reorderSegment(segmentId, direction) {

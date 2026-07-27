@@ -1,7 +1,7 @@
 // ReelFire — editor save, rough cut, export, report dialog + P2 auto-save
 import { editorState } from "../state/editor-state.js";
 import api from "../api/client.js";
-import { byId } from "../utils/dom.js";
+import { byId, clearChildren, createElement } from "../utils/dom.js";
 import { showToast, setButtonLoading } from "../utils/ui.js";
 
 // ── P2: auto-save draft ───────────────────────────────────────────────
@@ -15,6 +15,7 @@ function draftKey() {
 export function scheduleAutoSave() {
   if (autoSaveTimer) clearTimeout(autoSaveTimer);
   autoSaveTimer = setTimeout(() => {
+    // Save to localStorage
     const draft = {
       reviews: editorState.reviews,
       segments: editorState.segments.map((s) => ({ ...s })),
@@ -25,7 +26,88 @@ export function scheduleAutoSave() {
     } catch {
       // localStorage full or unavailable — silently skip
     }
+
+    // Server auto-save
+    if (editorState.jobId && editorState.dirty) {
+      autoSaveToServer();
+    }
   }, 2000);
+}
+
+async function autoSaveToServer() {
+  if (!editorState.jobId || !editorState.segments.length) return;
+
+  editorState.saveStatus = "saving";
+  updateSaveIndicator();
+
+  const body = {
+    status: "pending",
+    segments: editorState.segments.map((seg) => {
+      const rev = editorState.reviews[seg.id] || {};
+      return {
+        id: seg.id,
+        start: seg.start,
+        end: seg.end,
+        order: seg.order,
+        score: seg.score,
+        source_keyframes: seg.source_keyframes || [],
+        review: rev.recommendation || "",
+        review_note: rev.note || "",
+      };
+    }),
+  };
+
+  try {
+    await api.patch("/api/jobs/" + encodeURIComponent(editorState.jobId) + "/review", body);
+    editorState.dirty = false;
+    editorState.saveStatus = "saved";
+    updateSaveIndicator();
+    clearDraft();
+  } catch (error) {
+    editorState.saveStatus = "error";
+    updateSaveIndicator();
+    // Don't show toast for auto-save failures — the indicator shows it
+  }
+}
+
+function updateSaveIndicator() {
+  const indicator = byId("auto-save-indicator");
+  if (!indicator) return;
+
+  const status = editorState.saveStatus;
+  indicator.className = "auto-save-indicator " + status;
+  indicator.hidden = false;
+
+  const statusText = byId("save-status-text");
+  if (statusText) {
+    statusText.textContent =
+      status === "saving" ? "保存中…" :
+      status === "saved" ? "已保存" :
+      status === "error" ? "保存失败" : "未保存";
+  }
+
+  const retryBtn = byId("save-retry-button");
+  if (retryBtn) {
+    retryBtn.hidden = status !== "error";
+    if (status === "error") {
+      retryBtn.onclick = () => saveReview();
+    }
+  }
+
+  // Also update the save button dirty indicator
+  updateDirtyIndicator();
+}
+
+function updateDirtyIndicator() {
+  const button = byId("save-review-button");
+  if (!button) return;
+  const original = button.dataset.originalLabel || "保存审核";
+  button.dataset.originalLabel = original;
+  button.textContent = editorState.dirty ? "● " + original : original;
+  button.setAttribute(
+    "aria-label",
+    editorState.dirty ? original + "（有未保存修改）" : original
+  );
 }
 
 export function checkDraft() {
@@ -35,7 +117,6 @@ export function checkDraft() {
     const draft = JSON.parse(raw);
     if (!draft || !draft.savedAt || !draft.reviews) return;
 
-    // Check if draft has any actual review data
     const hasReviews = Object.values(draft.reviews).some(
       (r) => r && (r.recommendation || r.note)
     );
@@ -49,17 +130,26 @@ export function checkDraft() {
       return;
     }
 
-    // Show recovery dialog
-    const recover = window.confirm(
+    const banner = byId("draft-banner");
+    const bannerMsg = byId("draft-banner-msg");
+    const recoverBtn = byId("draft-recover-button");
+    const discardBtn = byId("draft-discard-button");
+    if (!banner || !recoverBtn || !discardBtn) return;
+
+    bannerMsg.textContent =
       "检测到未保存的审核草稿（" +
       new Date(draft.savedAt).toLocaleString("zh-CN") +
-      "），是否恢复？\n\n选择"确定"恢复草稿，"取消"放弃草稿并使用服务端数据。"
-    );
+      "）。";
+    banner.hidden = false;
 
-    if (recover) {
+    function dismissBanner() {
+      banner.hidden = true;
+      localStorage.removeItem(draftKey());
+    }
+
+    function applyDraft() {
       editorState.reviews = draft.reviews || {};
       if (draft.segments) {
-        // Merge segment boundaries from draft
         draft.segments.forEach((ds) => {
           const seg = editorState.segments.find((s) => s.id === ds.id);
           if (seg) {
@@ -70,13 +160,33 @@ export function checkDraft() {
         });
       }
       editorState.dirty = true;
-      // Re-render will be called by applyEditorData caller
+      editorState.saveStatus = "unsaved";
+      updateSaveIndicator();
+      dismissBanner();
+      import("./editor-segments.js").then((m) => {
+        m.renderSegmentList();
+        if (editorState.selectedSegmentId) {
+          m.selectSegment(editorState.selectedSegmentId);
+        }
+      });
+      import("./editor-review.js").then((m) => m.updateDirtyIndicator());
+      import("./editor-stats.js").then((m) => m.renderStatsDashboard());
+      import("./editor-video.js").then((m) => m.renderTimeline());
       showToast("已恢复审核草稿", "info");
     }
 
-    localStorage.removeItem(draftKey());
+    recoverBtn.onclick = applyDraft;
+    discardBtn.onclick = dismissBanner;
+
+    const autoTimer = setTimeout(() => {
+      if (!banner.hidden) {
+        dismissBanner();
+      }
+    }, 30000);
+
+    recoverBtn.addEventListener("click", () => clearTimeout(autoTimer), { once: true });
+    discardBtn.addEventListener("click", () => clearTimeout(autoTimer), { once: true });
   } catch {
-    // corrupted draft — silently clear
     try { localStorage.removeItem(draftKey()); } catch { /* ignore */ }
   }
 }
@@ -137,6 +247,10 @@ export function saveReview() {
   if (!editorState.jobId || !editorState.segments.length) return;
   const button = byId("save-review-button");
   setButtonLoading(button, true, "保存中…");
+
+  editorState.saveStatus = "saving";
+  updateSaveIndicator();
+
   const body = {
     status: "pending",
     segments: editorState.segments.map((seg) => {
@@ -156,7 +270,8 @@ export function saveReview() {
   api.patch("/api/jobs/" + encodeURIComponent(editorState.jobId) + "/review", body).then(
     () => {
       editorState.dirty = false;
-      // update dirty indicator
+      editorState.saveStatus = "saved";
+      updateSaveIndicator();
       const btn = byId("save-review-button");
       if (btn) {
         const original = btn.dataset.originalLabel || "保存审核";
@@ -165,11 +280,11 @@ export function saveReview() {
       clearDraft();
       showToast("审核结果已保存", "success");
       setButtonLoading(button, false);
-
-      // reload data to get fresh server state
       import("./editor-segments.js").then((m) => m.loadEditorData(editorState.jobId));
     },
     (error) => {
+      editorState.saveStatus = "error";
+      updateSaveIndicator();
       showToast(error.message, "error");
       setButtonLoading(button, false);
     }
@@ -183,10 +298,10 @@ export function createRoughCut() {
   const button = byId("rough-cut-button");
   setButtonLoading(button, true, "生成中…");
 
-  // save review first, then cut
   const reviewBody = {
     status: "approved",
     segments: editorState.segments.map((seg) => {
+      const rev = editorState.reviews[seg.id] || {};
       return {
         id: seg.id,
         start: seg.start,
@@ -194,6 +309,8 @@ export function createRoughCut() {
         order: seg.order,
         score: seg.score,
         source_keyframes: seg.source_keyframes || [],
+        review: rev.recommendation || "",
+        review_note: rev.note || "",
       };
     }),
   };
@@ -206,7 +323,6 @@ export function createRoughCut() {
     }
   ).then(
     (resp) => {
-      // P0 async: if backend returns render task, poll
       if (resp && resp.render_task_id) {
         setButtonLoading(button, true, "排队中…");
         return pollEditorRenderTask(resp.render_task_id, button);
@@ -215,6 +331,8 @@ export function createRoughCut() {
   ).then(
     () => {
       clearDraft();
+      editorState.saveStatus = "saved";
+      updateSaveIndicator();
       showToast("粗剪视频已生成", "success");
       setButtonLoading(button, false);
       import("./editor-segments.js").then((m) => m.loadEditorData(editorState.jobId));
@@ -226,7 +344,6 @@ export function createRoughCut() {
   );
 }
 
-// Poll async render task (ready for backend async export)
 async function pollEditorRenderTask(taskId, button) {
   for (let i = 0; i < 120; i++) {
     try {
@@ -236,7 +353,7 @@ async function pollEditorRenderTask(taskId, button) {
       const stages = { queued: "排队中…", transcoding: "转码中…", merging: "拼接中…", writing: "写入中…" };
       setButtonLoading(button, true, stages[resp.status] || "处理中…");
     } catch (e) {
-      if (e.status === 404) break; // endpoint not yet available, assume sync
+      if (e.status === 404) break;
       throw e;
     }
     await new Promise((r) => setTimeout(r, 1500));

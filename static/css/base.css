@@ -1424,6 +1424,288 @@ td:first-child {
   }
 }
 
+/* ═══════════════════════════════════════════════════════════════════
+   Projects Dashboard
+   ═══════════════════════════════════════════════════════════════════ */
+
+.projects-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.project-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  cursor: pointer;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 120ms ease;
+}
+
+.project-card:hover {
+  border-color: var(--primary);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.12);
+  transform: translateY(-1px);
+}
+
+.project-card:focus-visible {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+
+.project-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.project-card-icon {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+}
+
+.project-card-icon svg {
+  width: 22px;
+  height: 22px;
+  color: var(--primary);
+}
+
+.project-game-badge {
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 600;
+  background: var(--panel-soft);
+  color: var(--text-muted);
+}
+
+.project-game-badge.csgo { color: var(--accent); background: var(--accent-soft); }
+.project-game-badge.valorant { color: var(--warning, #f0a040); background: rgba(240, 160, 64, 0.12); }
+
+.project-card-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.project-card-name {
+  margin: 0 0 6px;
+  font-size: 16px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-card-meta {
+  display: flex;
+  gap: 8px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.project-card-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.project-context-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+
+.project-context-menu {
+  z-index: 100;
+  min-width: 140px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+
+.project-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 12px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  text-align: start;
+  cursor: pointer;
+}
+
+.project-context-menu button:hover { background: var(--panel-soft); }
+.project-context-menu button.danger { color: var(--danger, #e0556a); }
+
+/* Project detail panel */
+
+.project-detail-panel {
+  margin-top: 20px;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Task Stages & Progress
+   ═══════════════════════════════════════════════════════════════════ */
+
+.task-stages {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+}
+
+.task-stage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+.task-stage.completed { color: var(--success, #35d399); }
+.task-stage.running { color: var(--primary); font-weight: 600; }
+.task-stage.failed { color: var(--danger, #e0556a); }
+
+.task-stage-icon {
+  display: inline-grid;
+  width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 700;
+  border: 1.5px solid currentColor;
+}
+
+.task-stage.completed .task-stage-icon {
+  background: var(--success, #35d399);
+  border-color: var(--success, #35d399);
+  color: #fff;
+}
+
+.task-stage.running .task-stage-icon {
+  animation: spin 1s linear infinite;
+}
+
+.task-stage-status {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.analysis-progress-detail {
+  display: flex;
+  gap: 20px;
+  margin-top: 14px;
+  padding: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+  justify-content: center;
+}
+
+.progress-stat {
+  text-align: center;
+}
+
+.progress-stat-label {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-bottom: 2px;
+}
+
+.progress-stat strong {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.upload-progress {
+  width: 100%;
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 3px;
+  background: var(--panel-soft);
+  overflow: hidden;
+}
+
+.upload-progress-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--primary);
+  transition: width 300ms ease;
+}
+
+.empty-result-guide {
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel-soft);
+}
+
+.empty-result-actions ul {
+  margin: 4px 0 0 16px;
+  padding: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--primary);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+.result-error-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  justify-content: center;
+}
+
+/* Dialog body */
+.dialog-body {
+  padding: 16px 0;
+}
+
+.dialog-hint {
+  margin: 0 0 14px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.dialog-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 18px;
+  justify-content: flex-end;
+}
+
 @media (max-width: 900px) {
   .app-header {
     position: relative;

@@ -43,3 +43,4 @@ class Config:
         "output_ratio": "16:9",
     }
     JSON_SORT_KEYS = False
+    SEND_FILE_MAX_AGE_DEFAULT = 0  # 开发阶段禁用静态文件缓存

@@ -42,6 +42,13 @@ const api = {
   delete(url) {
     return this.request(url, { method: "DELETE" });
   },
+
+  postForm(url, formData) {
+    return this.request(url, {
+      method: "POST",
+      body: formData,
+    });
+  },
 };
 
 export default api;

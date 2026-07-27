@@ -9,12 +9,43 @@ import { initUpload } from "./views/upload.js";
 import { setView, submitAnalysis, stopPolling, showRuleOutput, showReportDialog } from "./views/analysis.js";
 import { saveReview, createRoughCut } from "./views/review.js";
 import { loadHistory, openHistoryJob, deleteHistoryJob } from "./views/history.js";
+import {
+  loadProjects, openProject, startAnalysisInProject,
+  backToProjectDetail, showProjectsView, showHistoryView,
+  initProjectDialog,
+} from "./views/projects.js";
 
 function initApp() {
+  // Navigation buttons
   document.querySelectorAll("[data-view]").forEach((button) => {
-    button.addEventListener("click", () => setView(button.dataset.view));
+    button.addEventListener("click", () => {
+      const view = button.dataset.view;
+      if (view === "projects") showProjectsView();
+      else if (view === "analysis") startAnalysisInProject();
+      else if (view === "history") showHistoryView();
+    });
   });
+
+  // Back to projects
+  const backBtn = byId("back-to-projects");
+  if (backBtn) backBtn.addEventListener("click", backToProjectDetail);
+
+  // Project detail → start analysis
+  const startAnalysisBtn = byId("project-start-analysis");
+  if (startAnalysisBtn) startAnalysisBtn.addEventListener("click", startAnalysisInProject);
+
+  // Empty state create button
+  const emptyCreate = byId("projects-empty-create");
+  if (emptyCreate) emptyCreate.addEventListener("click", () => byId("project-dialog").showModal());
+
+  // Projects retry
+  const projectsRetry = byId("projects-retry-button");
+  if (projectsRetry) projectsRetry.addEventListener("click", loadProjects);
+
+  // Logout
   byId("logout-button").addEventListener("click", logout);
+
+  // Analysis form
   byId("project-name").addEventListener("input", () => {
     appState.currentProjectId = null;
     appState.currentProjectName = null;
@@ -24,6 +55,21 @@ function initApp() {
     submitAnalysis();
   });
   byId("retry-button").addEventListener("click", submitAnalysis);
+
+  // Cancel analysis
+  const cancelBtn = byId("cancel-analysis-button");
+  if (cancelBtn) {
+    cancelBtn.addEventListener("click", () => {
+      if (appState.currentJobId) {
+        api.post("/api/jobs/" + encodeURIComponent(appState.currentJobId) + "/cancel", {})
+          .then(() => showToast("已取消分析任务", "info"))
+          .catch((err) => showToast(err.message, "error"));
+        stopPolling();
+      }
+    });
+  }
+
+  // Review & rough cut
   byId("save-review-button").addEventListener("click", saveReview);
   byId("rough-cut-button").addEventListener("click", createRoughCut);
   byId("open-report-button").addEventListener("click", showReportDialog);
@@ -31,6 +77,8 @@ function initApp() {
   byId("report-dialog").addEventListener("click", (event) => {
     if (event.target === byId("report-dialog")) byId("report-dialog").close();
   });
+
+  // History
   byId("refresh-history-button").addEventListener("click", loadHistory);
   byId("history-body").addEventListener("click", (event) => {
     const button = event.target.closest("[data-history-action]");
@@ -38,11 +86,19 @@ function initApp() {
     if (button.dataset.historyAction === "open") openHistoryJob(button.dataset.jobId);
     if (button.dataset.historyAction === "delete") deleteHistoryJob(button.dataset.jobId);
   });
+
+  // Rule output buttons
   byId("show-cover-button").addEventListener("click", () => showRuleOutput("cover"));
   byId("show-tags-button").addEventListener("click", () => showRuleOutput("tags"));
   byId("show-report-button").addEventListener("click", () => showRuleOutput("report"));
+
+  // Init upload, project dialog, and load user
   initUpload();
+  initProjectDialog();
   loadUser();
+
+  // Start on projects view
+  showProjectsView();
 }
 
 async function logout() {

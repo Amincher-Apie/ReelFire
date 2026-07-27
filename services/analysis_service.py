@@ -292,6 +292,7 @@ class AnalysisService:
             thread_name_prefix="reelfire-analysis",
         )
         self._active: set[str] = set()
+        self._cancelled: set[str] = set()
         self._active_lock = threading.Lock()
 
     def enqueue(self, job_id: str) -> None:
@@ -308,8 +309,19 @@ class AnalysisService:
             self.jobs.mark_failed(job_id, "后台任务调度器不可用")
             raise RuntimeError("后台任务调度器不可用") from exc
 
+    def cancel_job(self, job_id: str) -> None:
+        """Cancel a queued or running job."""
+        with self._active_lock:
+            self._cancelled.add(job_id)
+            self._active.discard(job_id)
+
     def _run(self, job_id: str) -> None:
         try:
+            if job_id in self._cancelled:
+                self.jobs.mark_failed(job_id, "任务已被取消")
+                with self._active_lock:
+                    self._cancelled.discard(job_id)
+                return
             job = self.jobs.mark_running(job_id)
             video_path = self.jobs.get_input_video(job_id)
             job_dir = self.jobs.job_dir(job_id)
@@ -340,6 +352,7 @@ class AnalysisService:
         finally:
             with self._active_lock:
                 self._active.discard(job_id)
+                self._cancelled.discard(job_id)
 
     def shutdown(self, wait: bool = True) -> None:
         self._executor.shutdown(wait=wait, cancel_futures=False)

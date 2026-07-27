@@ -8,17 +8,18 @@ import { renderReviewEditor, renderBoundaryEditor, renderSortButtons } from "./e
 import { renderStatsDashboard, renderTrajectoryPanel } from "./editor-stats.js";
 import { updateDirtyIndicator } from "./editor-review.js";
 import { checkDraft } from "./editor-actions.js";
+import { deleteSegment, playSegment, adoptSegment, ignoreSegment, initDragReorder } from "./segment-ops.js";
 
 // ── segment selection ─────────────────────────────────────────────────
 
 export function selectSegment(segmentId) {
   editorState.selectedSegmentId = segmentId;
 
-  const rows = document.querySelectorAll(".segment-row");
-  rows.forEach((row) => {
-    const selected = row.dataset.segmentId === segmentId;
-    row.classList.toggle("selected", selected);
-    row.setAttribute("aria-current", selected ? "true" : "false");
+  const cards = document.querySelectorAll(".segment-card");
+  cards.forEach((card) => {
+    const selected = card.dataset.segmentId === segmentId;
+    card.classList.toggle("selected", selected);
+    card.setAttribute("aria-current", selected ? "true" : "false");
   });
 
   const markers = document.querySelectorAll(".timeline-segment-marker");
@@ -31,83 +32,139 @@ export function selectSegment(segmentId) {
   renderReviewEditor(segmentId);
   renderBoundaryEditor(segmentId);
   renderSortButtons(segmentId);
+
+  // Show segment ops bar
+  const opsBar = byId("segment-ops-bar");
+  if (opsBar) opsBar.hidden = false;
 }
 
-// ── segment list ──────────────────────────────────────────────────────
+// ── segment card list ──────────────────────────────────────────────────
 
 export function renderSegmentList() {
   const container = byId("highlight-list");
+  if (!container) return;
   clearChildren(container);
   byId("segments-count").textContent = editorState.segments.length + " 个片段";
 
   if (!editorState.segments.length) {
     container.append(
-      createElement("p", "segment-table-empty", "YOLO 未产出精彩片段。")
+      createElement("p", "segment-table-empty", "YOLO 未产出精彩片段。点击「添加片段」手动创建。")
     );
     return;
   }
 
   editorState.segments.forEach((seg, idx) => {
-    const comment = findAgentComment(seg.id);
-    const status = comment ? comment.status : "pending";
-    const displayStatus = status === "completed" ? "ready" : status;
-    const row = createElement("div", "segment-row");
-    row.dataset.segmentId = seg.id;
-    const rev = editorState.reviews[seg.id];
-    if (rev && rev.recommendation) {
-      row.dataset.review = rev.recommendation;
-    }
-    row.setAttribute("role", "row");
-    row.setAttribute("tabindex", "0");
-    row.setAttribute(
-      "aria-label",
-      "片段 " + (idx + 1) + "，" + formatTime(seg.start) + " 到 " + formatTime(seg.end)
-    );
-
-    const timeCell = createElement(
-      "span",
-      "segment-time-cell",
-      formatTime(seg.start) + " : " + formatTime(seg.end)
-    );
-    timeCell.setAttribute("role", "cell");
-    timeCell.append(
-      createElement("small", "", formatNumber(seg.end - seg.start, 1) + " 秒")
-    );
-
-    const commentText =
-      displayStatus === "ready" && comment && comment.summary
-        ? comment.summary
-        : displayStatus === "pending"
-        ? "Agent 分析尚未完成"
-        : "Agent 最终评论不可用";
-    const commentCell = createElement(
-      "span",
-      "segment-comment-cell " + displayStatus,
-      commentText
-    );
-    commentCell.setAttribute("role", "cell");
-    row.append(timeCell, commentCell);
-
-    row.addEventListener("click", () => {
-      selectSegment(seg.id);
-      seekTo(seg.start);
-    });
-    row.addEventListener("keydown", (e) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        selectSegment(seg.id);
-        seekTo(seg.start);
-      }
-    });
-
-    container.append(row);
+    const card = renderSegmentCard(seg, idx);
+    container.append(card);
   });
+
+  // Init drag reorder
+  initDragReorder(container);
 }
 
-export function findAgentComment(segmentId) {
-  return (
-    editorState.agentComments.find((c) => c.segment_id === segmentId) || null
+function renderSegmentCard(seg, idx) {
+  const card = createElement("div", "segment-card");
+  card.dataset.segmentId = seg.id;
+  card.draggable = true;
+  card.setAttribute("role", "listitem");
+  card.setAttribute("tabindex", "0");
+
+  // Review status classes
+  const rev = editorState.reviews[seg.id];
+  if (rev && rev.recommendation) {
+    card.dataset.review = rev.recommendation;
+  }
+
+  // Thumbnail placeholder
+  const thumb = createElement("div", "segment-card-thumb");
+  thumb.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>`;
+  // Try to load keyframe thumbnail
+  const firstKf = (seg.source_keyframes || [])[0];
+  if (firstKf) {
+    const img = document.createElement("img");
+    img.className = "segment-thumb-img";
+    img.loading = "lazy";
+    img.alt = "片段缩略图";
+    img.src = "/outputs/" + encodeURIComponent(editorState.jobId) + "/keyframes/" + encodeURIComponent(firstKf + ".jpg");
+    img.onerror = () => { img.hidden = true; };
+    img.onload = () => { thumb.innerHTML = ""; thumb.append(img); };
+    thumb.append(img);
+  }
+
+  // Card body
+  const body = createElement("div", "segment-card-body");
+
+  // Header: type badge + confidence
+  const header = createElement("div", "segment-card-header");
+  const segType = seg.type || "auto";
+  const typeLabel = segType === "manual" ? "手动" : segType === "merged" ? "合并" : segType === "split" ? "拆分" : "自动";
+  const typeBadge = createElement("span", "segment-type-badge " + segType, typeLabel);
+  const confidence = createElement("span", "segment-confidence " + confidenceClass(seg.score), formatNumber(Number(seg.score) * 100, 0) + "%");
+  header.append(typeBadge, confidence);
+
+  // Time range
+  const timeRow = createElement("div", "segment-card-time");
+  timeRow.append(
+    createElement("span", "", formatTime(seg.start) + " – " + formatTime(seg.end)),
+    createElement("span", "segment-duration", formatDuration(seg.end - seg.start))
   );
+
+  // Keyframes info
+  const kfRow = createElement("div", "segment-card-keyframes");
+  const kfList = (seg.source_keyframes || []).slice(0, 3).join(", ");
+  kfRow.textContent = kfList ? "关键帧: " + kfList : "";
+
+  body.append(header, timeRow, kfRow);
+
+  // Actions
+  const actions = createElement("div", "segment-card-actions");
+  const playBtn = createElement("button", "seg-action play", "▶ 播放");
+  playBtn.type = "button";
+  playBtn.title = "播放此片段";
+  playBtn.addEventListener("click", (e) => { e.stopPropagation(); playSegment(seg.id); });
+
+  const adoptBtn = createElement("button", "seg-action adopt", "采用");
+  adoptBtn.type = "button";
+  adoptBtn.addEventListener("click", (e) => { e.stopPropagation(); adoptSegment(seg.id); });
+
+  const ignoreBtn = createElement("button", "seg-action ignore", "忽略");
+  ignoreBtn.type = "button";
+  ignoreBtn.addEventListener("click", (e) => { e.stopPropagation(); ignoreSegment(seg.id); });
+
+  const delBtn = createElement("button", "seg-action delete", "删除");
+  delBtn.type = "button";
+  delBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    if (window.confirm("确定删除片段「" + seg.id + "」吗？")) {
+      deleteSegment(seg.id);
+    }
+  });
+
+  actions.append(playBtn, adoptBtn, ignoreBtn, delBtn);
+
+  card.append(thumb, body, actions);
+
+  // Click to select
+  card.addEventListener("click", () => {
+    selectSegment(seg.id);
+    seekTo(seg.start);
+  });
+  card.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      selectSegment(seg.id);
+      seekTo(seg.start);
+    }
+  });
+
+  return card;
+}
+
+function confidenceClass(score) {
+  const s = Number(score);
+  if (s >= 0.8) return "high";
+  if (s >= 0.5) return "medium";
+  return "low";
 }
 
 // ── segment detail + agent comment ────────────────────────────────────
@@ -125,11 +182,19 @@ export function renderSegmentDetail(segmentId) {
   byId("detail-title").textContent = "片段 " + seg.id;
   byId("detail-score").textContent = formatNumber(Number(seg.score) * 100, 0) + " 分";
   byId("detail-time").textContent = formatTime(seg.start) + " – " + formatTime(seg.end);
-  byId("detail-duration").textContent = formatNumber(seg.end - seg.start, 1) + " 秒";
+  byId("detail-duration").textContent = formatDuration(seg.end - seg.start);
   byId("detail-keyframes").textContent = (seg.source_keyframes || []).join("、");
+  byId("detail-type").textContent = seg.type === "manual" ? "手动添加" : seg.type === "merged" ? "合并片段" : seg.type === "split" ? "拆分片段" : "自动检测";
+  byId("detail-confidence").textContent = formatNumber(Number(seg.score) * 100, 0) + "%";
 
   const agentStatus = comment ? comment.status : "pending";
   renderAgentComment(agentStatus, comment);
+}
+
+export function findAgentComment(segmentId) {
+  return (
+    editorState.agentComments.find((c) => c.segment_id === segmentId) || null
+  );
 }
 
 export function renderAgentComment(status, comment) {
@@ -256,54 +321,100 @@ export function renderAgentCompleted(comment) {
 
 // ── data loading ──────────────────────────────────────────────────────
 
+let loadRetries = 0;
+const MAX_LOAD_RETRIES = 2;
+
 export function loadEditorData(jobId) {
   editorState.jobId = jobId;
   setEditorView("loading");
 
   api.get("/api/jobs/" + encodeURIComponent(jobId) + "/editor").then(
     (payload) => {
+      loadRetries = 0;
       applyEditorData(payload);
     },
     (error) => {
+      if (loadRetries < MAX_LOAD_RETRIES && (error.status === 0 || error.status >= 500)) {
+        loadRetries++;
+        const retryMsg = "加载失败，正在重试（" + loadRetries + "/" + MAX_LOAD_RETRIES + "）…";
+        setEditorView("error");
+        byId("editor-error-message").textContent = retryMsg;
+        setTimeout(() => loadEditorData(jobId), 1500);
+        return;
+      }
+      loadRetries = 0;
       setEditorView("error");
-      byId("editor-error-message").textContent =
-        error.message || "剪辑预览数据读取失败。";
+      const code = error.status || 0;
+      if (code === 404) {
+        byId("editor-error-message").textContent =
+          "任务 " + jobId + " 不存在或已被删除。请从工作台重新进入。";
+      } else if (code === 0) {
+        byId("editor-error-message").textContent =
+          "无法连接服务器，请检查网络后重试。";
+      } else {
+        byId("editor-error-message").textContent =
+          error.message || "剪辑预览数据读取失败。";
+      }
     }
   );
 }
 
 export function normalizeEditorData(payload) {
-  if (!payload.job_id || !payload.video) {
-    throw new Error("剪辑预览数据缺少必要字段。");
+  if (!payload || typeof payload !== "object") {
+    throw new Error("服务端返回了无法识别的数据格式。");
+  }
+  if (!payload.job_id) {
+    throw new Error("剪辑预览数据缺少任务编号。");
   }
 
   const agentComments = Array.isArray(payload.agent_comments)
     ? payload.agent_comments.map((c) => Object.assign({}, c))
     : [];
 
-  const segments = (Array.isArray(payload.segments) ? payload.segments : []).map((seg) => {
-    return {
-      id: seg.id || "",
-      order: seg.order != null ? Number(seg.order) : 0,
-      start: Number(seg.start),
-      end: Number(seg.end),
-      score: seg.score != null ? Number(seg.score) : 0,
-      source_keyframes: Array.isArray(seg.source_keyframes) ? seg.source_keyframes : [],
-    };
-  });
+  const rawVideo = payload.video || {};
+
+  const segments = (Array.isArray(payload.segments) ? payload.segments : [])
+    .filter((seg) => seg && typeof seg === "object")
+    .map((seg) => {
+      const start = Number(seg.start);
+      const end = Number(seg.end);
+      return {
+        id: seg.id || "",
+        order: seg.order != null ? Number(seg.order) : 0,
+        start: Number.isFinite(start) && start >= 0 ? start : 0,
+        end: Number.isFinite(end) && end >= start ? end : start,
+        score: seg.score != null ? Number(seg.score) : 0,
+        source_keyframes: Array.isArray(seg.source_keyframes) ? seg.source_keyframes : [],
+        type: seg.type || "auto",
+      };
+    });
+
+  // Restore saved reviews from server-side segment data
+  const reviews = {};
+  (Array.isArray(payload.segments) ? payload.segments : [])
+    .filter((seg) => seg && typeof seg === "object" && seg.review)
+    .forEach((seg) => {
+      reviews[seg.id] = {
+        recommendation: seg.review || "",
+        note: seg.review_note || "",
+      };
+    });
 
   return {
     job_id: payload.job_id,
     status: payload.status || "unknown",
     video: {
-      duration: Number(payload.video.duration) || 0,
-      filename: payload.video.filename || "",
-      path: payload.video.path || null,
+      duration: Number(rawVideo.duration) || 0,
+      filename: rawVideo.filename || "",
+      path: rawVideo.path || null,
     },
     segments: segments,
     agent_comments: agentComments,
-    keyframes: Array.isArray(payload.keyframes) ? payload.keyframes : [],
+    keyframes: Array.isArray(payload.keyframes)
+      ? payload.keyframes.filter((kf) => kf && typeof kf === "object")
+      : [],
     output: payload.output || {},
+    reviews: reviews,
   };
 }
 
@@ -322,11 +433,12 @@ export function applyEditorData(payload) {
   editorState.agentComments = Array.isArray(data.agent_comments) ? data.agent_comments : [];
   editorState.keyframes = Array.isArray(data.keyframes) ? data.keyframes : [];
   editorState.output = data.output || null;
-  editorState.reviews = {};
+  editorState.reviews = data.reviews || {};
   editorState.dirty = false;
   editorState.selectedSegmentId = null;
   editorState.undoStack = [];
   editorState.redoStack = [];
+  editorState.saveStatus = "saved";
 
   byId("header-job-id").textContent = data.job_id || editorState.jobId || "—";
   byId("header-meta").textContent =
@@ -343,11 +455,37 @@ export function applyEditorData(payload) {
   renderStatsDashboard();
   renderTrajectoryPanel();
   updateDirtyIndicator();
+  updateAutoSaveIndicator();
 
-  // P2: check for auto-saved draft
+  // Show auto-save indicator
+  byId("auto-save-indicator").hidden = false;
+
+  // Check for auto-saved draft
   checkDraft();
 
   if (editorState.segments.length > 0) {
     selectSegment(editorState.segments[0].id);
+  }
+}
+
+// ── auto-save indicator helper ─────────────────────────────────────────
+
+function updateAutoSaveIndicator() {
+  const indicator = byId("auto-save-indicator");
+  if (!indicator) return;
+
+  const status = editorState.saveStatus;
+  indicator.className = "auto-save-indicator " + status;
+  byId("save-status-text").textContent =
+    status === "saving" ? "保存中…" :
+    status === "saved" ? "已保存" :
+    status === "error" ? "保存失败" : "未保存";
+
+  byId("save-retry-button").hidden = status !== "error";
+
+  if (status === "error") {
+    byId("save-retry-button").onclick = () => {
+      import("./editor-actions.js").then((m) => m.saveReview());
+    };
   }
 }

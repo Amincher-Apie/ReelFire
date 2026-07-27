@@ -7,6 +7,7 @@ import { outputUrl } from "../utils/url.js";
 import { showToast, setButtonLoading } from "../utils/ui.js";
 import { renderWorkbenchCharts } from "./charts.js";
 import { isSSESupported, connectSSE } from "../api/sse.js";
+import { showTaskStages, hideTaskStages, simulateStageProgress, showProgressDetail, hideProgressDetail, updateProgressDetail, showEmptyResultGuide, hideEmptyResultGuide } from "./task-progress.js";
 
 // ── view switching ────────────────────────────────────────────────────
 
@@ -129,8 +130,10 @@ export function renderSegments(segments) {
   byId("segment-count").textContent = `${segments.length} 个片段`;
   if (!segments.length) {
     container.append(createElement("p", "empty-copy", "报告中没有候选片段。"));
+    showEmptyResultGuide();
     return;
   }
+  hideEmptyResultGuide();
   segments.forEach((segment, index) => {
     const item = createElement("div", "segment-item");
     const order = createElement("span", "segment-order", String(index + 1).padStart(2, "0"));
@@ -278,17 +281,33 @@ export async function pollJob(jobId) {
     const payload = await api.get(`/api/jobs/${encodeURIComponent(jobId)}`);
     const job = payload.job;
     appState.currentJob = job;
+
+    // Update stage progress
+    simulateStageProgress(job.status);
+
     if (job.status === "completed") {
       logTool("GET", `/api/jobs/${jobId}`, "任务已完成");
+      hideTaskStages();
+      hideProgressDetail();
+      byId("cancel-analysis-button").hidden = true;
       await loadReport(jobId);
       showToast("视频分析完成", "success");
       return;
     }
     if (job.status === "failed") {
       logTool("GET", `/api/jobs/${jobId}`, "任务失败");
+      simulateStageProgress("failed");
+      hideProgressDetail();
+      byId("cancel-analysis-button").hidden = true;
       setResultState("error", "failed", job.error || "分析任务失败。");
       return;
     }
+
+    // Update progress detail if available
+    if (job.frames_processed != null) {
+      updateProgressDetail(job.frames_processed, job.total_frames, job.percentage);
+    }
+
     const message =
       job.status === "running"
         ? "正在进行视频采样、目标检测与片段评分…"
@@ -393,6 +412,10 @@ export async function submitAnalysis() {
   appState.toolCalls = [];
   renderToolCalls();
   updateAgentFlow(false);
+  showTaskStages();
+  showProgressDetail();
+  hideEmptyResultGuide();
+  byId("cancel-analysis-button").hidden = false;
   setButtonLoading(button, true, "正在创建任务…");
   setResultState("loading", "queued", "正在上传视频并创建任务…");
   try {
@@ -407,6 +430,9 @@ export async function submitAnalysis() {
     watchJob(created.job_id);
   } catch (error) {
     setButtonLoading(button, false);
+    hideTaskStages();
+    hideProgressDetail();
+    byId("cancel-analysis-button").hidden = true;
     setResultState("error", "failed", error.message);
     showToast(error.message, "error");
   }

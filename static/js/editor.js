@@ -8,6 +8,9 @@ import { loadEditorData } from "./views/editor-segments.js";
 import { setReviewStatus, setReviewNote, applyBoundaryChange, reorderSegment, undo, redo } from "./views/editor-review.js";
 import { showStatsDialog } from "./views/editor-stats.js";
 import { saveReview, createRoughCut, exportReview, showReportDialog } from "./views/editor-actions.js";
+import { showAddSegmentDialog, addManualSegment, deleteSegment, setPlayheadAsStart,
+         setPlayheadAsEnd, mergeSelectedSegments, showSplitDialog } from "./views/segment-ops.js";
+import { showExportDialog, initExportCenter } from "./views/export-center.js";
 
 function initEditor() {
   initTheme();
@@ -32,6 +35,10 @@ function initEditor() {
     if (e.target === byId("report-dialog")) byId("report-dialog").close();
   });
   safeOn("export-review-button", "click", exportReview);
+
+  // Export center
+  safeOn("open-export-button", "click", showExportDialog);
+  initExportCenter();
 
   // undo/redo buttons (P2)
   safeOn("undo-button", "click", undo);
@@ -81,11 +88,40 @@ function initEditor() {
     });
   });
 
+  // Playhead → boundary buttons
+  safeOn("set-start-from-playhead", "click", setPlayheadAsStart);
+  safeOn("set-end-from-playhead", "click", setPlayheadAsEnd);
+
   // sort buttons
   const sortUp = document.querySelector(".sort-up");
   const sortDown = document.querySelector(".sort-down");
   if (sortUp) sortUp.addEventListener("click", () => reorderSegment(editorState.selectedSegmentId, "up"));
   if (sortDown) sortDown.addEventListener("click", () => reorderSegment(editorState.selectedSegmentId, "down"));
+
+  // Manual add segment
+  safeOn("add-segment-button", "click", showAddSegmentDialog);
+  safeOn("close-add-segment-dialog", "click", () => byId("add-segment-dialog").close());
+  safeOn("cancel-add-segment", "click", () => byId("add-segment-dialog").close());
+  safeOn("manual-add-from-empty", "click", showAddSegmentDialog);
+  const addSegDialog = byId("add-segment-dialog");
+  if (addSegDialog) {
+    addSegDialog.addEventListener("click", (e) => {
+      if (e.target === addSegDialog) addSegDialog.close();
+    });
+  }
+  safeOn("confirm-add-segment", "click", () => {
+    const start = parseFloat(byId("new-segment-start").value);
+    const end = parseFloat(byId("new-segment-end").value);
+    if (isNaN(start) || isNaN(end) || start >= end) {
+      import("./utils/ui.js").then((m) => m.showToast("请输入有效的起止时间（起始 < 结束）", "error"));
+      return;
+    }
+    addManualSegment(start, end);
+  });
+
+  // Merge / split buttons
+  safeOn("merge-segments-button", "click", mergeSelectedSegments);
+  safeOn("split-segment-button", "click", showSplitDialog);
 
   // P2: keyboard shortcuts for undo/redo
   document.addEventListener("keydown", (e) => {
@@ -101,7 +137,7 @@ function initEditor() {
 
   // dirty state warning
   window.addEventListener("beforeunload", (e) => {
-    if (editorState.dirty) {
+    if (editorState.dirty || editorState.saveStatus === "saving") {
       e.preventDefault();
       e.returnValue = "您有未保存的审核修改，确定要离开吗？";
       return e.returnValue;

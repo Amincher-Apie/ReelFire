@@ -574,3 +574,430 @@ def get_project(project_id: int):
     if row is None:
         return jsonify(ok=False, error="项目不存在"), 404
     return jsonify(ok=True, project=dict(row))
+
+
+@api_bp.patch("/projects/<int:project_id>")
+def update_project(project_id: int):
+    """Rename a project."""
+    user_id = _require_user()
+    payload = _json_object()
+    name = str(payload.get("name", "")).strip()
+    if not name or len(name) > 100:
+        raise FileValidationError("project name 必须为 1-100 个字符")
+    db = get_db()
+    row = db.execute(
+        "SELECT id FROM projects WHERE id = ? AND owner_id = ? AND status = 'active'",
+        (project_id, user_id),
+    ).fetchone()
+    if row is None:
+        return jsonify(ok=False, error="项目不存在"), 404
+    now = datetime.now().replace(microsecond=0).isoformat()
+    db.execute(
+        "UPDATE projects SET name = ?, updated_at = ? WHERE id = ?",
+        (name, now, project_id),
+    )
+    db.commit()
+    return jsonify(ok=True, project={"id": project_id, "name": name, "updated_at": now})
+
+
+@api_bp.delete("/projects/<int:project_id>")
+def archive_project(project_id: int):
+    """Soft-delete (archive) a project."""
+    user_id = _require_user()
+    db = get_db()
+    row = db.execute(
+        "SELECT id FROM projects WHERE id = ? AND owner_id = ? AND status = 'active'",
+        (project_id, user_id),
+    ).fetchone()
+    if row is None:
+        return jsonify(ok=False, error="项目不存在"), 404
+    now = datetime.now().replace(microsecond=0).isoformat()
+    db.execute(
+        "UPDATE projects SET status = 'archived', updated_at = ? WHERE id = ?",
+        (now, project_id),
+    )
+    db.commit()
+    return jsonify(ok=True, deleted_project_id=project_id)
+
+
+# ── Job control ──────────────────────────────────────────────────────────
+
+@api_bp.post("/jobs/<job_id>/cancel")
+def cancel_job(job_id: str):
+    """Cancel a queued or running job."""
+    jobs, _, analysis = _services()
+    job = jobs.get_job(job_id)
+    if job.get("status") not in ("queued", "running"):
+        raise JobStateConflictError("只能取消排队中或运行中的任务")
+    analysis.cancel_job(job_id)
+    jobs.update_job(job_id, status="failed", error="用户取消任务")
+    return jsonify(ok=True, job_id=job_id, status="cancelled")
+
+
+@api_bp.post("/jobs/<job_id>/retry")
+def retry_job(job_id: str):
+    """Retry a failed job."""
+    jobs, _, analysis = _services()
+    job = jobs.get_job(job_id)
+    if job.get("status") != "failed":
+        raise JobStateConflictError("只能重试失败的任务")
+    analysis.enqueue(job_id)
+    return jsonify(ok=True, job_id=job_id, status="queued"), 202
+
+
+# ── Manual segment CRUD ──────────────────────────────────────────────────
+
+def _read_report_or_raise(jobs: JobService, job_id: str) -> dict[str, Any]:
+    if not jobs.report_path(job_id).is_file():
+        raise JobStateConflictError("分析报告尚未生成，不能操作片段")
+    return jobs.read_report(job_id)
+
+
+@api_bp.post("/jobs/<job_id>/segments")
+def add_segment(job_id: str):
+    """Add a manual segment to the report."""
+    jobs, _, _ = _services()
+    report = _read_report_or_raise(jobs, job_id)
+    payload = _json_object()
+    start = _number(payload, "start", 0, minimum=0, maximum=86_400_000)
+    end = _number(payload, "end", 0, minimum=0, maximum=86_400_000)
+    if start >= end:
+        raise FileValidationError("必须满足 0 <= start < end")
+
+    segments = list(report.get("segments") or [])
+    max_order = max((s.get("order", 0) for s in segments), default=0)
+    new_seg = {
+        "id": payload.get("id") or f"manual_{len(segments) + 1:03d}",
+        "start": start,
+        "end": end,
+        "score": 0,
+        "order": max_order + 1,
+        "source_keyframes": [],
+        "type": "manual",
+    }
+    segments.append(new_seg)
+
+    def update_fn(current: dict[str, Any]) -> dict[str, Any]:
+        return {**current, "segments": segments}
+
+    updated = jobs.update_report(job_id, update_fn)
+    return jsonify(ok=True, segment=new_seg, report=updated), 201
+
+
+@api_bp.delete("/jobs/<job_id>/segments/<seg_id>")
+def delete_segment(job_id: str, seg_id: str):
+    """Delete/ignore a segment from the report."""
+    jobs, _, _ = _services()
+    report = _read_report_or_raise(jobs, job_id)
+    segments = list(report.get("segments") or [])
+    original_len = len(segments)
+    segments = [s for s in segments if str(s.get("id")) != seg_id]
+    if len(segments) == original_len:
+        return jsonify(ok=False, error="片段不存在"), 404
+
+    def update_fn(current: dict[str, Any]) -> dict[str, Any]:
+        return {**current, "segments": segments}
+
+    updated = jobs.update_report(job_id, update_fn)
+    return jsonify(ok=True, deleted_segment_id=seg_id, report=updated)
+
+
+@api_bp.patch("/jobs/<job_id>/segments/<seg_id>")
+def update_segment(job_id: str, seg_id: str):
+    """Update a segment's boundary, order, or status."""
+    jobs, _, _ = _services()
+    report = _read_report_or_raise(jobs, job_id)
+    payload = _json_object()
+    segments = list(report.get("segments") or [])
+
+    target = None
+    for s in segments:
+        if str(s.get("id")) == seg_id:
+            target = s
+            break
+    if target is None:
+        return jsonify(ok=False, error="片段不存在"), 404
+
+    if "start" in payload:
+        start = _number(payload, "start", 0, minimum=0, maximum=86_400_000)
+        if start >= target.get("end", start + 1):
+            raise FileValidationError("start 必须小于 end")
+        target["start"] = start
+    if "end" in payload:
+        end = _number(payload, "end", 0, minimum=0, maximum=86_400_000)
+        if end <= target.get("start", 0):
+            raise FileValidationError("end 必须大于 start")
+        target["end"] = end
+    if "order" in payload:
+        target["order"] = _integer(payload, "order", target.get("order", 0), minimum=1, maximum=100_000)
+
+    def update_fn(current: dict[str, Any]) -> dict[str, Any]:
+        return {**current, "segments": segments}
+
+    updated = jobs.update_report(job_id, update_fn)
+    return jsonify(ok=True, segment=target, report=updated)
+
+
+@api_bp.post("/jobs/<job_id>/segments/merge")
+def merge_segments(job_id: str):
+    """Merge two adjacent segments into one."""
+    jobs, _, _ = _services()
+    report = _read_report_or_raise(jobs, job_id)
+    payload = _json_object()
+    seg_id_1 = str(payload.get("seg_id_1") or payload.get("segment_1") or "")
+    seg_id_2 = str(payload.get("seg_id_2") or payload.get("segment_2") or "")
+    if not seg_id_1 or not seg_id_2:
+        raise FileValidationError("必须提供 seg_id_1 和 seg_id_2")
+
+    segments = list(report.get("segments") or [])
+    seg1 = seg2 = None
+    remaining = []
+    for s in segments:
+        sid = str(s.get("id"))
+        if sid == seg_id_1:
+            seg1 = s
+        elif sid == seg_id_2:
+            seg2 = s
+        else:
+            remaining.append(s)
+
+    if seg1 is None or seg2 is None:
+        return jsonify(ok=False, error="至少一个片段不存在"), 404
+
+    merged = {
+        "id": f"merged_{seg_id_1}_{seg_id_2}",
+        "start": min(seg1["start"], seg2["start"]),
+        "end": max(seg1["end"], seg2["end"]),
+        "score": max(seg1.get("score", 0), seg2.get("score", 0)),
+        "order": min(seg1.get("order", 0), seg2.get("order", 0)),
+        "source_keyframes": list(
+            set(seg1.get("source_keyframes", []) + seg2.get("source_keyframes", []))
+        ),
+        "type": "merged",
+    }
+    remaining.append(merged)
+    remaining.sort(key=lambda s: s.get("order", 0))
+
+    def update_fn(current: dict[str, Any]) -> dict[str, Any]:
+        return {**current, "segments": remaining}
+
+    updated = jobs.update_report(job_id, update_fn)
+    return jsonify(ok=True, segment=merged, report=updated)
+
+
+@api_bp.post("/jobs/<job_id>/segments/<seg_id>/split")
+def split_segment(job_id: str, seg_id: str):
+    """Split a segment into two at the given time point."""
+    jobs, _, _ = _services()
+    report = _read_report_or_raise(jobs, job_id)
+    payload = _json_object()
+    split_time = _number(payload, "split_time", 0, minimum=0, maximum=86_400_000)
+
+    segments = list(report.get("segments") or [])
+    target = None
+    for s in segments:
+        if str(s.get("id")) == seg_id:
+            target = s
+            break
+    if target is None:
+        return jsonify(ok=False, error="片段不存在"), 404
+    if split_time <= target["start"] or split_time >= target["end"]:
+        raise FileValidationError("split_time 必须在片段的 start 和 end 之间")
+
+    seg_a = {
+        "id": f"{seg_id}_a",
+        "start": target["start"],
+        "end": split_time,
+        "score": target.get("score", 0),
+        "order": target.get("order", 0),
+        "source_keyframes": list(target.get("source_keyframes", [])),
+        "type": "split",
+    }
+    seg_b = {
+        "id": f"{seg_id}_b",
+        "start": split_time,
+        "end": target["end"],
+        "score": target.get("score", 0),
+        "order": target.get("order", 0) + 1,
+        "source_keyframes": list(target.get("source_keyframes", [])),
+        "type": "split",
+    }
+
+    new_segments = []
+    for s in segments:
+        if str(s.get("id")) == seg_id:
+            new_segments.append(seg_a)
+            new_segments.append(seg_b)
+        else:
+            new_segments.append(s)
+
+    def update_fn(current: dict[str, Any]) -> dict[str, Any]:
+        return {**current, "segments": new_segments}
+
+    updated = jobs.update_report(job_id, update_fn)
+    return jsonify(ok=True, segments=[seg_a, seg_b], report=updated)
+
+
+# ── Export ───────────────────────────────────────────────────────────────
+
+@api_bp.post("/jobs/<job_id>/export")
+def export_job(job_id: str):
+    """Start an export task (single clip or collection).
+
+    Body: {mode: "single"|"collection", segments: [...], aspect_ratio, resolution,
+           keep_audio: bool, filename: str}
+    """
+    jobs, _, _ = _services()
+    job = jobs.get_job(job_id)
+    if job.get("status") != "completed":
+        raise JobStateConflictError("只有已完成的任务可以导出")
+    if not is_ffmpeg_available():
+        return jsonify(ok=False, error="FFmpeg 不可用，无法导出"), 501
+
+    payload = _json_object()
+    mode = str(payload.get("mode", "collection")).strip()
+    if mode not in ("single", "collection"):
+        raise FileValidationError("mode 仅支持 single 或 collection")
+    aspect_ratio = str(payload.get("aspect_ratio", "16:9")).strip()
+    if aspect_ratio not in current_app.config["ALLOWED_OUTPUT_RATIOS"]:
+        raise FileValidationError("aspect_ratio 仅支持 16:9、9:16 或 1:1")
+    resolution = str(payload.get("resolution", "original")).strip()
+    if resolution not in ("original", "1080p", "720p"):
+        raise FileValidationError("resolution 仅支持 original、1080p 或 720p")
+    keep_audio = bool(payload.get("keep_audio", True))
+    filename = str(payload.get("filename", "")).strip()
+    if not filename:
+        filename = f"export_{mode}_{job_id[:8]}"
+    # Sanitize filename
+    filename = "".join(c for c in filename if c.isalnum() or c in "._-") or "export"
+
+    report = jobs.read_report(job_id)
+    segments = list(report.get("segments") or [])
+    requested_segments = payload.get("segments")
+
+    if mode == "single":
+        # Single segment export: export each requested segment separately
+        if not isinstance(requested_segments, list) or not requested_segments:
+            raise FileValidationError("单片段导出需要提供 segments 数组")
+        seg_ids = [str(s.get("id", "")) for s in requested_segments]
+        target_segs = [s for s in segments if str(s.get("id")) in seg_ids]
+        if not target_segs:
+            raise FileValidationError("未找到要导出的片段")
+
+        results = []
+        job_dir = jobs.job_dir(job_id)
+        input_video = jobs.get_input_video(job_id)
+        ratio_label = aspect_ratio.replace(":", "x")
+        for i, seg in enumerate(target_segs):
+            out_path = job_dir / "result" / f"{filename}_{i + 1}_{ratio_label}.mp4"
+            try:
+                result_path = create_rough_cut(
+                    input_video, out_path, seg["start"], seg["end"], aspect_ratio
+                )
+                relative = Path(result_path).resolve().relative_to(job_dir.resolve()).as_posix()
+                results.append({
+                    "segment_id": seg["id"],
+                    "output": relative,
+                    "start": seg["start"],
+                    "end": seg["end"],
+                })
+            except NotImplementedError as exc:
+                return jsonify(ok=False, error=str(exc)), 501
+        return jsonify(ok=True, job_id=job_id, mode=mode, exports=results)
+
+    # Collection mode: merge all requested/adopted segments
+    if isinstance(requested_segments, list) and requested_segments:
+        seg_ids = [str(s.get("id", "")) for s in requested_segments]
+        target_segs = [s for s in segments if str(s.get("id")) in seg_ids]
+    else:
+        target_segs = sorted(segments, key=lambda s: s.get("order", 0))
+
+    if not target_segs:
+        raise FileValidationError("没有可导出的片段")
+
+    # Use ffmpeg to concatenate segments (via concat demuxer)
+    job_dir = jobs.job_dir(job_id)
+    input_video = jobs.get_input_video(job_id)
+    ratio_label = aspect_ratio.replace(":", "x")
+    out_path = job_dir / "result" / f"{filename}_{ratio_label}.mp4"
+
+    try:
+        import subprocess
+        import tempfile
+
+        # Write concat file
+        concat_lines = []
+        for seg in target_segs:
+            duration = seg["end"] - seg["start"]
+            concat_lines.append(f"file '{input_video.as_posix()}'")
+            concat_lines.append(f"inpoint {seg['start']}")
+            concat_lines.append(f"outpoint {seg['end']}")
+
+        concat_file = job_dir / "result" / "_concat_list.txt"
+        concat_file.write_text("\n".join(concat_lines), encoding="utf-8")
+
+        resolution_map = {"original": None, "1080p": "1920:1080", "720p": "1280:720"}
+        scale_filter = ""
+        if resolution_map.get(resolution):
+            scale_filter = f",scale={resolution_map[resolution]}"
+
+        vf_parts = [f"crop=ih*{aspect_ratio.replace(':', '/')}:ih", f"scale=iw:ih{scale_filter}"]
+        vf_combined = ",".join(p for p in vf_parts if p)
+
+        cmd = [
+            "ffmpeg", "-y",
+            "-f", "concat", "-safe", "0",
+            "-i", str(concat_file),
+        ]
+        if not keep_audio:
+            cmd += ["-an"]
+        cmd += [
+            "-c:v", "libx264", "-preset", "medium", "-crf", "23",
+            "-c:a", "aac" if keep_audio else "copy",
+            "-vf", vf_combined,
+            "-movflags", "+faststart",
+            str(out_path),
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            raise RuntimeError(f"FFmpeg 导出失败: {result.stderr[:500]}")
+
+        # Clean up concat file
+        concat_file.unlink(missing_ok=True)
+
+        relative = out_path.resolve().relative_to(job_dir.resolve()).as_posix()
+
+        # Update report output
+        def update_output(current: dict[str, Any]) -> dict[str, Any]:
+            output = current.get("output") or {}
+            if not isinstance(output, dict):
+                output = {}
+            exports = list(output.get("exports") or [])
+            exports.append({
+                "file": relative,
+                "mode": mode,
+                "aspect_ratio": aspect_ratio,
+                "resolution": resolution,
+                "segment_count": len(target_segs),
+                "created_at": datetime.now().isoformat(),
+            })
+            return {**current, "output": {**output, "video": relative, "exports": exports}}
+
+        jobs.update_report(job_id, update_output)
+        jobs.update_job(job_id)
+
+        return jsonify(
+            ok=True,
+            job_id=job_id,
+            mode=mode,
+            export={
+                "file": relative,
+                "segment_count": len(target_segs),
+                "total_duration": sum(s["end"] - s["start"] for s in target_segs),
+            },
+        )
+    except subprocess.TimeoutExpired:
+        return jsonify(ok=False, error="导出超时"), 500
+    except Exception as exc:
+        return jsonify(ok=False, error=f"导出失败: {str(exc)}"), 500

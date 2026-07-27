@@ -32,6 +32,13 @@
     </div>
 
     <div class="header-actions">
+      <!-- Auto-save indicator -->
+      <span id="auto-save-indicator" class="auto-save-indicator saved" aria-live="polite" hidden>
+        <span class="save-status-icon"></span>
+        <span class="save-status-text" id="save-status-text">已保存</span>
+        <button id="save-retry-button" class="button ghost small" type="button" hidden>重试</button>
+      </span>
+
       <div class="theme-switcher" role="group" aria-label="界面主题">
         <button class="theme-button active" type="button" data-theme-value="dark" aria-label="暗色主题" title="暗色主题"><span class="theme-dot dark"></span></button>
         <button class="theme-button" type="button" data-theme-value="light" aria-label="亮色主题" title="亮色主题"><span class="theme-dot light"></span></button>
@@ -69,11 +76,28 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
       <h3>没有精彩片段</h3>
       <p>该任务未生成精彩片段，请检查分析参数或尝试其他视频。</p>
+      <div class="empty-result-actions">
+        <span>你可以：</span>
+        <ul>
+          <li>降低识别阈值重新分析</li>
+          <li><button id="manual-add-from-empty" class="link-button" type="button">手动添加片段</button></li>
+          <li>重新选择游戏类型</li>
+        </ul>
+      </div>
       <a href="/" class="button secondary">返回工作台</a>
     </div>
 
     <!-- 主内容区 -->
     <div id="editor-content" class="editor-content" hidden>
+
+      <!-- 草稿恢复提示 -->
+      <div id="draft-banner" class="draft-banner" hidden role="status" aria-live="polite">
+        <span id="draft-banner-msg">检测到未保存的审核草稿。</span>
+        <div class="draft-banner-actions">
+          <button id="draft-recover-button" class="button primary small" type="button">恢复草稿</button>
+          <button id="draft-discard-button" class="button ghost small" type="button">放弃</button>
+        </div>
+      </div>
 
       <!-- 当前视频预览区 -->
       <section class="editor-video-section" aria-labelledby="video-heading">
@@ -99,11 +123,11 @@
               <button id="timeline-play" class="timeline-play-button" type="button" aria-label="播放">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="6,3 20,12 6,21"/></svg>
               </button>
-              <div class="timeline-zoom-controls" role="group" aria-label="时间轴缩放">
-                <button class="timeline-zoom-btn timeline-zoom-out" type="button" aria-label="缩小时间轴" title="缩小 (Ctrl+滚轮)">−</button>
-                <span id="timeline-zoom-label" class="timeline-zoom-label">1.0x</span>
-                <button class="timeline-zoom-btn timeline-zoom-in" type="button" aria-label="放大时间轴" title="放大 (Ctrl+滚轮)">+</button>
-                <button class="timeline-zoom-btn timeline-zoom-reset" type="button" aria-label="重置缩放" title="重置缩放">↺</button>
+              <div class="timeline-speed-controls" role="group" aria-label="播放速度">
+                <button class="timeline-speed-btn timeline-speed-down" type="button" aria-label="减慢播放速度" title="减速 (Ctrl+滚轮)">−</button>
+                <span id="timeline-speed-label" class="timeline-speed-label">1.0x</span>
+                <button class="timeline-speed-btn timeline-speed-up" type="button" aria-label="加快播放速度" title="加速 (Ctrl+滚轮)">+</button>
+                <button class="timeline-speed-btn timeline-speed-reset" type="button" aria-label="重置速度" title="重置速度">↺</button>
               </div>
             </div>
           </div>
@@ -131,19 +155,19 @@
             <p class="panel-kicker">当前视频</p>
             <h2 id="segments-heading" class="editor-section-title">我的媒体 · 精彩片段</h2>
           </div>
-          <span id="segments-count" class="segments-badge">0 个片段</span>
+          <div class="segments-header-actions">
+            <span id="segments-count" class="segments-badge">0 个片段</span>
+            <button id="add-segment-button" class="button secondary small" type="button" title="手动添加片段">
+              <svg viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M12 5v14M5 12h14"/></svg>
+              添加片段
+            </button>
+          </div>
         </div>
 
         <div class="segments-layout">
-          <!-- 严格两列：时间范围、后端返回的最终 Agent 评论 -->
-          <div class="segment-table" role="table" aria-label="当前视频精彩片段">
-            <div class="segment-table-head" role="row">
-              <span role="columnheader">时间片段（start:end）</span>
-              <span role="columnheader">Agent 评论</span>
-            </div>
-            <div id="highlight-list" class="segment-table-body" role="rowgroup"
-                 aria-label="精彩片段列表，选择后视频跳转到片段起点"></div>
-          </div>
+          <!-- 片段卡片列表 -->
+          <div id="highlight-list" class="segment-card-list" role="list"
+               aria-label="精彩片段列表，可拖拽排序"></div>
 
           <!-- 片段详情面板 -->
           <aside id="segment-detail" class="segment-detail-panel" aria-labelledby="detail-heading">
@@ -157,12 +181,9 @@
               <div class="detail-header">
                 <h3 id="detail-title">片段详情</h3>
                 <span id="detail-score" class="detail-score-badge"></span>
-                <div id="sort-buttons" class="reorder-buttons" role="group" aria-label="片段排序" hidden>
-                  <button class="icon-button reorder-btn sort-up" type="button" aria-label="上移片段" title="上移">↑</button>
-                  <button class="icon-button reorder-btn sort-down" type="button" aria-label="下移片段" title="下移">↓</button>
-                </div>
               </div>
 
+              <!-- 片段类型与置信度 -->
               <div class="detail-meta">
                 <div class="detail-meta-item">
                   <span class="detail-meta-label">时间范围</span>
@@ -173,9 +194,23 @@
                   <strong id="detail-duration"></strong>
                 </div>
                 <div class="detail-meta-item">
+                  <span class="detail-meta-label">类型</span>
+                  <strong id="detail-type">自动检测</strong>
+                </div>
+                <div class="detail-meta-item">
+                  <span class="detail-meta-label">置信度</span>
+                  <strong id="detail-confidence">—</strong>
+                </div>
+                <div class="detail-meta-item">
                   <span class="detail-meta-label">来源关键帧</span>
                   <strong id="detail-keyframes"></strong>
                 </div>
+              </div>
+
+              <!-- 排序按钮 -->
+              <div id="sort-buttons" class="reorder-buttons" role="group" aria-label="片段排序" hidden>
+                <button class="icon-button reorder-btn sort-up" type="button" aria-label="上移片段" title="上移">↑</button>
+                <button class="icon-button reorder-btn sort-down" type="button" aria-label="下移片段" title="下移">↓</button>
               </div>
 
               <!-- 边界编辑 -->
@@ -184,8 +219,10 @@
                 <div class="boundary-row">
                   <label class="boundary-label">起始<span class="boundary-unit">(秒)</span></label>
                   <input id="boundary-start" class="boundary-input boundary-start" type="number" min="0" step="0.1" aria-label="片段起始时间（秒）">
+                  <button id="set-start-from-playhead" class="button ghost small playhead-btn" type="button" title="将当前播放位置设为起点">⏵设为起点</button>
                   <label class="boundary-label">结束<span class="boundary-unit">(秒)</span></label>
                   <input id="boundary-end" class="boundary-input boundary-end" type="number" min="0" step="0.1" aria-label="片段结束时间（秒）">
+                  <button id="set-end-from-playhead" class="button ghost small playhead-btn" type="button" title="将当前播放位置设为终点">⏵设为终点</button>
                 </div>
               </div>
 
@@ -251,6 +288,12 @@
                 <label for="review-note-input" class="agent-field-label">审核备注</label>
                 <input id="review-note-input" class="review-note-field" type="text" maxlength="500" placeholder="添加审核备注（可选）">
               </div>
+
+              <!-- 片段操作按钮 -->
+              <div id="segment-ops-bar" class="segment-ops-bar" hidden>
+                <button id="merge-segments-button" class="button ghost small" type="button">合并相邻片段</button>
+                <button id="split-segment-button" class="button ghost small" type="button">拆分片段</button>
+              </div>
             </div>
           </aside>
         </div>
@@ -260,7 +303,6 @@
       <section id="stats-dashboard" class="editor-stats-bar" aria-labelledby="stats-heading" hidden>
         <h2 id="stats-heading" class="editor-section-title">分析统计</h2>
 
-        <!-- 四个可点击的统计按钮 -->
         <div class="stat-tiles">
           <button class="stat-tile pass" type="button" data-stat="pass" aria-label="通过片段数，点击查看详情">
             <svg class="stat-tile-icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="m8 12 3 3 5-5"/></svg>
@@ -284,7 +326,6 @@
           </button>
         </div>
 
-        <!-- 轨迹可视化 -->
         <div id="trajectory-panel" class="trajectory-section" hidden>
           <h4>目标跟踪轨迹</h4>
           <div id="trajectory-placeholder" hidden>
@@ -309,6 +350,11 @@
           保存审核
         </button>
         <button id="rough-cut-button" class="button primary" type="button">生成粗剪</button>
+        <button id="open-export-button" class="button primary" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true" style="width:14px;height:14px"><path d="M12 16V4m0 0L7 9m5-5 5 5"/><path d="M5 14v5h14v-5"/></svg>
+          导出中心
+        </button>
+        <span class="toolbar-sep" aria-hidden="true"></span>
         <button id="view-report-button" class="button ghost" type="button">查看 JSON 报告</button>
         <button id="export-review-button" class="button ghost" type="button">导出审核</button>
         <a id="back-workbench-link" href="/" class="button ghost">返回工作台</a>
@@ -317,6 +363,125 @@
 
   </main>
 </div>
+
+<!-- 手动添加片段对话框 -->
+<dialog id="add-segment-dialog" class="report-dialog">
+  <div class="dialog-header">
+    <div><p class="panel-kicker">MANUAL</p><h2>手动添加片段</h2></div>
+    <button id="close-add-segment-dialog" class="icon-button" type="button" aria-label="关闭">×</button>
+  </div>
+  <div class="dialog-body">
+    <p class="dialog-hint">输入片段的起止时间（秒），或使用下方按钮从当前播放位置设置。</p>
+    <div class="form-field">
+      <label for="new-segment-start">起始时间（秒）</label>
+      <input id="new-segment-start" type="number" min="0" step="0.1" value="0" required>
+    </div>
+    <div class="form-field">
+      <label for="new-segment-end">结束时间（秒）</label>
+      <input id="new-segment-end" type="number" min="0" step="0.1" value="0" required>
+    </div>
+    <div class="dialog-actions">
+      <button id="cancel-add-segment" class="button ghost" type="button">取消</button>
+      <button id="confirm-add-segment" class="button primary" type="button">添加片段</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- 导出对话框 -->
+<dialog id="export-dialog" class="report-dialog export-dialog-wide">
+  <div class="dialog-header">
+    <div><p class="panel-kicker">EXPORT</p><h2>导出中心</h2></div>
+    <button id="close-export-dialog" class="icon-button" type="button" aria-label="关闭">×</button>
+  </div>
+
+  <!-- 导出配置面板 -->
+  <div id="export-config-panel" class="export-panel">
+    <div class="form-field">
+      <label>导出模式</label>
+      <div class="export-mode-selector" role="radiogroup" aria-label="导出模式">
+        <button class="export-mode-option active" type="button" data-export-mode="collection" aria-pressed="true">合集导出</button>
+        <button class="export-mode-option" type="button" data-export-mode="single" aria-pressed="false">单片段导出</button>
+      </div>
+    </div>
+
+    <div id="export-collection-info" class="export-info-text"></div>
+    <div id="export-single-segment-selector" hidden>
+      <label>选择片段</label>
+      <div id="export-single-segment-list" class="export-segment-list"></div>
+    </div>
+
+    <div class="form-grid">
+      <div class="form-field">
+        <label>画面比例</label>
+        <div class="export-ratio-selector" role="radiogroup" aria-label="画面比例">
+          <button class="export-ratio-option active" type="button" data-ratio-value="16:9" aria-pressed="true">16:9 横屏</button>
+          <button class="export-ratio-option" type="button" data-ratio-value="9:16" aria-pressed="false">9:16 竖屏</button>
+          <button class="export-ratio-option" type="button" data-ratio-value="1:1" aria-pressed="false">1:1 方形</button>
+        </div>
+      </div>
+      <div class="form-field">
+        <label for="export-resolution">分辨率</label>
+        <select id="export-resolution">
+          <option value="original">原始分辨率</option>
+          <option value="1080p">1080p</option>
+          <option value="720p">720p</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="form-field">
+      <label class="toggle-label">
+        <input id="export-audio-toggle" type="checkbox" checked>
+        保留原始音频
+      </label>
+    </div>
+
+    <div class="form-field">
+      <label for="export-filename">输出文件名</label>
+      <input id="export-filename" type="text" maxlength="100" placeholder="例如：cs2_highlights_0727">
+    </div>
+
+    <button id="export-submit-button" class="button primary full" type="button">开始导出</button>
+  </div>
+
+  <!-- 导出进度面板 -->
+  <div id="export-progress-panel" class="export-panel" hidden>
+    <div class="state-container">
+      <span class="spinner" aria-hidden="true"></span>
+      <h3>正在导出</h3>
+      <p id="export-progress-text">准备中…</p>
+      <div class="upload-progress" style="max-width:300px;margin:12px auto">
+        <div id="export-progress-fill" class="upload-progress-fill" style="width:0%"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 导出结果面板 -->
+  <div id="export-result-panel" class="export-panel" hidden>
+    <!-- 单片段结果 -->
+    <div id="export-single-results" hidden>
+      <h3>导出完成</h3>
+      <div id="export-result-list"></div>
+    </div>
+    <!-- 合集结果 -->
+    <div id="export-collection-result" hidden>
+      <h3>导出完成</h3>
+      <div class="export-result-item">
+        <video id="export-result-video" class="export-result-video" controls preload="metadata"
+               aria-label="导出视频预览"></video>
+        <div class="export-result-meta">
+          <div><span>包含片段</span><strong id="export-result-segments">—</strong></div>
+          <div><span>总时长</span><strong id="export-result-duration">—</strong></div>
+        </div>
+        <div class="export-result-actions">
+          <a id="export-download-button" class="button primary" href="#" download>下载视频</a>
+          <button id="export-back-config" class="button secondary" type="button">再次导出</button>
+          <button id="export-close-result" class="button ghost" type="button">关闭</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</dialog>
 
 <!-- JSON 报告弹窗 -->
 <dialog id="report-dialog" class="report-dialog">

@@ -8,7 +8,7 @@ import secrets
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, render_template, send_file
+from flask import Flask, jsonify, render_template, send_file, session
 from werkzeug.exceptions import MethodNotAllowed, NotFound, RequestEntityTooLarge
 
 from config import Config
@@ -64,6 +64,8 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
 
     @app.get("/")
     def index():
+        if session.get("user_id") is None:
+            return render_template("login.html")
         return render_template("index.html")
 
     @app.get("/login")

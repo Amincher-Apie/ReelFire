@@ -16,4 +16,13 @@ export const editorState = {
   // P2: undo/redo stacks
   undoStack: [],
   redoStack: [],
+
+  // Auto-save
+  saveStatus: "saved",    // "saved" | "saving" | "error" | "unsaved"
+  saveVersion: null,
+  segmentThumbnails: {},   // {segmentId: thumbnailUrl}
+
+  // Export
+  exports: [],
+  activeExportId: null,
 };

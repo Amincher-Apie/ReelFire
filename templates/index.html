@@ -25,7 +25,11 @@
     </a>
 
     <nav class="header-nav" aria-label="主导航">
-      <button id="nav-analysis" class="nav-button active" type="button" data-view="analysis">
+      <button id="nav-projects" class="nav-button active" type="button" data-view="projects">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
+        项目
+      </button>
+      <button id="nav-analysis" class="nav-button" type="button" data-view="analysis">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
         分析工作台
       </button>
@@ -36,6 +40,9 @@
     </nav>
 
     <div class="header-actions">
+      <!-- Project context indicator -->
+      <span id="project-context" class="project-context-badge" hidden></span>
+
       <div class="theme-switcher" role="group" aria-label="界面主题">
         <button class="theme-button active" type="button" data-theme-value="dark" aria-label="暗色主题" title="暗色主题"><span class="theme-dot dark"></span></button>
         <button class="theme-button" type="button" data-theme-value="light" aria-label="亮色主题" title="亮色主题"><span class="theme-dot light"></span></button>
@@ -52,7 +59,81 @@
   </header>
 
   <main id="main-content" class="main-content">
-    <section id="view-analysis" class="view active" aria-labelledby="analysis-heading">
+
+    <!-- ═══ 项目仪表盘 ═══ -->
+    <section id="view-projects" class="view active" aria-labelledby="projects-heading">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">DASHBOARD</p>
+          <h1 id="projects-heading">我的项目</h1>
+          <p>选择已有项目继续工作，或创建新项目开始分析。</p>
+        </div>
+        <button id="show-create-project-button" class="button primary" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="M12 5v14M5 12h14"/></svg>
+          创建项目
+        </button>
+      </div>
+
+      <div id="projects-loading" class="state-container">
+        <span class="spinner" aria-hidden="true"></span>
+        <p>正在加载项目列表…</p>
+      </div>
+      <div id="projects-empty" class="state-container" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
+        <h3>暂无项目</h3>
+        <p>创建第一个项目，开始分析 FPS 游戏录屏。</p>
+        <button id="projects-empty-create" class="button primary" type="button">创建项目</button>
+      </div>
+      <div id="projects-error" class="state-container error" hidden>
+        <h3>加载失败</h3>
+        <p id="projects-error-message"></p>
+        <button id="projects-retry-button" class="button secondary" type="button">重试</button>
+      </div>
+      <div id="projects-grid" class="projects-grid" hidden></div>
+    </section>
+
+    <!-- ═══ 项目详情 ═══ -->
+    <section id="view-project-detail" class="view" aria-labelledby="project-detail-heading" hidden>
+      <div class="section-heading">
+        <div>
+          <button id="back-to-projects" class="button ghost small" type="button">← 返回项目列表</button>
+          <h1 id="project-detail-heading">
+            <span id="project-detail-name"></span>
+            <span id="project-detail-game" class="project-game-badge"></span>
+          </h1>
+          <p id="project-detail-date"></p>
+        </div>
+        <button id="project-start-analysis" class="button primary" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="M12 5v14M5 12h14"/></svg>
+          新建分析任务
+        </button>
+      </div>
+
+      <div class="project-detail-panel panel">
+        <h3>分析任务</h3>
+        <div id="project-jobs-loading" class="state-container">
+          <span class="spinner" aria-hidden="true"></span>
+          <p>正在加载任务列表…</p>
+        </div>
+        <div id="project-jobs-empty" class="state-container" hidden>
+          <h3>暂无分析任务</h3>
+          <p>点击「新建分析任务」上传视频并开始分析。</p>
+        </div>
+        <div id="project-jobs-error" class="state-container error" hidden>
+          <h3>加载失败</h3>
+          <p id="project-jobs-error-msg"></p>
+        </div>
+        <div id="project-jobs-table" class="table-wrapper" hidden>
+          <table>
+            <thead><tr><th>任务名称</th><th>视频文件</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
+            <tbody id="project-jobs-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ═══ 分析工作台 ═══ -->
+    <section id="view-analysis" class="view" aria-labelledby="analysis-heading" hidden>
       <div class="section-heading">
         <div>
           <p class="eyebrow">REELFIRE WORKBENCH</p>
@@ -119,6 +200,10 @@
                 </div>
                 <button id="clear-file-button" class="button ghost small" type="button">重新选择</button>
               </div>
+              <!-- Upload progress bar -->
+              <div id="upload-progress-bar" class="upload-progress" hidden>
+                <div class="upload-progress-fill" id="upload-progress-fill"></div>
+              </div>
               <p id="file-error" class="field-error" role="alert"></p>
             </div>
 
@@ -142,10 +227,45 @@
               </select>
             </div>
 
+            <!-- Task progress stages -->
+            <div id="task-stages" class="task-stages" hidden>
+              <div class="task-stage" data-stage="upload">
+                <span class="task-stage-icon"></span>
+                <span>上传视频</span>
+                <span id="stage-status-upload" class="task-stage-status"></span>
+              </div>
+              <div class="task-stage" data-stage="preprocess">
+                <span class="task-stage-icon"></span>
+                <span>视频预处理</span>
+                <span id="stage-status-preprocess" class="task-stage-status"></span>
+              </div>
+              <div class="task-stage" data-stage="keyframe">
+                <span class="task-stage-icon"></span>
+                <span>关键帧提取</span>
+                <span id="stage-status-keyframe" class="task-stage-status"></span>
+              </div>
+              <div class="task-stage" data-stage="detect">
+                <span class="task-stage-icon"></span>
+                <span>YOLO 目标识别</span>
+                <span id="stage-status-detect" class="task-stage-status"></span>
+              </div>
+              <div class="task-stage" data-stage="highlight">
+                <span class="task-stage-icon"></span>
+                <span>高光片段生成</span>
+                <span id="stage-status-highlight" class="task-stage-status"></span>
+              </div>
+              <div class="task-stage" data-stage="proxy">
+                <span class="task-stage-icon"></span>
+                <span>代理视频生成</span>
+                <span id="stage-status-proxy" class="task-stage-status"></span>
+              </div>
+            </div>
+
             <button id="analyze-button" class="button primary full" type="submit">
               <span class="button-icon" aria-hidden="true">▶</span>
               <span class="button-label">创建任务并开始分析</span>
             </button>
+            <button id="cancel-analysis-button" class="button secondary full" type="button" hidden>取消分析</button>
           </form>
         </section>
 
@@ -168,13 +288,30 @@
             <span class="spinner" aria-hidden="true"></span>
             <h3>正在分析</h3>
             <p id="loading-message">任务正在排队，请稍候。</p>
+            <!-- Enhanced progress info -->
+            <div id="analysis-progress-detail" class="analysis-progress-detail" hidden>
+              <div class="progress-stat">
+                <span class="progress-stat-label">处理帧数</span>
+                <strong id="progress-frames">—</strong>
+              </div>
+              <div class="progress-stat">
+                <span class="progress-stat-label">整体进度</span>
+                <strong id="progress-percent">—</strong>
+              </div>
+              <div class="progress-stat">
+                <span class="progress-stat-label">已用时间</span>
+                <strong id="progress-elapsed">—</strong>
+              </div>
+            </div>
           </div>
 
           <div id="result-error" class="state-container error" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 20h19z"/><path d="M12 9v4m0 3h.01"/></svg>
             <h3>分析失败</h3>
             <p id="result-error-message"></p>
-            <button id="retry-button" class="button secondary" type="button">重新提交</button>
+            <div id="result-error-actions" class="result-error-actions">
+              <button id="retry-button" class="button secondary" type="button">重新提交</button>
+            </div>
           </div>
 
           <div id="result-content" class="results-content" hidden>
@@ -201,6 +338,17 @@
             <article class="result-card">
               <div class="result-card-header"><h3>候选片段</h3><span id="segment-count" class="muted-label"></span></div>
               <div id="segment-list" class="segment-list"></div>
+              <div id="empty-result-guide" class="empty-result-guide" hidden>
+                <p>本次分析未发现满足当前阈值的高光片段。</p>
+                <div class="empty-result-actions">
+                  <span>你可以：</span>
+                  <ul>
+                    <li>降低识别阈值重新分析</li>
+                    <li>在剪辑台中手动添加片段</li>
+                    <li>重新选择游戏类型</li>
+                  </ul>
+                </div>
+              </div>
             </article>
 
             <article class="result-card">
@@ -282,6 +430,7 @@
       </div>
     </section>
 
+    <!-- ═══ 历史记录 ═══ -->
     <section id="view-history" class="view" aria-labelledby="history-heading" hidden>
       <div class="section-heading">
         <div><p class="eyebrow">ARCHIVE</p><h1 id="history-heading">历史任务</h1><p>重新打开已完成任务，或检查失败原因。</p></div>
@@ -303,6 +452,33 @@
   </main>
 </div>
 
+<!-- 创建项目对话框 -->
+<dialog id="project-dialog" class="report-dialog">
+  <div class="dialog-header">
+    <div><p class="panel-kicker">NEW PROJECT</p><h2>创建新项目</h2></div>
+    <button id="close-project-dialog-button" class="icon-button" type="button" aria-label="关闭">×</button>
+  </div>
+  <div class="dialog-body">
+    <div class="form-field">
+      <label for="new-project-name">项目名称 <span aria-hidden="true">*</span></label>
+      <input id="new-project-name" type="text" maxlength="100" value="" placeholder="例如：CS2 排位录像 0727" required>
+    </div>
+    <div class="form-field">
+      <label for="new-project-game">游戏类型</label>
+      <select id="new-project-game">
+        <option value="csgo">CS:GO / CS2</option>
+        <option value="valorant">Valorant / 无畏契约</option>
+        <option value="other">其他 FPS</option>
+      </select>
+    </div>
+    <div class="dialog-actions">
+      <button id="cancel-project-button" class="button ghost" type="button">取消</button>
+      <button id="create-project-button" class="button primary" type="button">创建项目</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- JSON 报告弹窗 -->
 <dialog id="report-dialog" class="report-dialog">
   <div class="dialog-header">
     <div><p class="panel-kicker">RAW DATA</p><h2>分析报告</h2></div>

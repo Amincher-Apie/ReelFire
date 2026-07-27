@@ -6,6 +6,6 @@
     "test:browser": "node tests/browser_acceptance.cjs"
   },
   "devDependencies": {
-    "playwright": "1.61.1"
+    "playwright": "^1.61.1"
   }
 }
