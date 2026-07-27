@@ -42,6 +42,8 @@ DIFY_BASE_URL=https://api.dify.ai
 DIFY_API_KEY=
 DIFY_USER=reelfire-demo
 DIFY_MODEL_LABEL=reelfire-chatflow-v1.0.0
+DIFY_MAX_ATTEMPTS=3
+DIFY_RETRY_BASE_SECONDS=0.5
 ```
 
 `DIFY_API_KEY` 必须是该已发布 Chatflow 的应用 API Key，不是知识库 Key 或
@@ -73,6 +75,11 @@ Web 端在分析完成后调用 `POST /api/jobs/<job_id>/agent-calls`，后端�
 
 Key 为空、Dify 超时、返回非 JSON 或引用不合法时，工作流会记录错误并切换为
 确定性规则结果，不会把在线调用失败伪装为成功，也不会破坏 CV 报告。
+
+网络错误、超时、HTTP 429 和 HTTP 5xx 会按上述参数进行有限指数退避；
+401/403、其他 4xx 和输出契约错误不会重试。`agent_report.json.errors[]` 会在
+兼容错误码之外保存提供方错误类型和实际尝试次数，但不会保存 API Key 或完整
+请求头。Day 04 验收矩阵见 `docs/evidence/DAY04_AGENT_ACCEPTANCE.md`。
 
 本地 Ollama 调用示例：
 

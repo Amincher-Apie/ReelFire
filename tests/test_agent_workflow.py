@@ -126,6 +126,20 @@ class BrokenRetriever:
         raise RuntimeError("retrieval backend crashed")
 
 
+class EmptyRetriever:
+    def run(self, visual_summary):
+        return {
+            "status": "completed",
+            "strategy": "acceptance_empty",
+            "query": "no matching rule",
+            "top_k": 5,
+            "result_count": 0,
+            "results": [],
+            "index": None,
+            "degraded_reason": None,
+        }
+
+
 class BrokenGenerator:
     def run(self, visual_summary, retrieval, *, requested_provider):
         raise RuntimeError("generation backend crashed")
@@ -188,6 +202,10 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(result["provider"]["type"], "ollama")
         self.assertEqual(result["provider"]["model"], "test-chat-model")
         self.assertEqual(result["suggestions"][0]["suggestion_id"], "SUG-MODEL-001")
+        self.assertEqual(
+            [item["segment_id"] for item in result["segment_comments"]],
+            ["seg_001"],
+        )
 
     def test_ollama_prompt_uses_real_reference_whitelists(self) -> None:
         class FakeResponse:
@@ -348,6 +366,36 @@ class AgentWorkflowTests(unittest.TestCase):
         self.assertEqual(result["review"]["recommendation"], "needs_review")
         self.assertEqual(result["tags"], [])
         self.assertIn("没有可靠目标类别证据", result["summary"])
+
+    def test_low_confidence_detection_requires_review(self) -> None:
+        payload = agent_input()
+        payload["provider"] = {"type": "rule_only"}
+        for sample in payload["analysis_report"]["samples"]:
+            for detected in sample["objects"]:
+                detected["confidence"] = 0.3
+        for detected in payload["analysis_report"]["keyframes"][0]["objects"]:
+            detected["confidence"] = 0.3
+
+        result = self.completed_service().run(payload)
+
+        self.assertEqual(result["review"]["recommendation"], "needs_review")
+        self.assertLessEqual(result["review"]["confidence"], 0.45)
+        self.assertTrue(
+            all("0.300" in item["description"] for item in result["tags"])
+        )
+
+    def test_knowledge_miss_requires_review_and_keeps_segment_comment(self) -> None:
+        payload = agent_input()
+        payload["provider"] = {"type": "rule_only"}
+        result = AgentService(knowledge_retriever=EmptyRetriever()).run(payload)
+
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["review"]["recommendation"], "needs_review")
+        self.assertEqual(result["knowledge_refs"], [])
+        self.assertEqual(
+            [item["segment_id"] for item in result["segment_comments"]],
+            ["seg_001"],
+        )
 
     def test_report_and_trace_are_atomically_persisted(self) -> None:
         payload = agent_input()

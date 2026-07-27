@@ -1155,6 +1155,13 @@ Legacy 任务的创建接口返回持久化不可用，历史接口返回空数�
 `analysis_report.json`；只原子写入独立的 `agent_report.json` 和
 `agent_trace.json`。
 
+模型提供方失败时，`agent_report.json.errors[]` 保留兼容字段
+`code/message/stage/retryable`，并可增加 `provider_code` 与
+`attempt_count`。`code=model_generation_failed` 供现有 Editor 判断降级，
+`provider_code` 用于区分 Dify 的认证、限流、网络、超时、服务端和契约错误。
+映射到 `agent_calls.result.risk_flags` 时两类错误码都会保留并去重；任何日志和
+API 响应都不得包含 API Key、Authorization 请求头或本机绝对路径。
+
 每次后台调用先写入任务目录下调用专属的
 `.agent_runs/<agent_call_id>-<random>/`。只有状态映射为 `completed` 或
 `needs_review`，且报告和轨迹均为非空 JSON 对象、`job_id` 匹配时，才把两份

@@ -211,11 +211,15 @@ def to_backend_agent_call(
                 for reason in review.get("reasons", [])
                 if isinstance(reason, str)
             ),
-            "risk_flags": [
-                str(item.get("code"))
-                for item in errors
-                if isinstance(item, dict) and item.get("code")
-            ],
+            "risk_flags": list(
+                dict.fromkeys(
+                    str(code)
+                    for item in errors
+                    if isinstance(item, dict)
+                    for code in (item.get("code"), item.get("provider_code"))
+                    if code
+                )
+            ),
         },
         "duration_ms": max(0, int(trace.get("duration_ms", 0))),
         "error_code": first_error.get("code"),

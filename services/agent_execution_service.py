@@ -195,7 +195,10 @@ class AgentExecutionService:
 
     def _configured_model_name(self) -> str:
         if self.provider == "dify":
-            return os.getenv("DIFY_MODEL_LABEL", "dify-chat-app")
+            return os.getenv(
+                "DIFY_MODEL_LABEL",
+                "reelfire-chatflow-v1.0.0",
+            )
         if self.provider == "ollama":
             return os.getenv("OLLAMA_MODEL") or "ollama-unconfigured"
         return "deterministic-v1"

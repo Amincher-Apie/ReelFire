@@ -226,3 +226,33 @@ Day 02～Day 03 的代码接入遵循以下原则：
 - `tests/fixtures/cv_highlights_v2.json` 仅用于冻结跨分支契约，不是实际运行数据；
 - 只有拿到 CV 实际生成的多片段 JSON 并完成整链运行后，才可把“真实多片段联调”
   标记为完成。
+
+## 13. Day 04 稳定性与验收口径
+
+Day 04 不扩大 CV、后端或 Editor 的职责边界，优先处理 Agent 调用失败后的
+可诊断、可降级和可交接问题。
+
+Dify 调用采用有限指数退避并加入抖动：默认最多尝试 3 次，基础等待 0.5 秒。
+只重试网络连接错误、超时、HTTP 429 和 HTTP 5xx；HTTP 401/403、其他 4xx、
+空响应和非法业务 JSON 属于配置或契约错误，不自动重试。最终仍失败时继续保留
+兼容错误码 `model_generation_failed`，并额外记录 `provider_code`、
+`attempt_count`、`retryable` 和可用的 `request_id`。后端 `risk_flags` 同时包含
+兼容错误码与提供方错误码，Editor 仍按原有兼容错误码显示规则降级结果。
+
+健康检查 `python -m agent.check_dify` 会区分：
+
+- `dify_not_configured`：本机未配置应用 Key；
+- `dify_auth_failed`：Key 无效、已撤销或不属于该应用；
+- `dify_network_error` / `dify_timeout`：网络或超时，可有限重试；
+- `dify_rate_limited` / `dify_server_error`：限流或服务端错误，可有限重试；
+- `dify_request_rejected`：其他请求错误，不重试；
+- `dify_contract_error`：响应或模型业务 JSON 不符合契约，不重试；
+- `dify_app_mode_mismatch`：应用不是已冻结的 Chatflow `advanced-chat`。
+
+本阶段没有实现跨请求熔断和生成结果缓存。当前后端每次调用会创建独立客户端，
+在未冻结缓存键、缓存时效和多进程共享状态前，加入进程内熔断或缓存会产生误判。
+这两项保留为后续性能阶段任务，不计入 Day 04 已完成项。
+
+Day 04 的成功、失败和低置信度用例、用途、输入输出、局限及实测命令统一记录在
+`docs/evidence/DAY04_AGENT_ACCEPTANCE.md`。测试夹具只验证契约与降级行为，不冒充
+真实比赛视频；真实 Dify 在线调用仍以有效的已发布 Chatflow 应用 Key 为前提。
