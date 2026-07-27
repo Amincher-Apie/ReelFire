@@ -11,12 +11,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/charts.css') }}">
   <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
 </head>
-<body
-  data-page="app"
-  data-theme="dark"
-  data-initial-view="{{ initial_view|default('projects') }}"
-  data-job-id="{{ job_id|default('', true) }}"
->
+<body data-page="app" data-theme="dark" data-initial-view="{{ initial_view }}" data-job-id="{{ job_id or '' }}">
 <a class="skip-link" href="#main-content">跳到主要内容</a>
 
 <div id="app" class="app-shell">
@@ -30,18 +25,18 @@
     </a>
 
     <nav class="header-nav" aria-label="主导航">
-      <a id="nav-projects" class="nav-button active" href="/" data-view="projects"{% if initial_view == 'projects' %} aria-current="page"{% endif %}>
+      <button id="nav-projects" class="nav-button active" type="button" data-view="projects">
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
         项目
-      </a>
-      <a id="nav-analysis" class="nav-button{% if initial_view == 'analysis' %} active{% endif %}{% if not job_id %} disabled{% endif %}" href="{% if job_id %}/jobs/{{ job_id }}/analysis{% else %}#{% endif %}" data-view="analysis"{% if initial_view == 'analysis' %} aria-current="page"{% endif %}{% if not job_id %} aria-disabled="true" tabindex="-1" title="请先上传视频或从历史记录选择任务"{% endif %}>
+      </button>
+      <button id="nav-analysis" class="nav-button" type="button" data-view="analysis">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
         分析工作台
-      </a>
-      <a id="nav-editor" class="nav-button{% if not job_id %} disabled{% endif %}" href="{% if job_id %}/jobs/{{ job_id }}/editor{% else %}#{% endif %}" data-view="editor"{% if not job_id %} aria-disabled="true" tabindex="-1" title="请先完成视频分析"{% endif %}>
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 18h16M8 3v6m8 6v6"/><rect x="7" y="9" width="10" height="6" rx="1"/></svg>
+      </button>
+      <button id="nav-editor" class="nav-button" type="button" data-view="editor">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h16"/><path d="m17 10 3 2-3 2z"/></svg>
         剪辑工作台
-      </a>
+      </button>
     </nav>
 
     <div class="header-actions">
@@ -71,12 +66,29 @@
         <div>
           <p class="eyebrow">DASHBOARD</p>
           <h1 id="projects-heading">我的项目</h1>
-          <p>选择已有项目继续工作，或创建新项目开始分析。</p>
+          <p>管理项目、回看任务记录，并从同一个入口继续分析。</p>
         </div>
         <button id="show-create-project-button" class="button primary" type="button">
           <svg viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="M12 5v14M5 12h14"/></svg>
           创建项目
         </button>
+      </div>
+
+      <div class="project-browser-toolbar">
+        <div>
+          <h2>项目库</h2>
+          <span id="projects-count" class="muted-label" aria-live="polite">正在加载</span>
+        </div>
+        <div class="segmented-control" role="group" aria-label="项目显示方式">
+          <button id="project-view-cards" class="segmented-button active" type="button" data-project-view="cards" aria-pressed="true">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+            卡片
+          </button>
+          <button id="project-view-list" class="segmented-button" type="button" data-project-view="list" aria-pressed="false">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6h12M9 12h12M9 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></svg>
+            列表
+          </button>
+        </div>
       </div>
 
       <div id="projects-loading" class="state-container">
@@ -95,79 +107,13 @@
         <button id="projects-retry-button" class="button secondary" type="button">重试</button>
       </div>
       <div id="projects-grid" class="projects-grid" hidden></div>
-    </section>
-
-    <!-- ═══ 项目详情 ═══ -->
-    <section id="view-project-detail" class="view" aria-labelledby="project-detail-heading" hidden>
-      <div class="section-heading">
-        <div>
-          <button id="back-to-projects" class="button ghost small" type="button">← 返回项目列表</button>
-          <h1 id="project-detail-heading">
-            <span id="project-detail-name"></span>
-            <span id="project-detail-game" class="project-game-badge"></span>
-            <span id="project-detail-status" class="status-badge active" hidden></span>
-          </h1>
-          <p id="project-detail-date"></p>
-        </div>
-        <div class="section-heading-actions">
-          <button id="project-archive-button" class="button ghost small" type="button" hidden>归档项目</button>
-          <button id="project-start-analysis" class="button primary" type="button">
-            <svg viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="M12 5v14M5 12h14"/></svg>
-            新建分析任务
-          </button>
-        </div>
+      <div id="projects-list" class="table-wrapper project-list-wrapper" hidden>
+        <table>
+          <thead><tr><th>项目名称</th><th>素材名称</th><th>游戏类型</th><th>最近状态</th><th>任务数</th><th>更新时间</th><th>操作</th></tr></thead>
+          <tbody id="projects-list-body"></tbody>
+        </table>
       </div>
-
-      <!-- 项目状态概览 -->
-      <div class="project-stats-bar" id="project-stats-bar">
-        <div class="project-stat-card">
-          <span class="project-stat-label">总任务</span>
-          <strong id="project-job-count">—</strong>
-        </div>
-        <div class="project-stat-card">
-          <span class="project-stat-label">排队中</span>
-          <strong id="project-stat-created">0</strong>
-        </div>
-        <div class="project-stat-card">
-          <span class="project-stat-label">运行中</span>
-          <strong id="project-stat-running">0</strong>
-        </div>
-        <div class="project-stat-card">
-          <span class="project-stat-label">已完成</span>
-          <strong id="project-stat-completed">0</strong>
-        </div>
-        <div class="project-stat-card">
-          <span class="project-stat-label">失败</span>
-          <strong id="project-stat-failed">0</strong>
-        </div>
-      </div>
-
-      <div class="project-detail-panel panel">
-        <h3>分析任务</h3>
-        <div id="project-jobs-loading" class="state-container">
-          <span class="spinner" aria-hidden="true"></span>
-          <p>正在加载任务列表…</p>
-        </div>
-        <div id="project-jobs-empty" class="state-container" hidden>
-          <h3>暂无分析任务</h3>
-          <p>点击「新建分析任务」上传视频并开始分析。</p>
-        </div>
-        <div id="project-jobs-error" class="state-container error" hidden>
-          <h3>加载失败</h3>
-          <p id="project-jobs-error-msg"></p>
-        </div>
-        <div id="project-jobs-table" class="table-wrapper" hidden>
-          <table>
-            <thead><tr><th>任务名称</th><th>视频文件</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
-            <tbody id="project-jobs-body"></tbody>
-          </table>
-        </div>
-        <div id="project-jobs-pagination" class="pagination-bar" hidden>
-          <button class="button ghost small pagination-prev" type="button">← 上一页</button>
-          <span class="pagination-info"></span>
-          <button class="button ghost small pagination-next" type="button">下一页 →</button>
-        </div>
-      </div>
+      <div id="projects-pagination" class="pagination-toolbar" hidden></div>
     </section>
 
     <!-- ═══ 分析工作台 ═══ -->
@@ -176,9 +122,12 @@
         <div>
           <p class="eyebrow">REELFIRE WORKBENCH</p>
           <h1 id="analysis-heading">视频理解与精彩片段分析</h1>
-          <p>上传 FPS 录屏，获取真实检测、关键帧、候选片段和可追溯报告。</p>
+          <p>查看当前项目的分析进度、检测结果与 Agent 工作流。</p>
         </div>
-        <span class="capability-badge">当前能力：视频</span>
+        <div class="analysis-context" aria-label="当前分析上下文">
+          <span><small>项目</small><strong id="analysis-project-name">未选择项目</strong></span>
+          <span><small>素材</small><strong id="analysis-asset-name">等待添加素材</strong></span>
+        </div>
       </div>
 
       <div class="workbench">
@@ -191,10 +140,11 @@
           </div>
 
           <form id="analysis-form" novalidate>
+            <input id="analysis-project-id" name="project_id" type="hidden" value="">
             <div class="form-field">
               <label for="project-name">项目名称 <span aria-hidden="true">*</span></label>
-              <input id="project-name" name="project_name" type="text" maxlength="100" value="FPS 视频内容理解" required>
-              <small>用于历史记录和结果归档。</small>
+              <input id="project-name" name="project_name" type="text" maxlength="100" value="" placeholder="例如：CS2 排位录像 0727" required>
+              <small>项目用于归档素材、分析结果与剪辑记录。</small>
             </div>
 
             <div class="form-field">
@@ -256,37 +206,35 @@
                 <span>上传视频</span>
                 <span id="stage-status-upload" class="task-stage-status"></span>
               </div>
-              <div class="task-stage" data-stage="preprocess">
+              <div class="task-stage" data-stage="initialize">
                 <span class="task-stage-icon"></span>
-                <span>视频预处理</span>
-                <span id="stage-status-preprocess" class="task-stage-status"></span>
+                <span>读取视频与加载模型</span>
+                <span id="stage-status-initialize" class="task-stage-status"></span>
               </div>
-              <div class="task-stage" data-stage="keyframe">
+              <div class="task-stage" data-stage="screening">
                 <span class="task-stage-icon"></span>
-                <span>关键帧提取</span>
-                <span id="stage-status-keyframe" class="task-stage-status"></span>
+                <span>全片快速筛选</span>
+                <span id="stage-status-screening" class="task-stage-status"></span>
               </div>
               <div class="task-stage" data-stage="detect">
                 <span class="task-stage-icon"></span>
-                <span>YOLO 目标识别</span>
+                <span>候选窗口 YOLO 识别</span>
                 <span id="stage-status-detect" class="task-stage-status"></span>
               </div>
-              <div class="task-stage" data-stage="highlight">
+              <div class="task-stage" data-stage="finalize">
                 <span class="task-stage-icon"></span>
-                <span>高光片段生成</span>
-                <span id="stage-status-highlight" class="task-stage-status"></span>
-              </div>
-              <div class="task-stage" data-stage="proxy">
-                <span class="task-stage-icon"></span>
-                <span>代理视频生成</span>
-                <span id="stage-status-proxy" class="task-stage-status"></span>
+                <span>片段归并与报告生成</span>
+                <span id="stage-status-finalize" class="task-stage-status"></span>
               </div>
             </div>
 
-            <button id="analyze-button" class="button primary full" type="submit">
-              <span class="button-icon" aria-hidden="true">▶</span>
-              <span class="button-label">创建任务并开始分析</span>
-            </button>
+            <div class="dialog-actions project-task-actions">
+              <button id="cancel-project-button" class="button ghost" type="button">取消</button>
+              <button id="analyze-button" class="button primary" type="submit">
+                <span class="button-icon" aria-hidden="true">▶</span>
+                <span id="analysis-submit-label" class="button-label">创建项目并开始分析</span>
+              </button>
+            </div>
             <button id="cancel-analysis-button" class="button secondary full" type="button" hidden>取消分析</button>
           </form>
         </section>
@@ -311,41 +259,45 @@
             <h3>正在分析</h3>
             <p id="loading-message">任务正在排队，请稍候。</p>
             <!-- Enhanced progress info -->
-            <section id="analysis-progress-panel" class="analysis-progress-panel" hidden aria-labelledby="analysis-chunk-heading">
-            <div id="analysis-progress-detail" class="analysis-progress-detail" hidden>
-              <div class="progress-stat">
-                <span class="progress-stat-label">处理帧数</span>
-                <strong id="progress-frames">—</strong>
+            <section id="analysis-progress-panel" class="analysis-progress-panel" aria-labelledby="analysis-progress-heading">
+              <div id="analysis-progress-detail" class="analysis-progress-detail" hidden>
+                <div class="progress-stat">
+                  <span class="progress-stat-label">当前阶段</span>
+                  <strong id="progress-stage">等待启动</strong>
+                </div>
+                <div class="progress-stat">
+                  <span class="progress-stat-label">处理样本</span>
+                  <strong id="progress-frames">—</strong>
+                </div>
+                <div class="progress-stat">
+                  <span class="progress-stat-label">暂定片段</span>
+                  <strong id="progress-provisional">0</strong>
+                </div>
+                <div class="progress-stat">
+                  <span class="progress-stat-label">已用 / 剩余</span>
+                  <strong id="progress-elapsed">—</strong>
+                </div>
               </div>
-              <div class="progress-stat">
-                <span class="progress-stat-label">整体进度</span>
-                <strong id="progress-percent">—</strong>
+              <div class="progress-heading">
+                <div>
+                  <strong id="analysis-progress-heading">实时分析状态</strong>
+                  <span id="analysis-progress-count">0 / 0</span>
+                </div>
+                <strong id="analysis-progress-percent">0%</strong>
               </div>
-              <div class="progress-stat">
-                <span class="progress-stat-label">已用时间</span>
-                <strong id="progress-elapsed">—</strong>
+              <progress id="analysis-progress-bar" max="100" value="0">0%</progress>
+              <p id="analysis-progress-detail-text" class="muted-label" aria-live="polite">等待后台返回分析状态。</p>
+              <div id="analysis-chunk-track" class="analysis-chunk-track" role="list" aria-label="候选窗口分析状态"></div>
+              <div id="partial-results" class="partial-results" hidden>
+                <div>
+                  <h4>已识别的暂定片段</h4>
+                  <div id="partial-segment-list" class="partial-segment-list"></div>
+                </div>
+                <div>
+                  <h4>已生成的关键帧</h4>
+                  <div id="partial-keyframe-list" class="partial-keyframe-list"></div>
+                </div>
               </div>
-            </div>
-            <div class="progress-heading">
-              <div>
-                <strong id="analysis-chunk-heading">分块分析进度</strong>
-                <span id="analysis-progress-count">0 / 0</span>
-              </div>
-              <strong id="analysis-progress-percent">0%</strong>
-            </div>
-            <progress id="analysis-progress-bar" max="100" value="0">0%</progress>
-            <p id="analysis-progress-detail-text" aria-live="polite">等待后台返回分析分块。</p>
-            <div id="analysis-chunk-track" class="analysis-chunk-track" role="list" aria-label="视频分析分块"></div>
-            <div id="partial-results" class="partial-results" hidden>
-              <div>
-                <h4>已产生的候选片段</h4>
-                <div id="partial-segment-list" class="partial-segment-list"></div>
-              </div>
-              <div>
-                <h4>已产生的关键帧</h4>
-                <div id="partial-keyframe-list" class="partial-keyframe-list"></div>
-              </div>
-            </div>
             </section>
           </div>
 
@@ -382,6 +334,7 @@
             <article class="result-card">
               <div class="result-card-header"><h3>候选片段</h3><span id="segment-count" class="muted-label"></span></div>
               <div id="segment-list" class="segment-list"></div>
+              <div id="segment-pagination" class="pagination-toolbar" hidden></div>
               <div id="empty-result-guide" class="empty-result-guide" hidden>
                 <p>本次分析未发现满足当前阈值的高光片段。</p>
                 <div class="empty-result-actions">
@@ -401,12 +354,26 @@
                 <div class="inline-actions">
                   <button id="save-review-button" class="button secondary small" type="button">保存审核</button>
                   <button id="rough-cut-button" class="button primary small" type="button">生成粗剪</button>
-                  <a id="editor-link" class="button primary small" href="#" hidden>剪辑预览工作台</a>
+                  <a id="editor-link" class="button primary small" href="#" hidden>进入剪辑工作台</a>
                 </div>
               </div>
-              <div id="keyframe-chunk-tabs" class="keyframe-chunk-tabs" role="tablist" aria-label="按视频时间段选择关键帧"></div>
+              <div class="related-segment-heading">
+                <div>
+                  <strong id="keyframe-review-context">当前片段</strong>
+                  <span id="keyframe-review-context-detail">选择上方候选片段，下方将显示对应关键帧</span>
+                </div>
+                <div class="segmented-control keyframe-review-modes" role="group" aria-label="关键帧审核范围">
+                  <button id="keyframe-mode-segment" class="segmented-button active" type="button"
+                          data-keyframe-review-mode="segment" aria-pressed="true">单片段审核</button>
+                  <button id="keyframe-mode-all" class="segmented-button" type="button"
+                          data-keyframe-review-mode="all" aria-pressed="false">全部关键帧</button>
+                </div>
+              </div>
+              <div id="keyframe-chunk-tabs" class="keyframe-chunk-tabs" role="tablist" aria-label="按视频时间段选择关键帧" hidden></div>
+              <div id="keyframe-group-pagination" class="pagination-toolbar compact" hidden></div>
               <p id="keyframe-chunk-summary" class="keyframe-chunk-summary"></p>
               <div id="keyframe-list" class="keyframe-grid"></div>
+              <div id="keyframe-pagination" class="pagination-toolbar" hidden></div>
             </article>
 
             <article id="output-card" class="result-card" hidden>
@@ -438,7 +405,7 @@
           </div>
         </section>
 
-        <aside id="analysis-agent-panel" class="panel agent-panel" aria-labelledby="agent-heading">
+        <aside class="panel agent-panel" aria-labelledby="agent-heading">
           <div class="panel-header">
             <div>
               <p class="panel-kicker">WORKFLOW</p>
@@ -447,14 +414,12 @@
             <span id="agent-provider-badge" class="capability-badge neutral">等待 Agent</span>
           </div>
 
-          <p id="agent-run-note" class="panel-note" aria-live="polite">
-            YOLO 完成后会自动启动 Agent，并在这里显示排队、运行、完成或降级状态。
-          </p>
+          <p id="agent-run-note" class="panel-note" aria-live="polite">YOLO 完成后会自动启动 Agent，并在这里显示调用状态。</p>
 
           <ol id="agent-flow" class="agent-flow">
             <li class="agent-node pending" data-step="1"><span>1</span><div><strong>视觉报告解析</strong><small>等待任务完成</small></div></li>
             <li class="agent-node pending" data-step="2"><span>2</span><div><strong>检测标签汇总</strong><small>等待真实检测</small></div></li>
-            <li class="agent-node pending" data-step="3"><span>3</span><div><strong>知识检索与建议</strong><small>等待 Agent 调用</small></div></li>
+            <li class="agent-node pending" data-step="3"><span>3</span><div><strong>知识检索与建议</strong><small>独立 Agent 待接入</small></div></li>
             <li class="agent-node pending" data-step="4"><span>4</span><div><strong>人工审核与输出</strong><small>等待复核</small></div></li>
           </ol>
 
@@ -478,52 +443,20 @@
       </div>
     </section>
 
-    <!-- ═══ 历史记录 ═══ -->
-    <section id="view-history" class="view" aria-labelledby="history-heading" hidden>
-      <div class="section-heading">
-        <div><p class="eyebrow">ARCHIVE</p><h1 id="history-heading">历史任务</h1><p>重新打开已完成任务，或检查失败原因。</p></div>
-        <button id="refresh-history-button" class="button secondary" type="button">刷新列表</button>
-      </div>
-
-      <div class="panel history-panel">
-        <div id="history-loading" class="state-container" hidden><span class="spinner" aria-hidden="true"></span><p>正在加载历史记录</p></div>
-        <div id="history-empty" class="state-container"><h3>暂无记录</h3><p>完成分析后，任务会出现在这里。</p></div>
-        <div id="history-error" class="state-container error" hidden><h3>加载失败</h3><p id="history-error-message"></p></div>
-        <div id="history-table-wrapper" class="table-wrapper" hidden>
-          <table>
-            <thead><tr><th>任务</th><th>素材</th><th>类型</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
-            <tbody id="history-body"></tbody>
-          </table>
-        </div>
-      </div>
-    </section>
   </main>
 </div>
 
-<!-- 创建项目对话框 -->
-<dialog id="project-dialog" class="report-dialog">
+<!-- 创建项目 / 新建任务对话框 -->
+<dialog id="project-dialog" class="report-dialog project-task-dialog">
   <div class="dialog-header">
-    <div><p class="panel-kicker">NEW PROJECT</p><h2>创建新项目</h2></div>
+    <div>
+      <p class="panel-kicker">PROJECT INPUT</p>
+      <h2 id="project-dialog-title">创建新项目</h2>
+      <p id="project-dialog-description" class="dialog-subtitle">创建项目并上传首个分析素材。</p>
+    </div>
     <button id="close-project-dialog-button" class="icon-button" type="button" aria-label="关闭">×</button>
   </div>
-  <div class="dialog-body">
-    <div class="form-field">
-      <label for="new-project-name">项目名称 <span aria-hidden="true">*</span></label>
-      <input id="new-project-name" type="text" maxlength="100" value="" placeholder="例如：CS2 排位录像 0727" required>
-    </div>
-    <div class="form-field">
-      <label for="new-project-game">游戏类型</label>
-      <select id="new-project-game">
-        <option value="csgo">CS:GO / CS2</option>
-        <option value="valorant">Valorant / 无畏契约</option>
-        <option value="other">其他 FPS</option>
-      </select>
-    </div>
-    <div class="dialog-actions">
-      <button id="cancel-project-button" class="button ghost" type="button">取消</button>
-      <button id="create-project-button" class="button primary" type="button">创建项目</button>
-    </div>
-  </div>
+  <div id="project-form-slot" class="dialog-body"></div>
 </dialog>
 
 <!-- JSON 报告弹窗 -->

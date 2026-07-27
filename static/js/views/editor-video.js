@@ -2,6 +2,16 @@
 import { editorState } from "../state/editor-state.js";
 import { byId, clearChildren, createElement } from "../utils/dom.js";
 import { formatTime, formatDuration, formatNumber } from "../utils/format.js";
+import {
+  pointerXToTimelineTime,
+  timeToTimelinePercent,
+} from "../utils/timeline.js";
+import {
+  adjacentSegmentIndex,
+  editorShortcutAction,
+  shouldIgnoreEditorShortcutTarget,
+  steppedPlaybackTime,
+} from "../utils/editor-shortcuts.js";
 import { outputUrl } from "../utils/url.js";
 import { selectSegment } from "./editor-segments.js";
 
@@ -146,11 +156,7 @@ export function renderTimeline() {
   if (!editorState.video) return;
   let duration = Number(editorState.video.duration);  // FIXED: let, not const
   if (!Number.isFinite(duration) || duration <= 0) duration = 0;
-  const scrubber = byId("timeline-scrubber");
   const track = byId("timeline-track");
-  scrubber.max = String(duration);
-  // Only reset position to 0 on initial load (scrubber is at 0 from HTML)
-  // but don't reset scrubber value — preserve user's position on re-render
   track.setAttribute("aria-valuemax", String(duration));
 
   // Compute lane assignments for overlapping segments
@@ -216,17 +222,15 @@ export function renderTimeline() {
 export function updatePlayhead(currentTime) {
   if (!editorState.video) return;
   const duration = editorState.video.duration;
-  const pct = duration > 0 ? Math.min((currentTime / duration) * 100, 100) : 0;
+  const pct = timeToTimelinePercent(currentTime, duration);
   const playhead = byId("timeline-playhead");
   playhead.style.left = pct + "%";
 
   const track = byId("timeline-track");
   track.setAttribute("aria-valuenow", String(Math.round(currentTime)));
+  track.setAttribute("aria-valuetext", formatTime(currentTime));
 
   byId("timeline-current").textContent = formatTime(currentTime);
-  byId("timeline-scrubber").value = String(currentTime);
-
-  highlightSegmentAtTime(currentTime);
 }
 
 export function seekTo(time) {
@@ -245,44 +249,80 @@ export function seekTo(time) {
   updatePlayhead(target);
 }
 
-export function highlightSegmentAtTime(time) {
-  let found = null;
-  editorState.segments.forEach((seg) => {
-    if (time >= seg.start && time <= seg.end) {
-      found = seg.id;
-    }
-  });
+function segmentAtTime(time) {
+  return editorState.segments.find((segment) => (
+    time >= segment.start && time <= segment.end
+  )) || null;
+}
 
-  const markers = document.querySelectorAll(".timeline-segment-marker");
-  markers.forEach((marker) => {
-    marker.classList.remove("active");
-  });
+function syncSelectionAtTime(time) {
+  const segment = segmentAtTime(time);
+  if (segment) selectSegment(segment.id);
+}
 
-  // FIXED: Always highlight the segment the playhead is on,
-  // even if it's the currently selected segment.
-  if (found) {
-    const idx = editorState.segments.findIndex((s) => s.id === found);
-    if (idx >= 0) {
-      const target = markers[idx];
-      if (target) target.classList.add("active");
-    }
+function toggleVideoPlayback(videoEl) {
+  if (!videoEl || !videoEl.src) return;
+  if (videoEl.paused) {
+    videoEl.play().catch(() => {});
+  } else {
+    videoEl.pause();
+  }
+}
+
+function runPlaybackShortcut(action, videoEl) {
+  if (!videoEl || !videoEl.src || !editorState.video) return false;
+
+  if (action === "toggle-playback") {
+    toggleVideoPlayback(videoEl);
+    return true;
   }
 
-  // If the playhead isn't on any segment, restore selected segment highlight
-  if (!found && editorState.selectedSegmentId) {
-    const selIdx = editorState.segments.findIndex((s) => s.id === editorState.selectedSegmentId);
-    if (selIdx >= 0) {
-      const target = markers[selIdx];
-      if (target) target.classList.add("active");
-    }
+  if (action === "previous-segment" || action === "next-segment") {
+    const direction = action === "previous-segment" ? -1 : 1;
+    const targetIndex = adjacentSegmentIndex(
+      editorState.segments,
+      editorState.selectedSegmentId,
+      direction,
+    );
+    const targetSegment = editorState.segments[targetIndex];
+    if (!targetSegment) return false;
+
+    selectSegment(targetSegment.id);
+    seekTo(targetSegment.start);
+    return true;
   }
+
+  videoEl.pause();
+  const direction = action === "step-backward" ? -1 : 1;
+  seekTo(steppedPlaybackTime(
+    videoEl.currentTime,
+    editorState.video.duration,
+    direction,
+    editorState.video.fps,
+  ));
+  return true;
+}
+
+function handleEditorKeyboardShortcut(event) {
+  if (
+    event.defaultPrevented
+    || shouldIgnoreEditorShortcutTarget(event.target)
+    || document.querySelector("dialog[open]")
+  ) {
+    return;
+  }
+
+  const action = editorShortcutAction(event);
+  if (!action) return;
+
+  const videoEl = editorState.videoElement;
+  if (runPlaybackShortcut(action, videoEl)) event.preventDefault();
 }
 
 export function bindTimelineEvents() {
   if (editorState.timelineBound) return;
   editorState.timelineBound = true;
   const track = byId("timeline-track");
-  const scrubber = byId("timeline-scrubber");
   const playButton = byId("timeline-play");
   const videoEl = editorState.videoElement;
   let isDragging = false;
@@ -294,59 +334,70 @@ export function bindTimelineEvents() {
 
   // play/pause
   playButton.addEventListener("click", () => {
-    if (videoEl && videoEl.src) {
-      if (videoEl.paused) {
-        videoEl.play().catch(() => {});
-      } else {
-        videoEl.pause();
-      }
-    }
+    toggleVideoPlayback(videoEl);
   });
 
-  // track click
-  track.addEventListener("click", (e) => {
+  const seekFromPointer = (event) => {
     if (!editorState.video) return;
     const rect = track.getBoundingClientRect();
-    const pct = (e.clientX - rect.left) / rect.width;
-    seekTo(pct * editorState.video.duration);
-  });
+    const target = pointerXToTimelineTime(
+      event.clientX,
+      rect.left,
+      rect.width,
+      editorState.video.duration,
+    );
+    seekTo(target);
+    return target;
+  };
 
-  // track drag
-  track.addEventListener("mousedown", () => {
-    isDragging = true;
-    document.body.style.userSelect = "none";
-  });
-
-  document.addEventListener("mousemove", (e) => {
-    if (!isDragging || !editorState.video) return;
-    const rect = track.getBoundingClientRect();
-    const pct = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    seekTo(pct * editorState.video.duration);
-  });
-
-  document.addEventListener("mouseup", () => {
-    if (isDragging) {
-      isDragging = false;
-      document.body.style.userSelect = "";
+  track.addEventListener("pointerdown", (event) => {
+    if (
+      event.button !== 0
+      || event.target.closest(".timeline-segment-marker")
+    ) {
+      return;
     }
+    event.preventDefault();
+    isDragging = true;
+    track.classList.add("dragging");
+    track.setPointerCapture(event.pointerId);
+    track.focus({ preventScroll: true });
+    document.body.style.userSelect = "none";
+    const target = seekFromPointer(event);
+    if (Number.isFinite(target)) syncSelectionAtTime(target);
   });
+
+  track.addEventListener("pointermove", (event) => {
+    if (!isDragging) return;
+    seekFromPointer(event);
+  });
+
+  const finishDragging = (event) => {
+    if (!isDragging) return;
+    isDragging = false;
+    track.classList.remove("dragging");
+    if (track.hasPointerCapture(event.pointerId)) {
+      track.releasePointerCapture(event.pointerId);
+    }
+    document.body.style.userSelect = "";
+  };
+
+  track.addEventListener("pointerup", finishDragging);
+  track.addEventListener("pointercancel", finishDragging);
 
   // keyboard
   track.addEventListener("keydown", (e) => {
     if (!editorState.video) return;
-    const step = editorState.video.duration / 100;
-    if (e.key === "ArrowRight") {
+    const action = editorShortcutAction(e);
+    if (action && runPlaybackShortcut(action, videoEl)) {
       e.preventDefault();
-      seekTo(Math.min((videoEl ? videoEl.currentTime : 0) + step, editorState.video.duration));
-    } else if (e.key === "ArrowLeft") {
+    } else if (e.key === "Home") {
       e.preventDefault();
-      seekTo(Math.max((videoEl ? videoEl.currentTime : 0) - step, 0));
+      seekTo(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      seekTo(editorState.video.duration);
     }
-  });
-
-  scrubber.addEventListener("input", () => {
-    if (videoEl && !videoEl.paused) videoEl.pause();
-    seekTo(Number(scrubber.value));
   });
 
   // timeupdate sync + play/pause/ended button state
@@ -382,4 +433,6 @@ export function bindTimelineEvents() {
   if (_speedDownBtn) _speedDownBtn.addEventListener("click", speedDown);
   const speedResetBtn = document.querySelector(".timeline-speed-reset");
   if (speedResetBtn) speedResetBtn.addEventListener("click", resetSpeed);
+
+  document.addEventListener("keydown", handleEditorKeyboardShortcut);
 }

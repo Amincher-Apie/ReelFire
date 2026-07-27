@@ -1,30 +1,42 @@
 // ReelFire — analysis pipeline: submit, poll, render reports
 import { appState, statusLabels } from "../state/app-state.js";
+import { setSelectedProject } from "../state/project-selection.js";
 import api from "../api/client.js";
 import { byId, clearChildren, createElement } from "../utils/dom.js";
 import { formatNumber, formatDuration } from "../utils/format.js";
+import { paginate, renderPagination } from "../utils/pagination.js";
 import { outputUrl } from "../utils/url.js";
 import { showToast, setButtonLoading } from "../utils/ui.js";
-import { renderWorkbenchCharts } from "./charts.js";
-import { isSSESupported, connectSSE } from "../api/sse.js";
+import {
+  drawSegmentScoreChart,
+  renderWorkbenchCharts,
+} from "./charts.js";
 import { showTaskStages, hideTaskStages, simulateStageProgress, showProgressDetail, hideProgressDetail, updateProgressDetail, showEmptyResultGuide, hideEmptyResultGuide } from "./task-progress.js";
+import { showAppView } from "./navigation.js";
+
+const AGENT_PROMPT_VERSION = "v2";
+const analysisPagination = {
+  segmentPage: 1,
+  segmentPageSize: 5,
+  keyframePage: 1,
+  keyframePageSize: 5,
+};
+let selectedCandidateSegmentId = null;
 
 // ── view switching ────────────────────────────────────────────────────
 
 export function setView(view) {
-  const history = view === "history";
-  byId("view-analysis").hidden = history;
-  byId("view-history").hidden = !history;
-  byId("view-analysis").classList.toggle("active", !history);
-  byId("view-history").classList.toggle("active", history);
-  document.querySelectorAll("[data-view]").forEach((button) => {
-    const active = button.dataset.view === view;
-    button.classList.toggle("active", active);
-    button.setAttribute("aria-current", active ? "page" : "false");
-  });
-  if (history) {
-    // dynamic import to avoid circular dependency at module level
-    import("./history.js").then((m) => m.loadHistory());
+  showAppView(view);
+}
+
+export function updateAnalysisContext(project = appState.currentProject, job = appState.currentJob) {
+  const projectName = byId("analysis-project-name");
+  const assetName = byId("analysis-asset-name");
+  if (projectName) projectName.textContent = project?.name || job?.project_name || "未选择项目";
+  if (assetName) {
+    assetName.textContent = job
+      ? job.original_asset_name || job.asset_name || "未命名素材"
+      : "等待添加素材";
   }
 }
 
@@ -204,7 +216,7 @@ export async function ensureAgentRun(jobId) {
       );
       const created = await api.post(
         `/api/jobs/${encodeURIComponent(jobId)}/agent-calls`,
-        { force: false },
+        { prompt_version: AGENT_PROMPT_VERSION, force: false },
       );
       call = created.agent_call;
     }
@@ -240,13 +252,20 @@ export function renderAnalysisProgress(progress) {
   const value = progress && typeof progress === "object" ? progress : {};
   const total = Number(value.total_chunks) || 0;
   const completed = Number(value.completed_chunks) || 0;
+  const screening = value.stage === "screening";
+  const screeningTotal = Number(value.screening_total_chunks) || 0;
+  const screeningCompleted = Number(value.screening_completed_chunks) || 0;
   const percent = Math.max(0, Math.min(100, Number(value.percent) || 0));
   const chunks = Array.isArray(value.chunks) ? value.chunks : [];
 
   const panel = byId("analysis-progress-panel");
   if (panel) panel.hidden = false;
   const countEl = byId("analysis-progress-count");
-  if (countEl) countEl.textContent = `${completed} / ${total}`;
+  if (countEl) {
+    countEl.textContent = screening
+      ? `已扫描 ${screeningCompleted} / ${screeningTotal}`
+      : `${completed} / ${total} 个候选窗口`;
+  }
   const percentEl = byId("analysis-progress-percent");
   if (percentEl) percentEl.textContent = `${Math.round(percent)}%`;
   const bar = byId("analysis-progress-bar");
@@ -257,7 +276,18 @@ export function renderAnalysisProgress(progress) {
   const track = byId("analysis-chunk-track");
   if (!track) return;
   clearChildren(track);
-  if (!total) {
+  if (screening) {
+    const scanned = Number(value.screened_seconds) || 0;
+    const videoDuration =
+      Number(value.video_duration_seconds)
+      || Number(value.video && value.video.duration)
+      || 0;
+    const item = createElement("span", "analysis-screening-status running");
+    item.setAttribute("role", "listitem");
+    item.textContent =
+      `全片粗筛 ${formatDuration(scanned)} / ${formatDuration(videoDuration)}`;
+    track.append(item);
+  } else if (!total) {
     track.append(createElement("span", "chunk-empty", "等待计算视频分块"));
   } else {
     for (let index = 0; index < total; index += 1) {
@@ -349,39 +379,123 @@ export function persistVisibleKeyframeReview() {
 }
 
 export function keyframeGroups() {
-  if (appState.analysisChunks.length) {
-    return appState.analysisChunks
-      .map((chunk) => ({
-        id: chunk.id,
-        label: `${formatDuration(chunk.start)}–${formatDuration(chunk.end)}`,
-        start: Number(chunk.start) || 0,
-        end: Number(chunk.end) || 0,
-        frames: appState.keyframes
-          .map((frame, index) => ({ frame, index }))
-          .filter(({ frame }) => frame.chunk_id === chunk.id),
-      }))
-      .filter((group) => group.frames.length > 0);
-  }
-  const grouped = new Map();
-  appState.keyframes.forEach((frame, index) => {
-    const id = frame.chunk_id || "all";
-    if (!grouped.has(id)) grouped.set(id, []);
-    grouped.get(id).push({ frame, index });
-  });
-  return [...grouped.entries()].map(([id, frames]) => ({
-    id,
-    label: id === "all" ? "全部关键帧" : id,
-    start: Math.min(...frames.map(({ frame }) => Number(frame.timestamp) || 0)),
-    end: Math.max(...frames.map(({ frame }) => Number(frame.timestamp) || 0)),
-    frames,
+  const indexedFrames = appState.keyframes.map((frame, index) => ({
+    frame,
+    index,
   }));
+
+  const groups = [{
+    id: "all",
+    label: "全部关键帧",
+    timeLabel: "完整报告",
+    frames: indexedFrames,
+  }];
+  appState.segments.forEach((segment, segmentIndex) => {
+    const segmentId = candidateSegmentId(segment, segmentIndex);
+    const sourceIds = new Set(
+      (segment.source_keyframes || []).map((value) => (
+        String(value).replace(/\.(?:jpe?g|png|webp)$/i, "")
+      )),
+    );
+    let frames = indexedFrames.filter(({ frame }) => (
+      sourceIds.has(String(frame.id || "").replace(/\.(?:jpe?g|png|webp)$/i, ""))
+    ));
+    if (!frames.length) {
+      const start = Number(segment.start) || 0;
+      const end = Number(segment.end) || start;
+      frames = indexedFrames.filter(({ frame }) => {
+        const timestamp = Number(frame.timestamp) || 0;
+        return timestamp >= start && timestamp <= end;
+      });
+    }
+    groups.push({
+      id: `segment:${segmentId}`,
+      segmentId,
+      label: `片段 ${String(segmentIndex + 1).padStart(2, "0")}`,
+      timeLabel: `${formatDuration(segment.start)}–${formatDuration(segment.end)}`,
+      frames,
+    });
+  });
+  return groups;
+}
+
+function normalizedKeyframeReviewMode(mode) {
+  return mode === "all" ? "all" : "segment";
+}
+
+function candidateSegmentId(segment, index) {
+  const explicitId = String(segment?.id ?? "").trim();
+  return explicitId || `index:${index}`;
+}
+
+function selectedSegmentGroup(groups) {
+  return (
+    groups.find((group) => group.segmentId === selectedCandidateSegmentId)
+    || groups.find((group) => Boolean(group.segmentId))
+    || groups.find((group) => group.id === "all")
+    || null
+  );
+}
+
+function activeKeyframeGroup(groups) {
+  if (normalizedKeyframeReviewMode(appState.keyframeReviewMode) === "all") {
+    return groups.find((group) => group.id === "all") || groups[0] || null;
+  }
+  return selectedSegmentGroup(groups);
+}
+
+function renderKeyframeReviewMode(active) {
+  const mode = normalizedKeyframeReviewMode(appState.keyframeReviewMode);
+  document.querySelectorAll("[data-keyframe-review-mode]").forEach((button) => {
+    const selected = button.dataset.keyframeReviewMode === mode;
+    button.classList.toggle("active", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+
+  const context = byId("keyframe-review-context");
+  const detail = byId("keyframe-review-context-detail");
+  if (mode === "all") {
+    if (context) context.textContent = "全部关键帧";
+    if (detail) {
+      detail.textContent = "候选片段选择不会改变下方审核范围";
+    }
+    return;
+  }
+  if (context) context.textContent = active?.label || "当前片段";
+  if (detail) {
+    detail.textContent = active?.segmentId
+      ? `${active.timeLabel || "未标注时间"} · ${active.frames.length} 张关联关键帧`
+      : "选择上方候选片段，下方将显示对应关键帧";
+  }
+}
+
+export function setKeyframeReviewMode(mode) {
+  const nextMode = normalizedKeyframeReviewMode(mode);
+  if (nextMode === normalizedKeyframeReviewMode(appState.keyframeReviewMode)) {
+    return;
+  }
+  persistVisibleKeyframeReview();
+  appState.keyframeReviewMode = nextMode;
+  analysisPagination.keyframePage = 1;
+  const groups = keyframeGroups();
+  const active = activeKeyframeGroup(groups);
+  appState.activeKeyframeChunkId = active?.id || null;
+  if (
+    nextMode === "segment"
+    && active?.segmentId
+    && active.segmentId !== selectedCandidateSegmentId
+  ) {
+    selectedCandidateSegmentId = active.segmentId;
+    renderSegments(appState.segments);
+  }
+  renderKeyframes(appState.keyframes);
 }
 
 export function renderActiveKeyframeGroup(groups) {
   const container = byId("keyframe-list");
   clearChildren(container);
-  const active =
-    groups.find((group) => group.id === appState.activeKeyframeChunkId) || groups[0];
+  const active = activeKeyframeGroup(groups);
+  renderKeyframeReviewMode(active);
   if (!active) {
     container.append(createElement("p", "empty-copy", "报告中没有关键帧。"));
     const summary = byId("keyframe-chunk-summary");
@@ -389,9 +503,18 @@ export function renderActiveKeyframeGroup(groups) {
     return;
   }
   appState.activeKeyframeChunkId = active.id;
+  const framePage = paginate(
+    active.frames,
+    analysisPagination.keyframePage,
+    analysisPagination.keyframePageSize,
+  );
+  analysisPagination.keyframePage = framePage.page;
   const summary = byId("keyframe-chunk-summary");
-  if (summary) summary.textContent =
-    `当前时间段 ${active.label}，显示 ${active.frames.length} 张关键帧。`;
+  if (summary) {
+    summary.textContent = framePage.total
+      ? `${active.label} · ${active.timeLabel || ""}，显示 ${framePage.startIndex + 1}-${framePage.endIndex} / ${framePage.total} 张关键帧。`
+      : `${active.label} · ${active.timeLabel || ""}，暂无关联关键帧。`;
+  }
 
   const tabs = byId("keyframe-chunk-tabs");
   if (tabs) {
@@ -403,7 +526,18 @@ export function renderActiveKeyframeGroup(groups) {
     });
   }
 
-  active.frames.forEach(({ frame, index }) => {
+  if (!framePage.total) {
+    container.append(
+      createElement(
+        "p",
+        "empty-copy",
+        normalizedKeyframeReviewMode(appState.keyframeReviewMode) === "all"
+          ? "报告中没有关键帧。"
+          : "当前片段没有关联关键帧，可切换到“全部关键帧”继续审核。",
+      ),
+    );
+  }
+  framePage.items.forEach(({ frame, index }) => {
     const card = createElement("article", "keyframe-card");
     card.dataset.frameIndex = String(index);
     const image = document.createElement("img");
@@ -441,6 +575,24 @@ export function renderActiveKeyframeGroup(groups) {
     card.append(image, body);
     container.append(card);
   });
+  renderPagination(byId("keyframe-pagination"), {
+    total: framePage.total,
+    page: framePage.page,
+    pageSize: framePage.pageSize,
+    itemLabel: "张关键帧",
+    ariaLabel: "关键帧审核分页",
+    onPageChange: (page) => {
+      persistVisibleKeyframeReview();
+      analysisPagination.keyframePage = page;
+      renderActiveKeyframeGroup(groups);
+    },
+    onPageSizeChange: (pageSize) => {
+      persistVisibleKeyframeReview();
+      analysisPagination.keyframePageSize = pageSize;
+      analysisPagination.keyframePage = 1;
+      renderActiveKeyframeGroup(groups);
+    },
+  });
 }
 
 export function renderDetections(report) {
@@ -474,8 +626,32 @@ export function renderSegments(segments) {
     return;
   }
   hideEmptyResultGuide();
-  segments.forEach((segment, index) => {
-    const item = createElement("div", "segment-item");
+  const segmentPage = paginate(
+    segments,
+    analysisPagination.segmentPage,
+    analysisPagination.segmentPageSize,
+  );
+  analysisPagination.segmentPage = segmentPage.page;
+  const chartsCard = byId("workbench-charts-card");
+  if (chartsCard && !chartsCard.hidden) {
+    drawSegmentScoreChart(segmentPage.items, segmentPage.startIndex);
+  }
+  segmentPage.items.forEach((segment, localIndex) => {
+    const index = segmentPage.startIndex + localIndex;
+    const segmentId = candidateSegmentId(segment, index);
+    const item = createElement(
+      "button",
+      `segment-item${segmentId === selectedCandidateSegmentId ? " selected" : ""}`,
+    );
+    item.type = "button";
+    item.setAttribute(
+      "aria-pressed",
+      String(segmentId === selectedCandidateSegmentId),
+    );
+    item.setAttribute(
+      "aria-label",
+      `选择候选片段 ${index + 1}，查看关联关键帧`,
+    );
     const order = createElement("span", "segment-order", String(index + 1).padStart(2, "0"));
     const detail = createElement("div");
     detail.append(
@@ -495,39 +671,56 @@ export function renderSegments(segments) {
       detail,
       createElement("span", "segment-score", formatNumber(Number(segment.score) * 100, 0)),
     );
+    item.addEventListener("click", () => {
+      persistVisibleKeyframeReview();
+      selectedCandidateSegmentId = segmentId;
+      if (normalizedKeyframeReviewMode(appState.keyframeReviewMode) === "segment") {
+        const groups = keyframeGroups();
+        const group = groups.find(
+          (candidate) => candidate.segmentId === segmentId,
+        );
+        appState.activeKeyframeChunkId = group?.id || null;
+        analysisPagination.keyframePage = 1;
+      }
+      renderSegments(appState.segments);
+      if (normalizedKeyframeReviewMode(appState.keyframeReviewMode) === "segment") {
+        renderKeyframes(appState.keyframes);
+      }
+    });
     container.append(item);
+  });
+  renderPagination(byId("segment-pagination"), {
+    total: segmentPage.total,
+    page: segmentPage.page,
+    pageSize: segmentPage.pageSize,
+    itemLabel: "个片段",
+    ariaLabel: "候选片段分页",
+    onPageChange: (page) => {
+      analysisPagination.segmentPage = page;
+      renderSegments(segments);
+    },
+    onPageSizeChange: (pageSize) => {
+      analysisPagination.segmentPageSize = pageSize;
+      analysisPagination.segmentPage = 1;
+      renderSegments(segments);
+    },
   });
 }
 
 export function renderKeyframes(keyframes) {
   const tabs = byId("keyframe-chunk-tabs");
-  if (tabs) clearChildren(tabs);
-  if (!keyframes.length) {
-    renderActiveKeyframeGroup([]);
-    return;
+  if (tabs) {
+    clearChildren(tabs);
+    tabs.hidden = true;
   }
   const groups = keyframeGroups();
-  if (!groups.some((group) => group.id === appState.activeKeyframeChunkId)) {
-    appState.activeKeyframeChunkId = groups[0] ? groups[0].id : null;
+  const groupPagination = byId("keyframe-group-pagination");
+  if (groupPagination) {
+    clearChildren(groupPagination);
+    groupPagination.hidden = true;
   }
-  if (tabs) {
-    groups.forEach((group) => {
-      const button = createElement(
-        "button",
-        "keyframe-chunk-tab",
-        `${group.label} · ${group.frames.length}`,
-      );
-      button.type = "button";
-      button.setAttribute("role", "tab");
-      button.dataset.chunkId = group.id;
-      button.addEventListener("click", () => {
-        persistVisibleKeyframeReview();
-        appState.activeKeyframeChunkId = group.id;
-        renderActiveKeyframeGroup(groups);
-      });
-      tabs.append(button);
-    });
-  }
+  const active = activeKeyframeGroup(groups);
+  appState.activeKeyframeChunkId = active?.id || null;
   renderActiveKeyframeGroup(groups);
 }
 
@@ -558,6 +751,24 @@ export function renderReport(report) {
   appState.analysisChunks = Array.isArray(report.analysis_chunks)
     ? report.analysis_chunks.map((item) => ({ ...item }))
     : [];
+  analysisPagination.segmentPage = 1;
+  analysisPagination.keyframePage = 1;
+  if (!appState.segments.some((segment, index) => (
+    candidateSegmentId(segment, index) === selectedCandidateSegmentId
+  ))) {
+    selectedCandidateSegmentId = appState.segments.length
+      ? candidateSegmentId(appState.segments[0], 0)
+      : null;
+  }
+  appState.keyframeReviewMode = normalizedKeyframeReviewMode(
+    appState.keyframeReviewMode,
+  );
+  appState.activeKeyframeChunkId =
+    appState.keyframeReviewMode === "all"
+      ? "all"
+      : selectedCandidateSegmentId
+        ? `segment:${selectedCandidateSegmentId}`
+        : "all";
   const scores = appState.keyframes.map((frame) => Number(frame.highlight_score)).filter(Number.isFinite);
   const maxScore = scores.length ? Math.max(...scores) : 0;
   const detected = aggregateDetections(report);
@@ -587,7 +798,16 @@ export function renderReport(report) {
     editorLink.hidden = false;
   }
 
-  renderWorkbenchCharts(report);
+  const visibleSegmentPage = paginate(
+    appState.segments,
+    analysisPagination.segmentPage,
+    analysisPagination.segmentPageSize,
+  );
+  renderWorkbenchCharts(
+    report,
+    visibleSegmentPage.items,
+    visibleSegmentPage.startIndex,
+  );
   updateJobNavigation(appState.currentJobId, true);
 }
 
@@ -600,9 +820,26 @@ export async function loadReport(jobId) {
 
 // ── polling ───────────────────────────────────────────────────────────
 
+function updateEditorEntry(jobId, ready) {
+  const editorLink = byId("editor-link");
+  if (!editorLink) return;
+  editorLink.href = `/jobs/${encodeURIComponent(jobId)}/editor`;
+  editorLink.hidden = !ready;
+}
+
 export function stopPolling() {
   if (appState.pollTimer) window.clearTimeout(appState.pollTimer);
   appState.pollTimer = null;
+}
+
+export function prepareActiveAnalysis(job) {
+  const progress = job?.progress || {};
+  showTaskStages();
+  showProgressDetail();
+  hideEmptyResultGuide();
+  simulateStageProgress(job?.status || "queued", progress.stage);
+  if (job?.progress) renderAnalysisProgress(job.progress);
+  byId("cancel-analysis-button").hidden = false;
 }
 
 export async function pollJob(jobId) {
@@ -610,14 +847,20 @@ export async function pollJob(jobId) {
   try {
     const payload = await api.get(`/api/jobs/${encodeURIComponent(jobId)}`);
     const job = payload.job;
+    const progress = job.progress || {};
     appState.currentJob = job;
 
     // Update stage progress
-    simulateStageProgress(job.status);
+    simulateStageProgress(job.status, progress.stage);
 
     // Update chunk-level progress
     if (job.progress) renderAnalysisProgress(job.progress);
     updateJobNavigation(
+      jobId,
+      job.status === "completed" ||
+        Number(job.progress && job.progress.completed_chunks) > 0,
+    );
+    updateEditorEntry(
       jobId,
       job.status === "completed" ||
         Number(job.progress && job.progress.completed_chunks) > 0,
@@ -642,14 +885,28 @@ export async function pollJob(jobId) {
     }
 
     // Update progress detail if available
-    if (job.frames_processed != null) {
-      updateProgressDetail(job.frames_processed, job.total_frames, job.percentage);
+    if (progress.processed_frames != null) {
+      updateProgressDetail(
+        progress.processed_frames,
+        progress.total_frames,
+        progress.percent,
+        progress.eta_seconds ?? progress.stage_eta_seconds,
+        progress.elapsed_seconds,
+        progress.stage,
+        progress.provisional_segment_count ?? (progress.chunks || [])
+          .reduce(
+            (count, chunk) =>
+              count + (chunk.provisional_segments || []).length,
+            0,
+          ),
+      );
     }
 
     const message =
-      job.status === "running"
-        ? "正在进行视频采样、目标检测与片段评分…"
-        : "任务已创建，正在等待分析线程…";
+      progress.message ||
+      (job.status === "running"
+        ? "正在进行视频粗筛、目标检测与片段评分…"
+        : "任务已创建，正在等待分析线程…");
     setResultState("loading", job.status || "queued", message);
     appState.pollTimer = window.setTimeout(() => pollJob(jobId), 1600);
   } catch (error) {
@@ -659,42 +916,24 @@ export async function pollJob(jobId) {
 
 // SSE-backed watch (falls back to polling)
 export function watchJob(jobId) {
-  if (isSSESupported()) {
-    const es = connectSSE(jobId, {
-      onCompleted() {
-        es.close();
-        logTool("SSE", `/api/jobs/${jobId}`, "任务已完成");
-        loadReport(jobId).then(() => showToast("视频分析完成", "success"));
-      },
-      onError(data) {
-        es.close();
-        setResultState("error", "failed", (data && data.error) || "分析任务失败。");
-      },
-      onSnapshot(data) {
-        if (data && data.status) {
-          const message =
-            data.status === "running"
-              ? "正在进行视频采样、目标检测与片段评分…"
-              : "任务已创建，正在等待分析线程…";
-          setResultState("loading", data.status, message);
-        }
-      },
-    });
-    window.addEventListener("beforeunload", () => es.close());
-    return es;
-  }
-  // fallback to polling
   return pollJob(jobId);
 }
 
 // ── project & submission ──────────────────────────────────────────────
 
-export async function resolveProject(projectName, gameType) {
-  if (appState.currentProjectId && appState.currentProjectName === projectName) {
-    return appState.currentProjectId;
+export async function resolveProject(projectName, gameType, requestedProjectId = null) {
+  if (requestedProjectId) {
+    if (
+      appState.currentProject
+      && String(appState.currentProject.id) === String(requestedProjectId)
+    ) {
+      return appState.currentProject;
+    }
+    const payload = await api.get(
+      `/api/projects/${encodeURIComponent(requestedProjectId)}`,
+    );
+    return payload.project || null;
   }
-  appState.currentProjectId = null;
-  appState.currentProjectName = null;
 
   try {
     const payload = await api.post("/api/projects", {
@@ -702,9 +941,7 @@ export async function resolveProject(projectName, gameType) {
       game_type: gameType,
     });
     if (payload.project && payload.project.id) {
-      appState.currentProjectId = payload.project.id;
-      appState.currentProjectName = projectName;
-      return payload.project.id;
+      return payload.project;
     }
   } catch (error) {
     const status = error.status || 0;
@@ -718,6 +955,7 @@ export async function resolveProject(projectName, gameType) {
 export async function submitAnalysis() {
   const file = appState.selectedFile || byId("video-file").files[0];
   const projectName = byId("project-name").value.trim();
+  const requestedProjectId = byId("analysis-project-id").value || null;
   if (!projectName) {
     showToast("请填写项目名称。", "error");
     byId("project-name").focus();
@@ -733,13 +971,22 @@ export async function submitAnalysis() {
   const gameType = byId("game-type").value;
 
   setButtonLoading(button, true, "正在准备…");
-  const projectId = await resolveProject(projectName, gameType);
+  let project;
+  try {
+    project = await resolveProject(projectName, gameType, requestedProjectId);
+  } catch (error) {
+    setButtonLoading(button, false);
+    showToast(`项目读取失败：${error.message}`, "error");
+    return;
+  }
+  if (!project) {
+    setButtonLoading(button, false);
+    return;
+  }
 
   const form = new FormData();
   form.append("file", file, file.name);
-  if (projectId) {
-    form.append("project_id", String(projectId));
-  }
+  form.append("project_id", String(project.id));
   form.append("project_name", projectName);
   form.append("game_type", gameType);
   form.append("sample_interval", byId("sample-interval").value);
@@ -760,7 +1007,18 @@ export async function submitAnalysis() {
     logTool("POST", "/api/jobs", `上传 ${file.name}`);
     const created = await api.post("/api/jobs", form);
     appState.currentJobId = created.job_id;
-    if (created.project_id) appState.currentProjectId = created.project_id;
+    setSelectedProject(project);
+    appState.currentJob = {
+      job_id: created.job_id,
+      project_id: project.id,
+      project_name: project.name,
+      original_asset_name: file.name,
+      game_type: gameType,
+      status: created.status,
+    };
+    updateAnalysisContext(project, appState.currentJob);
+    byId("project-dialog").close();
+    showAppView("analysis");
     logTool("POST", `/api/jobs/${created.job_id}/analyze`, "启动真实 CV 分析");
     await api.post(`/api/jobs/${encodeURIComponent(created.job_id)}/analyze`, {});
     setButtonLoading(button, false);
@@ -789,14 +1047,22 @@ export function updateJobNavigation(jobId, editorReady = false) {
   const editorLink = byId("nav-editor");
   if (!jobId) return;
   if (analysisLink) {
-    analysisLink.href = `/jobs/${encodeURIComponent(jobId)}/analysis`;
+    if (analysisLink.tagName === "A") {
+      analysisLink.href = `/jobs/${encodeURIComponent(jobId)}/analysis`;
+    } else {
+      analysisLink.dataset.jobId = jobId;
+    }
     analysisLink.classList.remove("disabled");
     analysisLink.removeAttribute("aria-disabled");
     analysisLink.removeAttribute("tabindex");
     analysisLink.removeAttribute("title");
   }
   if (editorLink) {
-    editorLink.href = `/jobs/${encodeURIComponent(jobId)}/editor`;
+    if (editorLink.tagName === "A") {
+      editorLink.href = `/jobs/${encodeURIComponent(jobId)}/editor`;
+    } else {
+      editorLink.dataset.jobId = jobId;
+    }
     editorLink.classList.toggle("disabled", !editorReady);
     if (editorReady) {
       editorLink.removeAttribute("aria-disabled");
@@ -825,6 +1091,7 @@ export async function hydrateAnalysisJob(jobId) {
     } else if (payload.job.status === "failed") {
       setResultState("error", "failed", payload.job.error || "任务失败。");
     } else {
+      prepareActiveAnalysis(payload.job);
       await pollJob(jobId);
     }
   } catch (error) {

@@ -28,4 +28,9 @@ export const editorState = {
   // Export
   exports: [],
   activeExportId: null,
+  analysisPollTimer: null,
+  agentPollTimer: null,
+  agentCallId: null,
+  agentCallStatus: null,
+  agentStreamPollAttempts: 0,
 };

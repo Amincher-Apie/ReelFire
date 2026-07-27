@@ -3,6 +3,11 @@ import { editorState } from "../state/editor-state.js";
 import api from "../api/client.js";
 import { byId, clearChildren, createElement } from "../utils/dom.js";
 import { formatTime, formatDuration, formatNumber } from "../utils/format.js";
+import {
+  pageForIndex,
+  paginate,
+  renderPagination,
+} from "../utils/pagination.js";
 import { setEditorView, renderVideo, renderTimeline, bindTimelineEvents, seekTo } from "./editor-video.js";
 import { renderReviewEditor, renderBoundaryEditor, renderSortButtons } from "./editor-review.js";
 import { renderStatsDashboard, renderTrajectoryPanel } from "./editor-stats.js";
@@ -10,10 +15,23 @@ import { updateDirtyIndicator } from "./editor-review.js";
 import { checkDraft } from "./editor-actions.js";
 import { deleteSegment, playSegment, adoptSegment, ignoreSegment, initDragReorder } from "./segment-ops.js";
 
+let segmentPage = 1;
+let segmentPageSize = 5;
+
 // ── segment selection ─────────────────────────────────────────────────
 
 export function selectSegment(segmentId) {
   editorState.selectedSegmentId = segmentId;
+  const reviewCard = byId("segment-review-card");
+  if (reviewCard) reviewCard.hidden = false;
+  const idx = editorState.segments.findIndex((segment) => (
+    segment.id === segmentId
+  ));
+  const targetPage = pageForIndex(idx, segmentPageSize);
+  if (idx >= 0 && targetPage !== segmentPage) {
+    segmentPage = targetPage;
+    renderSegmentList();
+  }
 
   const cards = document.querySelectorAll(".segment-card");
   cards.forEach((card) => {
@@ -23,15 +41,18 @@ export function selectSegment(segmentId) {
   });
 
   const markers = document.querySelectorAll(".timeline-segment-marker");
-  const idx = editorState.segments.findIndex((s) => s.id === segmentId);
+  const timelineIndex = editorState.segments.findIndex(
+    (segment) => segment.id === segmentId,
+  );
   markers.forEach((m, i) => {
-    m.classList.toggle("active", i === idx);
+    m.classList.toggle("active", i === timelineIndex);
   });
 
   renderSegmentDetail(segmentId);
   renderReviewEditor(segmentId);
   renderBoundaryEditor(segmentId);
   renderSortButtons(segmentId);
+  renderTrajectoryPanel();
 
   // Show segment ops bar
   const opsBar = byId("segment-ops-bar");
@@ -44,30 +65,69 @@ export function renderSegmentList() {
   const container = byId("highlight-list");
   if (!container) return;
   clearChildren(container);
-  renderClipSequence();
   byId("segments-count").textContent = editorState.segments.length + " 个片段";
 
   if (!editorState.segments.length) {
+    const reviewCard = byId("segment-review-card");
+    if (reviewCard) reviewCard.hidden = true;
     container.append(
       createElement("p", "segment-table-empty", "YOLO 未产出精彩片段。点击「添加片段」手动创建。")
     );
+    renderPagination(byId("highlight-pagination"), {
+      total: 0,
+      page: 1,
+      pageSize: segmentPageSize,
+    });
+    renderClipSequence(null);
     return;
   }
 
-  editorState.segments.forEach((seg, idx) => {
-    const card = renderSegmentCard(seg, idx);
+  const pagination = paginate(
+    editorState.segments,
+    segmentPage,
+    segmentPageSize,
+  );
+  segmentPage = pagination.page;
+  pagination.items.forEach((seg, localIndex) => {
+    const card = renderSegmentCard(seg, pagination.startIndex + localIndex);
     container.append(card);
   });
+  renderPagination(byId("highlight-pagination"), {
+    total: pagination.total,
+    page: pagination.page,
+    pageSize: pagination.pageSize,
+    itemLabel: "个片段",
+    ariaLabel: "精彩片段分页",
+    onPageChange: (page) => {
+      segmentPage = page;
+      renderSegmentList();
+    },
+    onPageSizeChange: (pageSize) => {
+      segmentPageSize = pageSize;
+      segmentPage = editorState.selectedSegmentId
+        ? pageForIndex(
+            editorState.segments.findIndex(
+              (segment) => segment.id === editorState.selectedSegmentId,
+            ),
+            segmentPageSize,
+          )
+        : 1;
+      renderSegmentList();
+    },
+  });
+  renderClipSequence(pagination);
 
   // Init drag reorder
-  initDragReorder(container);
+  initDragReorder(container, pagination.startIndex);
 }
 
-function renderClipSequence() {
+function renderClipSequence(pagination) {
   const container = byId("clip-sequence");
   if (!container) return;
   clearChildren(container);
-  editorState.segments.forEach((segment, index) => {
+  const visibleSegments = pagination?.items || [];
+  visibleSegments.forEach((segment, localIndex) => {
+    const index = (pagination?.startIndex || 0) + localIndex;
     const item = createElement("div", "clip-sequence-item");
     item.setAttribute("role", "listitem");
     item.dataset.segmentId = segment.id;
@@ -84,7 +144,11 @@ function renderClipSequence() {
   });
   const state = byId("sequence-save-state");
   if (state) {
-    state.textContent = editorState.dirty ? "Order not saved" : "Order synced";
+    const range = pagination?.total
+      ? ` · 当前 ${pagination.startIndex + 1}-${pagination.endIndex}`
+      : "";
+    state.textContent =
+      (editorState.dirty ? "顺序尚未保存" : "顺序已同步") + range;
   }
 }
 
@@ -94,6 +158,9 @@ function renderSegmentCard(seg, idx) {
   card.draggable = true;
   card.setAttribute("role", "listitem");
   card.setAttribute("tabindex", "0");
+  const selected = seg.id === editorState.selectedSegmentId;
+  card.classList.toggle("selected", selected);
+  card.setAttribute("aria-current", selected ? "true" : "false");
 
   // Review status classes
   const rev = editorState.reviews[seg.id];
@@ -217,6 +284,7 @@ export function renderSegmentDetail(segmentId) {
 
   // Agent 状态来自整体 agentReport，不再从单条 segmentComment.status 读取
   renderAgentComment(segmentComment);
+  renderSelectedSegmentEvidence(seg, segmentComment);
 }
 
 export function findAgentComment(segmentId) {
@@ -228,6 +296,8 @@ export function findAgentComment(segmentId) {
 export function renderAgentComment(segmentComment) {
   const agent = editorState.agentReport;
   const avail = agent ? agent.availability : null;
+  const degraded = agent?.status === "degraded";
+  const streaming = agent?.status === "streaming";
   // availability 值域：ready | unavailable | invalid | pending（无 agent 对象视为 pending）
   const agentStatus = !agent
     ? "pending"
@@ -240,7 +310,11 @@ export function renderAgentComment(segmentComment) {
   badge.className = "agent-status-badge " + agentStatus;
   const badgeText =
     agentStatus === "completed"
-      ? "Agent 已完成"
+      ? degraded
+        ? "规则降级结果"
+        : streaming
+          ? "Agent 分片输出"
+        : "Agent 已完成"
       : agentStatus === "pending"
       ? "待 Agent 分析"
       : avail === "invalid"
@@ -340,39 +414,83 @@ function renderAgentOverall(agent) {
     }
   }
 
-  // 证据引用：来自 agent.evidence_refs
-  const evidenceContainer = byId("agent-evidence");
-  clearChildren(evidenceContainer);
-  (agent.evidence_refs || []).forEach((ref) => {
+}
+
+function evidenceValue(ref) {
+  if (typeof ref === "string") return ref;
+  if (!ref || typeof ref !== "object") return String(ref || "");
+  return (
+    ref.source_id
+    || ref.ref_id
+    || ref.title
+    || ref.knowledge_id
+    || ref.id
+    || JSON.stringify(ref)
+  );
+}
+
+function renderEvidenceGroup(container, entries, emptyText) {
+  clearChildren(container);
+  entries.forEach(({ type, value }) => {
     const item = createElement("div", "agent-evidence-item");
     item.append(
-      createElement("span", "agent-evidence-type", ref.type || "ref"),
-      createElement("span", "agent-evidence-source", ref.source_id || ref.ref_id || "")
+      createElement("span", "agent-evidence-type", type),
+      createElement("span", "agent-evidence-source", value),
     );
-    evidenceContainer.append(item);
+    container.append(item);
   });
-  if (!agent.evidence_refs || !agent.evidence_refs.length) {
-    evidenceContainer.append(
-      createElement("p", "agent-field-value", "无证据引用。")
-    );
+  if (!entries.length) {
+    container.append(createElement("p", "agent-field-value", emptyText));
+  }
+}
+
+function renderSelectedSegmentEvidence(segment, segmentComment) {
+  const frameEntries = [];
+  (segment.source_keyframes || []).forEach((keyframeId) => {
+    frameEntries.push({ type: "关键帧", value: String(keyframeId) });
+  });
+  (segment.source_segment_ids || []).forEach((sourceId) => {
+    frameEntries.push({ type: "来源片段", value: String(sourceId) });
+  });
+
+  const explanation = segmentComment?.explanation;
+  if (explanation && typeof explanation === "object") {
+    (explanation.detection_box_refs || []).forEach((ref) => {
+      frameEntries.push({ type: "检测框", value: evidenceValue(ref) });
+    });
   }
 
-  // 知识库引用：来自 agent.knowledge_refs
-  const knowledgeContainer = byId("agent-knowledge");
-  clearChildren(knowledgeContainer);
-  (agent.knowledge_refs || []).forEach((ref) => {
-    const item = createElement("div", "agent-evidence-item");
-    item.append(
-      createElement("span", "agent-evidence-type", "知识库"),
-      createElement("span", "agent-evidence-source", ref.title || ref.knowledge_id || "")
-    );
-    knowledgeContainer.append(item);
-  });
-  if (!agent.knowledge_refs || !agent.knowledge_refs.length) {
-    knowledgeContainer.append(
-      createElement("p", "agent-field-value", "无知识库引用。")
-    );
-  }
+  const agentEntries = (segmentComment?.evidence_refs || []).map((ref) => ({
+    type: "Agent",
+    value: evidenceValue(ref),
+  }));
+  const knowledgeEntries = (editorState.agentReport?.knowledge_refs || []).map(
+    (ref) => ({
+      type: "知识库",
+      value: evidenceValue(ref),
+    }),
+  );
+
+  renderEvidenceGroup(
+    byId("segment-frame-evidence"),
+    frameEntries,
+    "该片段暂时没有可显示的视觉证据。",
+  );
+  renderEvidenceGroup(
+    byId("segment-agent-evidence"),
+    agentEntries,
+    "该片段的 Agent 引用仍在生成或未返回。",
+  );
+  renderEvidenceGroup(
+    byId("segment-knowledge-evidence"),
+    knowledgeEntries,
+    "当前没有关联的审核知识。",
+  );
+
+  const total = frameEntries.length + agentEntries.length + knowledgeEntries.length;
+  byId("segment-evidence-count").textContent = `${total} 项`;
+  byId("segment-evidence-summary").textContent =
+    `片段 ${segment.id} · ${formatTime(segment.start)}–${formatTime(segment.end)}，仅展示当前选中片段的证据。`;
 }
 
 // ── 逐片段 Agent 评论（per-segment） ──
@@ -462,17 +580,6 @@ function renderSegmentCommentDetail(segmentComment) {
     );
   }
 
-  // per-segment evidence_refs — 字符串数组，不做 ref.type/ref.source_id 解构
-  if (segmentComment.evidence_refs && segmentComment.evidence_refs.length) {
-    const refsHtml = segmentComment.evidence_refs.map((ref) =>
-      '<span class="agent-evidence-item">' + escapeHtml(typeof ref === "string" ? ref : String(ref)) + '</span>'
-    ).join("");
-    parts.push(
-      '<div class="agent-field"><span class="agent-field-label">相关证据</span>' +
-      '<div class="agent-evidence-list">' + refsHtml + '</div></div>'
-    );
-  }
-
   container.innerHTML = parts.length ? parts.join("") : '<p class="agent-field-value">该片段暂无 Agent 评论。</p>';
 }
 
@@ -485,9 +592,9 @@ function escapeHtml(text) {
 // ── Agent report loading (independent from /editor) ───────────────────
 
 export function loadAgentReport(jobId) {
-  if (!jobId) return;
+  if (!jobId) return Promise.resolve(null);
 
-  api.get("/api/jobs/" + encodeURIComponent(jobId) + "/report-data").then(
+  return api.get("/api/jobs/" + encodeURIComponent(jobId) + "/report-data").then(
     (payload) => {
       // 新后端契约：payload.report_data.agent.{segment_comments, summary, tags, ...}
       const reportData = payload.report_data || {};
@@ -505,6 +612,7 @@ export function loadAgentReport(jobId) {
       if (editorState.selectedSegmentId) {
         renderSegmentDetail(editorState.selectedSegmentId);
       }
+      return agent;
     },
     (error) => {
       // Agent 报告不可用不阻塞编辑 — 面板显示 pending 状态
@@ -513,8 +621,227 @@ export function loadAgentReport(jobId) {
       if (editorState.selectedSegmentId) {
         renderSegmentDetail(editorState.selectedSegmentId);
       }
+      return null;
     }
   );
+}
+
+// ── Agent call polling ─────────────────────────────────────────────────
+
+export function stopAgentPolling() {
+  if (editorState.agentPollTimer) {
+    window.clearTimeout(editorState.agentPollTimer);
+  }
+  editorState.agentPollTimer = null;
+}
+
+function setAgentProgress(status, detail, call = null) {
+  const badge = byId("agent-run-badge");
+  const retry = byId("agent-retry-button");
+  const queued = byId("agent-step-queued");
+  const running = byId("agent-step-running");
+  const result = byId("agent-step-result");
+  const steps = [queued, running, result].filter(Boolean);
+  steps.forEach((step) => {
+    step.classList.remove("active", "complete", "failed");
+  });
+
+  if (badge) badge.className = "agent-run-badge " + status;
+  if (retry) retry.hidden = true;
+
+  if (status === "waiting") {
+    if (badge) badge.textContent = "等待 YOLO";
+    queued?.classList.add("active");
+  } else if (status === "queued" || status === "pending") {
+    if (badge) badge.textContent = status === "queued" ? "排队中" : "检查中";
+    queued?.classList.add("active");
+  } else if (status === "running") {
+    if (badge) badge.textContent = "分析中";
+    queued?.classList.add("complete");
+    running?.classList.add("active");
+  } else if (status === "completed") {
+    if (badge) badge.textContent = "Agent 已完成";
+    steps.forEach((step) => step.classList.add("complete"));
+  } else if (status === "degraded") {
+    if (badge) badge.textContent = "规则降级结果";
+    queued?.classList.add("complete");
+    running?.classList.add("failed");
+    result?.classList.add("complete");
+    if (retry) retry.hidden = false;
+  } else {
+    if (badge) badge.textContent = "Agent 失败";
+    queued?.classList.add("complete");
+    running?.classList.add("failed");
+    result?.classList.add("failed");
+    if (retry) retry.hidden = false;
+  }
+
+  const provider = call?.model_name ? " · " + call.model_name : "";
+  const detailElement = byId("agent-run-detail");
+  if (detailElement) detailElement.textContent = detail + provider;
+}
+
+function isDegradedAgentCall(call) {
+  const flags = Array.isArray(call?.result?.risk_flags)
+    ? call.result.risk_flags
+    : [];
+  return (
+    flags.includes("model_generation_failed") ||
+    flags.includes("model_provider_not_configured") ||
+    flags.includes("knowledge_retrieval_degraded") ||
+    call?.result?.status === "degraded"
+  );
+}
+
+export async function pollAgentCall(agentCallId) {
+  stopAgentPolling();
+  try {
+    const payload = await api.get(
+      "/api/agent-calls/" + encodeURIComponent(agentCallId),
+    );
+    const call = payload.agent_call;
+    editorState.agentCallId = call.id;
+    editorState.agentCallStatus = call.status;
+
+    if (call.status === "queued") {
+      setAgentProgress(
+        "queued",
+        "Agent 调用已创建，正在等待后台执行器。",
+        call,
+      );
+    } else if (call.status === "running") {
+      setAgentProgress(
+        "running",
+        "正在解析视觉报告、检索知识并生成逐片段评论。",
+        call,
+      );
+    } else if (call.status === "completed") {
+      setAgentProgress(
+        "completed",
+        "在线 Agent 结果和逐片段评论已保存。",
+        call,
+      );
+      await loadAgentReport(editorState.jobId);
+      return call;
+    } else if (call.status === "needs_review") {
+      const degraded = isDegradedAgentCall(call);
+      setAgentProgress(
+        degraded ? "degraded" : "completed",
+        degraded
+          ? "在线模型或知识检索不可用，当前已展示完整的规则降级评论；可修正配置后重试。"
+          : "Agent 已完成逐片段输出，结果需要人工复核。",
+        call,
+      );
+      await loadAgentReport(editorState.jobId);
+      return call;
+    } else {
+      setAgentProgress(
+        "failed",
+        call.error_message || "Agent 执行失败，请检查服务配置后重试。",
+        call,
+      );
+      return call;
+    }
+
+    editorState.agentPollTimer = window.setTimeout(
+      () => pollAgentCall(agentCallId),
+      1400,
+    );
+    return call;
+  } catch (error) {
+    editorState.agentCallStatus = "failed";
+    setAgentProgress(
+      "failed",
+      (error.message || "无法读取 Agent 调用状态。") + " 请点击重试。",
+    );
+    return null;
+  }
+}
+
+export async function startAgentRun(forceNew = false) {
+  stopAgentPolling();
+  setAgentProgress("pending", "正在检查 Agent 调用记录。");
+  try {
+    let call = null;
+    if (!forceNew) {
+      const history = await api.get(
+        "/api/jobs/" + encodeURIComponent(editorState.jobId) + "/agent-calls",
+      );
+      call = Array.isArray(history.agent_calls)
+        ? history.agent_calls[0] || null
+        : null;
+    }
+    if (!call) {
+      const created = await api.post(
+        "/api/jobs/" + encodeURIComponent(editorState.jobId) + "/agent-calls",
+        { prompt_version: "v2", force: forceNew },
+      );
+      call = created.agent_call;
+    }
+    editorState.agentCallId = call.id;
+    editorState.agentCallStatus = call.status;
+    return pollAgentCall(call.id);
+  } catch (error) {
+    editorState.agentCallStatus = "failed";
+    setAgentProgress(
+      "failed",
+      (error.message || "Agent 调用无法启动。") + " 请检查配置后重试。",
+    );
+    return null;
+  }
+}
+
+export async function ensureAgentRun() {
+  const data = editorState.editorData;
+  if (!data || data.status !== "completed") {
+    if (editorState.agentComments.length > 0) {
+      setAgentProgress(
+        "running",
+        `已收到 ${editorState.agentComments.length} 个片段的 Agent 输出；后续片段会继续追加。`,
+      );
+    } else {
+      setAgentProgress(
+        "waiting",
+        "YOLO 发现首个精彩片段后会立即送入 Agent 队列。",
+      );
+    }
+    return null;
+  }
+
+  const expected = editorState.segments.length;
+  if (expected > 0 && editorState.agentComments.length >= expected) {
+    editorState.agentStreamPollAttempts = 0;
+    setAgentProgress(
+      editorState.agentReport?.status === "degraded"
+        ? "degraded"
+        : "completed",
+      `已收到全部 ${expected} 个片段的 Agent 输出。`,
+    );
+    return null;
+  }
+
+  if (
+    editorState.agentCallId &&
+    (editorState.agentCallStatus === "queued" ||
+      editorState.agentCallStatus === "running")
+  ) {
+    return pollAgentCall(editorState.agentCallId);
+  }
+
+  if (expected > 0 && editorState.agentStreamPollAttempts < 10) {
+    editorState.agentStreamPollAttempts += 1;
+    setAgentProgress(
+      "running",
+      `正在接收逐片段 Agent 输出：${editorState.agentComments.length} / ${expected}。`,
+    );
+    stopAgentPolling();
+    editorState.agentPollTimer = window.setTimeout(async () => {
+      await loadAgentReport(editorState.jobId);
+      ensureAgentRun();
+    }, 1400);
+    return null;
+  }
+  return startAgentRun(false);
 }
 
 // ── data loading ──────────────────────────────────────────────────────
@@ -522,14 +849,76 @@ export function loadAgentReport(jobId) {
 let loadRetries = 0;
 const MAX_LOAD_RETRIES = 2;
 
+function stopLiveAnalysisPolling() {
+  if (editorState.analysisPollTimer) {
+    window.clearTimeout(editorState.analysisPollTimer);
+  }
+  editorState.analysisPollTimer = null;
+}
+
+function scheduleLiveAnalysisPolling() {
+  stopLiveAnalysisPolling();
+  editorState.analysisPollTimer = window.setTimeout(
+    pollLiveAnalysis,
+    1600,
+  );
+}
+
+function pollLiveAnalysis() {
+  stopLiveAnalysisPolling();
+  if (!editorState.jobId) return;
+  api.get(
+    "/api/jobs/" + encodeURIComponent(editorState.jobId) + "/editor"
+  ).then(
+    (payload) => {
+      const data = applyEditorData(payload, { refresh: true });
+      if (
+        data &&
+        data.status !== "completed" &&
+        data.status !== "failed" &&
+        !(data.live_analysis && data.live_analysis.final)
+      ) {
+        scheduleLiveAnalysisPolling();
+      }
+    },
+    (error) => {
+      const detail = byId("live-analysis-detail");
+      if (detail) {
+        detail.textContent =
+          "增量状态暂时读取失败，将自动重试：" + error.message;
+      }
+      scheduleLiveAnalysisPolling();
+    },
+  );
+}
+
 export function loadEditorData(jobId) {
+  if (editorState.jobId !== jobId) {
+    stopAgentPolling();
+    editorState.agentCallId = null;
+    editorState.agentCallStatus = null;
+    editorState.agentStreamPollAttempts = 0;
+    segmentPage = 1;
+    segmentPageSize = 5;
+  }
   editorState.jobId = jobId;
+  stopLiveAnalysisPolling();
   setEditorView("loading");
+  const headerMeta = byId("header-meta");
+  if (headerMeta) headerMeta.textContent = "正在请求编辑数据…";
 
   api.get("/api/jobs/" + encodeURIComponent(jobId) + "/editor").then(
     (payload) => {
       loadRetries = 0;
-      applyEditorData(payload);
+      const data = applyEditorData(payload);
+      if (
+        data &&
+        data.status !== "completed" &&
+        data.status !== "failed" &&
+        !(data.live_analysis && data.live_analysis.final)
+      ) {
+        scheduleLiveAnalysisPolling();
+      }
     },
     (error) => {
       if (loadRetries < MAX_LOAD_RETRIES && (error.status === 0 || error.status >= 500)) {
@@ -600,6 +989,12 @@ export function normalizeEditorData(payload) {
         source_segment_ids: Array.isArray(seg.source_segment_ids) ? seg.source_segment_ids : [],
         review: seg.review || "",
         review_note: seg.review_note || "",
+        evidence: seg.evidence && typeof seg.evidence === "object"
+          ? seg.evidence
+          : null,
+        tracking: seg.tracking && typeof seg.tracking === "object"
+          ? seg.tracking
+          : null,
         // /editor 内嵌的 Agent 预览（/report-data 加载前用于快速展示）
         _agentPreview: {
           comment: seg.agent_comment || null,
@@ -609,6 +1004,21 @@ export function normalizeEditorData(payload) {
         },
       };
     });
+  const agentComments = segments
+    .filter((segment) => segment._agentPreview.comment)
+    .map((segment) => ({
+      segment_id: segment.id,
+      comment: segment._agentPreview.comment,
+      review_status:
+        segment._agentPreview.reviewStatus || "needs_review",
+      action_recommendation:
+        segment._agentPreview.reviewStatus === "pass"
+          ? "adopt"
+          : segment._agentPreview.reviewStatus === "reject"
+            ? "reject"
+            : "needs_review",
+      evidence_refs: segment._agentPreview.evidenceRefs,
+    }));
 
   // Restore saved reviews from server-side segment/highlight data
   const reviews = {};
@@ -627,13 +1037,14 @@ export function normalizeEditorData(payload) {
     video: {
       duration: videoDuration,
       filename: rawVideo.filename || "",
+      fps: Number(rawVideo.fps) || 0,
       // 新后端：video.url 直接可用；旧后端：video.path 需拼接
       url: videoUrl,
       path: videoPath,
     },
     segments: segments,
     // agent_comments 不再从 /editor 聚合数据中读取 — 由 /report-data 独立加载
-    agent_comments: [],
+    agent_comments: agentComments,
     output: payload.output || {},
     reviews: reviews,
     actions_enabled: payload.actions_enabled !== false,
@@ -641,31 +1052,81 @@ export function normalizeEditorData(payload) {
   };
 }
 
-export function applyEditorData(payload) {
+export function applyEditorData(payload, options = {}) {
   let data;
   try {
     data = normalizeEditorData(payload);
   } catch (error) {
     setEditorView("error");
     byId("editor-error-message").textContent = error.message;
-    return;
+    return null;
   }
+  const refresh = options.refresh === true;
+  const previousSelection = editorState.selectedSegmentId;
+  const existingSegments = editorState.segments.slice();
   editorState.editorData = data;
   editorState.video = data.video || null;
-  editorState.segments = Array.isArray(data.segments) ? data.segments : [];
-  editorState.agentReport = null;
-  editorState.agentComments = [];
-  editorState.keyframes = [];
+  if (refresh && editorState.dirty) {
+    const existingIds = new Set(existingSegments.map((segment) => segment.id));
+    editorState.segments = existingSegments.concat(
+      data.segments.filter((segment) => !existingIds.has(segment.id)),
+    );
+  } else {
+    editorState.segments = Array.isArray(data.segments) ? data.segments : [];
+  }
+  const addedSegmentCount = Math.max(
+    0,
+    editorState.segments.length - existingSegments.length,
+  );
   editorState.output = data.output || null;
-  editorState.reviews = data.reviews || {};
-  editorState.dirty = false;
-  editorState.selectedSegmentId = null;
-  editorState.undoStack = [];
-  editorState.redoStack = [];
-  editorState.saveStatus = "saved";
+  if (!refresh) {
+    editorState.agentReport = null;
+    editorState.agentComments = [];
+    editorState.keyframes = [];
+    editorState.reviews = data.reviews || {};
+    editorState.dirty = false;
+    editorState.undoStack = [];
+    editorState.redoStack = [];
+    editorState.saveStatus = "saved";
+  }
+  const incomingComments = Array.isArray(data.agent_comments)
+    ? data.agent_comments
+    : [];
+  if (incomingComments.length > 0) {
+    const commentsById = new Map(
+      editorState.agentComments.map((comment) => [
+        comment.segment_id,
+        comment,
+      ]),
+    );
+    incomingComments.forEach((comment) => {
+      commentsById.set(comment.segment_id, comment);
+    });
+    editorState.agentComments = [...commentsById.values()];
+    if (data.status !== "completed" || !editorState.agentReport) {
+      editorState.agentReport = {
+        availability: "ready",
+        status: "streaming",
+        summary: `已完成 ${editorState.agentComments.length} 个候选片段的 Agent 分析。`,
+        tags: [],
+        suggestions: [],
+        review: null,
+        evidence_refs: [],
+        knowledge_refs: [],
+      };
+    }
+  }
+  editorState.selectedSegmentId = editorState.segments.some(
+    (segment) => segment.id === previousSelection,
+  ) ? previousSelection : null;
 
   const actionsEnabled = data.actions_enabled !== false;
-  ["save-review-button", "rough-cut-button", "open-export-button"].forEach((id) => {
+  [
+    "save-review-button",
+    "rough-cut-button",
+    "open-export-button",
+    "export-selected-segment-button",
+  ].forEach((id) => {
     const button = byId(id);
     if (button) button.disabled = !actionsEnabled;
   });
@@ -679,14 +1140,14 @@ export function applyEditorData(payload) {
   const count = byId("live-analysis-count");
   if (count) {
     count.textContent =
-      `${Number(live.completed_chunks) || 0} / ${Number(live.total_chunks) || 0} chunks`;
+      `${Number(live.completed_chunks) || 0} / ${Number(live.total_chunks) || 0} 个窗口`;
   }
   const detail = byId("live-analysis-detail");
   if (detail) detail.textContent = live.message || "";
   const badge = byId("live-analysis-badge");
   if (badge) {
     badge.className = `live-analysis-badge ${live.final ? "completed" : "running"}`;
-    badge.textContent = live.final ? "Analysis complete" : "Analysis running";
+    badge.textContent = live.final ? "分析完成" : "后台分析中";
   }
 
   byId("header-job-id").textContent = data.job_id || editorState.jobId || "—";
@@ -697,7 +1158,7 @@ export function applyEditorData(payload) {
 
   setEditorView("content");
 
-  renderVideo();
+  if (!refresh) renderVideo();
   renderTimeline();
   renderSegmentList();
   bindTimelineEvents();
@@ -709,15 +1170,31 @@ export function applyEditorData(payload) {
   // Show auto-save indicator
   byId("auto-save-indicator").hidden = false;
 
-  // Check for auto-saved draft
-  checkDraft();
+  if (!refresh) {
+    // Check for auto-saved draft
+    checkDraft();
+  }
 
-  // 独立加载完整 Agent 报告（新后端 /report-data，不再从 /editor 聚合数据中内嵌）
-  loadAgentReport(editorState.jobId);
+  if (data.status === "completed") {
+    // 最终报告就绪后刷新完整 Agent 报告并同步调用终态。
+    loadAgentReport(editorState.jobId).finally(() => ensureAgentRun());
+  } else {
+    ensureAgentRun();
+  }
 
   if (editorState.segments.length > 0) {
-    selectSegment(editorState.segments[0].id);
+    selectSegment(
+      editorState.selectedSegmentId || editorState.segments[0].id,
+    );
   }
+  if (refresh && addedSegmentCount > 0) {
+    const live = byId("sequence-live");
+    if (live) {
+      live.textContent =
+        `后台分析新增 ${addedSegmentCount} 个片段，已追加到剪辑序列。`;
+    }
+  }
+  return data;
 }
 
 // ── auto-save indicator helper ─────────────────────────────────────────

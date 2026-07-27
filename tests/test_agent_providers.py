@@ -10,6 +10,13 @@ from agent import check_dify
 from agent.integrations.reelfire import to_backend_agent_call
 from agent.providers.dify import DifyChatClient
 from agent.providers.ollama import ModelProviderError
+from agent.retrieval.ollama_topk import (
+    EmbeddingServiceError,
+    request_embeddings,
+)
+from agent.retrieval.openai_compatible import (
+    request_openai_compatible_embeddings,
+)
 from agent.service import AgentService
 from agent.tools.advice_generator import AdviceGeneratorTool
 from agent.tools.knowledge_retriever import KnowledgeRetrieverTool
@@ -298,6 +305,162 @@ class DifyProviderTests(unittest.TestCase):
         self.assertTrue(raised.exception.retryable)
         self.assertEqual(raised.exception.attempt_count, 3)
         self.assertEqual(sleeps, [0.1, 0.2])
+
+    def test_network_log_exposes_cause_without_host_or_secret(self) -> None:
+        secret = "test-secret-value-never-log"
+        client = DifyChatClient(
+            base_url="https://private.example.invalid",
+            api_key=secret,
+            max_attempts=1,
+        )
+        cause = OSError(10061, "connection refused")
+
+        with patch(
+            "agent.providers.dify.urlopen",
+            side_effect=URLError(cause),
+        ), self.assertLogs("agent.providers.dify", level="WARNING") as captured:
+            with self.assertRaises(ModelProviderError):
+                client.get_app_info()
+
+        output = "\n".join(captured.output)
+        self.assertIn("endpoint=get:info", output)
+        self.assertIn("reason_type=ConnectionRefusedError", output)
+        self.assertIn("errno=10061", output)
+        self.assertNotIn("private.example.invalid", output)
+        self.assertNotIn(secret, output)
+
+    def test_ollama_embedding_log_is_sanitized(self) -> None:
+        cause = OSError(10061, "connection refused")
+
+        with patch(
+            "agent.retrieval.ollama_topk.urlopen",
+            side_effect=URLError(cause),
+        ), self.assertLogs(
+            "agent.retrieval.ollama_topk",
+            level="WARNING",
+        ) as captured:
+            with self.assertRaises(EmbeddingServiceError):
+                request_embeddings(
+                    "http://private-ollama.invalid",
+                    "private-model-name",
+                    ["private prompt"],
+                    timeout=1,
+                )
+
+        output = "\n".join(captured.output)
+        self.assertIn("endpoint=post:embed", output)
+        self.assertIn("errno=10061", output)
+        self.assertNotIn("private-ollama.invalid", output)
+        self.assertNotIn("private-model-name", output)
+        self.assertNotIn("private prompt", output)
+
+    def test_long_visual_summary_is_compacted_before_dify_request(self) -> None:
+        visual = self.visual_summary()
+        visual.update(
+            {
+                "segment_count": 100,
+                "keyframe_count": 100,
+                "segments": [
+                    {
+                        "id": f"seg_{index:03d}",
+                        "start": float(index),
+                        "end": float(index + 8),
+                        "score": 0.8,
+                        "reason": "candidate",
+                        "evidence_refs": [
+                            f"ev:segment:seg_{index:03d}",
+                            f"ev:detection:{index:03d}",
+                        ],
+                        "detections_summary": [
+                            {
+                                "class": "character",
+                                "confidence": 0.8,
+                                "evidence_refs": [
+                                    f"ev:detection:{index:03d}"
+                                ],
+                            }
+                        ],
+                    }
+                    for index in range(100)
+                ],
+                "keyframes": [
+                    {
+                        "id": f"kf_{index:03d}",
+                        "timestamp": float(index),
+                        "highlight_score": index / 100,
+                        "evidence_refs": [f"ev:keyframe:{index:03d}"],
+                    }
+                    for index in range(100)
+                ],
+                "evidence_refs": [
+                    {
+                        "ref_id": f"ev:segment:seg_{index:03d}",
+                        "type": "segment",
+                        "source_id": f"seg_{index:03d}",
+                        "value": {"large": "x" * 1000},
+                    }
+                    for index in range(100)
+                ]
+                + [
+                    {
+                        "ref_id": f"ev:detection:{index:03d}",
+                        "type": "detection",
+                        "source_id": f"sample_{index:03d}",
+                        "value": {"large": "x" * 1000},
+                    }
+                    for index in range(100)
+                ],
+            }
+        )
+        client = DifyChatClient(api_key="placeholder")
+
+        prompt = client._render_prompt(
+            "job_test",
+            visual,
+            self.knowledge_context(),
+        )
+
+        self.assertLess(len(prompt.encode("utf-8")), 150_000)
+        self.assertIn('"id":"seg_000"', prompt)
+        self.assertIn('"id":"seg_099"', prompt)
+        self.assertIn('"id":"kf_099"', prompt)
+        self.assertNotIn('"id":"kf_000"', prompt)
+
+    def test_openai_compatible_embedding_contract(self) -> None:
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, *_args):
+                return (
+                    b'{"data":[{"index":1,"embedding":[3,4]},'
+                    b'{"index":0,"embedding":[1,2]}]}'
+                )
+
+        with patch(
+            "agent.retrieval.openai_compatible.urlopen",
+            return_value=FakeResponse(),
+        ) as mocked:
+            vectors = request_openai_compatible_embeddings(
+                "https://embedding.example.invalid/v1",
+                "test-model",
+                ["first", "second"],
+                api_key="secret",
+            )
+
+        self.assertEqual(vectors, [[1.0, 2.0], [3.0, 4.0]])
+        request = mocked.call_args.args[0]
+        self.assertEqual(
+            request.full_url,
+            "https://embedding.example.invalid/v1/embeddings",
+        )
+        self.assertEqual(
+            request.get_header("Authorization"),
+            "Bearer secret",
+        )
 
     def test_server_error_retries_then_health_check_succeeds(self) -> None:
         class FakeResponse:

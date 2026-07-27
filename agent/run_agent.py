@@ -12,7 +12,11 @@ from dotenv import load_dotenv
 
 from agent.providers import DifyChatClient, OllamaChatClient
 from agent.service import AgentService
-from agent.tools import AdviceGeneratorTool, KnowledgeRetrieverTool, OllamaEmbedder
+from agent.tools import (
+    AdviceGeneratorTool,
+    KnowledgeRetrieverTool,
+    build_embedder_from_env,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -35,7 +39,7 @@ def _model_client(provider: str):
 
 
 def _service(provider: str) -> AgentService:
-    embedder = OllamaEmbedder() if os.getenv("OLLAMA_EMBED_MODEL") else None
+    embedder = build_embedder_from_env()
     return AgentService(
         knowledge_retriever=KnowledgeRetrieverTool(embedder=embedder),
         advice_generator=AdviceGeneratorTool(

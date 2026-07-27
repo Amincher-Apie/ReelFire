@@ -154,6 +154,18 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         app.config["AGENT_PROVIDER"],
     )
     app.extensions["agent_execution_service"] = agent_execution
+    if hasattr(analysis, "set_segment_callback") and hasattr(
+        agent_execution,
+        "enqueue_segment",
+    ):
+        analysis.set_segment_callback(
+            agent_execution.enqueue_segment,
+            (
+                agent_execution.finalize_segments
+                if hasattr(agent_execution, "finalize_segments")
+                else None
+            ),
+        )
     if not app.testing:
         atexit.register(agent_execution.shutdown, False)
 
@@ -187,17 +199,13 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     def index():
         return render_template(
             "index.html",
-            initial_view="upload",
+            initial_view="projects",
             job_id=None,
         )
 
     @app.get("/history")
     def history_page():
-        return render_template(
-            "index.html",
-            initial_view="history",
-            job_id=None,
-        )
+        return redirect(url_for("index"))
 
     @app.get("/jobs/<job_id>/analysis")
     def analysis_page(job_id: str):

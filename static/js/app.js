@@ -6,18 +6,27 @@ import { byId } from "./utils/dom.js";
 import api from "./api/client.js";
 import { showToast } from "./utils/ui.js";
 import { appState } from "./state/app-state.js";
+import { clearSelectedProject, refreshProjectContext } from "./state/project-selection.js";
 import { initUpload } from "./views/upload.js";
-import { setView, submitAnalysis, stopPolling, stopAgentPolling, showRuleOutput, showReportDialog, hydrateAnalysisJob } from "./views/analysis.js";
-import { saveReview, createRoughCut } from "./views/review.js";
-import { loadHistory, openHistoryJob, deleteHistoryJob } from "./views/history.js";
 import {
-  loadProjects, openProject, startAnalysisInProject,
-  backToProjectDetail, showProjectsView, showHistoryView,
-  initProjectDialog,
+  setKeyframeReviewMode,
+  showReportDialog,
+  showRuleOutput,
+  stopAgentPolling,
+  stopPolling,
+  submitAnalysis,
+} from "./views/analysis.js";
+import { saveReview, createRoughCut } from "./views/review.js";
+import {
+  openHistoryJob,
+} from "./views/history.js";
+import {
+  loadProjects, showProjectsView, showAnalysisWorkspace, showEditorWorkspace,
+  initProjectBrowser, initProjectDialog,
 } from "./views/projects.js";
 
-function initApp() {
-  // Navigation buttons — prevent default link navigation, handle disabled state
+async function initApp() {
+  // Navigation buttons
   document.querySelectorAll("[data-view]").forEach((button) => {
     button.addEventListener("click", (event) => {
       // Always prevent default <a> navigation to keep SPA routing
@@ -28,32 +37,10 @@ function initApp() {
       }
       const view = button.dataset.view;
       if (view === "projects") showProjectsView();
-      else if (view === "analysis") startAnalysisInProject();
-      else if (view === "history") showHistoryView();
+      else if (view === "analysis") showAnalysisWorkspace();
+      else if (view === "editor") showEditorWorkspace();
     });
   });
-
-  // Back to projects
-  const backBtn = byId("back-to-projects");
-  if (backBtn) backBtn.addEventListener("click", backToProjectDetail);
-
-  // Project detail → start analysis
-  const startAnalysisBtn = byId("project-start-analysis");
-  if (startAnalysisBtn) startAnalysisBtn.addEventListener("click", startAnalysisInProject);
-
-  // Empty state create button
-  const emptyCreate = byId("projects-empty-create");
-  if (emptyCreate) emptyCreate.addEventListener("click", () => byId("project-dialog").showModal());
-
-  // Project archive/restore button on detail page
-  const archiveBtn = byId("project-archive-button");
-  if (archiveBtn) {
-    archiveBtn.addEventListener("click", async () => {
-      const { appState: st } = await import("./state/app-state.js");
-      const { toggleArchiveProject } = await import("./views/projects.js");
-      if (st.currentProject) toggleArchiveProject(st.currentProject);
-    });
-  }
 
   // Projects retry
   const projectsRetry = byId("projects-retry-button");
@@ -63,10 +50,6 @@ function initApp() {
   byId("logout-button").addEventListener("click", logout);
 
   // Analysis form
-  byId("project-name").addEventListener("input", () => {
-    appState.currentProjectId = null;
-    appState.currentProjectName = null;
-  });
   byId("analysis-form").addEventListener("submit", (event) => {
     event.preventDefault();
     submitAnalysis();
@@ -90,18 +73,14 @@ function initApp() {
   byId("save-review-button").addEventListener("click", saveReview);
   byId("rough-cut-button").addEventListener("click", createRoughCut);
   byId("open-report-button").addEventListener("click", showReportDialog);
+  document.querySelectorAll("[data-keyframe-review-mode]").forEach((button) => {
+    button.addEventListener("click", () => {
+      setKeyframeReviewMode(button.dataset.keyframeReviewMode);
+    });
+  });
   byId("close-report-button").addEventListener("click", () => byId("report-dialog").close());
   byId("report-dialog").addEventListener("click", (event) => {
     if (event.target === byId("report-dialog")) byId("report-dialog").close();
-  });
-
-  // History
-  byId("refresh-history-button").addEventListener("click", loadHistory);
-  byId("history-body").addEventListener("click", (event) => {
-    const button = event.target.closest("[data-history-action]");
-    if (!button) return;
-    if (button.dataset.historyAction === "open") openHistoryJob(button.dataset.jobId);
-    if (button.dataset.historyAction === "delete") deleteHistoryJob(button.dataset.jobId);
   });
 
   // Rule output buttons
@@ -111,17 +90,15 @@ function initApp() {
 
   // Init upload, project dialog, and load user
   initUpload();
+  initProjectBrowser();
   initProjectDialog();
-  loadUser();
+  await loadUser();
+  refreshProjectContext();
 
-  const initialView = document.body.dataset.initialView || "projects";
-  const initialJobId = document.body.dataset.jobId || "";
+  const initialView = document.body.dataset.initialView;
+  const initialJobId = document.body.dataset.jobId;
   if (initialView === "analysis" && initialJobId) {
-    appState.currentJobId = initialJobId;
-    startAnalysisInProject();
-    hydrateAnalysisJob(initialJobId);
-  } else if (initialView === "history") {
-    showHistoryView();
+    await openHistoryJob(initialJobId);
   } else {
     showProjectsView();
   }
@@ -130,6 +107,7 @@ function initApp() {
 async function logout() {
   try {
     await api.post("/api/auth/logout", {});
+    clearSelectedProject();
     showToast("已退出登录", "success");
     window.location.assign("/login");
   } catch (error) {

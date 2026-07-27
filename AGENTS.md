@@ -17,3 +17,6 @@ These rules apply to the entire ReelFire repository.
 - Search all tracked files for any known private identifiers before commit or push.
 - Inspect `git diff --cached` and newly added binary assets before publishing.
 - If personal information is found in tracked content, replace it with a role label before continuing.
+- If running python for test, use conda activate TestAI
+- Use codegraph to access the entire codebase, and update it after the code-editing finished
+- After any test or browser acceptance session, immediately terminate every Python process started for that session. Verify each target by PID and command line before stopping it; do not terminate unrelated Python processes.

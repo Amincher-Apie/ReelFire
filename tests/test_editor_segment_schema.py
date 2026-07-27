@@ -469,6 +469,23 @@ class EditorSegmentSchemaApiTestCase(unittest.TestCase):
         self.assertEqual(segment["source"], "cv")
         self.assertEqual(segment["source_segment_ids"], [])
 
+    def test_long_video_editor_skips_synchronous_preview_transcode(self) -> None:
+        report = self.jobs.read_report(self.job_id)
+        report["duration"] = 1800.0
+        self.jobs.write_report(self.job_id, report)
+
+        with patch(
+            "routes.api_routes.ensure_browser_preview",
+        ) as preview:
+            response = self.owner.get(f"/api/jobs/{self.job_id}/editor")
+
+        self.assertEqual(response.status_code, 200, response.get_json())
+        preview.assert_not_called()
+        self.assertEqual(
+            response.get_json()["video"]["preview_status"],
+            "source_unverified",
+        )
+
     def test_patch_inherits_reject_and_evidence_without_unknown_injection(
         self,
     ) -> None:

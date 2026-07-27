@@ -4,18 +4,30 @@ import { formatTime } from "../utils/format.js";
 
 const STAGES = [
   { key: "upload", label: "上传视频", order: 0 },
-  { key: "preprocess", label: "视频预处理", order: 1 },
-  { key: "keyframe", label: "关键帧提取", order: 2 },
-  { key: "detect", label: "YOLO 目标识别", order: 3 },
-  { key: "highlight", label: "高光片段生成", order: 4 },
-  { key: "proxy", label: "代理视频生成", order: 5 },
+  { key: "initialize", label: "读取视频与加载模型", order: 1 },
+  { key: "screening", label: "全片快速筛选", order: 2 },
+  { key: "detect", label: "窗口 YOLO 与目标追踪", order: 3 },
+  { key: "finalize", label: "片段归并与报告生成", order: 4 },
 ];
+
+const STAGE_LABELS = {
+  queued: "等待分析线程",
+  initializing: "初始化",
+  screening: "快速筛选",
+  sampling: "候选窗口排队",
+  detecting: "YOLO 识别",
+  tracking: "候选片段目标跟踪",
+  finalizing: "生成报告",
+  completed: "分析完成",
+  failed: "分析失败",
+};
 
 // ── stage rendering ─────────────────────────────────────────────────────
 
 export function showTaskStages() {
   const el = byId("task-stages");
   if (el) el.hidden = false;
+  STAGES.forEach((stage) => updateStageStatus(stage.key, "waiting"));
   updateStageStatus("upload", "completed");
 }
 
@@ -48,14 +60,40 @@ export function updateStageStatus(stageKey, status) {
 }
 
 // Simulate stage progression based on job status
-export function simulateStageProgress(jobStatus) {
+export function simulateStageProgress(jobStatus, progressStage = null) {
+  const completeThrough = (stageKey) => {
+    const target = STAGES.find((stage) => stage.key === stageKey);
+    if (!target) return;
+    STAGES.forEach((stage) => {
+      if (stage.order < target.order) updateStageStatus(stage.key, "completed");
+    });
+  };
+
   if (jobStatus === "queued") {
     updateStageStatus("upload", "completed");
   } else if (jobStatus === "running") {
     updateStageStatus("upload", "completed");
-    updateStageStatus("preprocess", "completed");
-    updateStageStatus("keyframe", "completed");
-    updateStageStatus("detect", "running");
+    if (progressStage === "initializing") {
+      completeThrough("initialize");
+      updateStageStatus("initialize", "running");
+    } else if (progressStage === "screening") {
+      completeThrough("screening");
+      updateStageStatus("screening", "running");
+    } else if (progressStage === "sampling") {
+      completeThrough("detect");
+      updateStageStatus("detect", "waiting");
+    } else if (progressStage === "detecting") {
+      completeThrough("detect");
+      updateStageStatus("detect", "running");
+    } else if (progressStage === "tracking") {
+      completeThrough("detect");
+      updateStageStatus("detect", "running");
+    } else if (progressStage === "finalizing") {
+      completeThrough("finalize");
+      updateStageStatus("finalize", "running");
+    } else {
+      updateStageStatus("initialize", "running");
+    }
   } else if (jobStatus === "completed") {
     STAGES.forEach((s) => updateStageStatus(s.key, "completed"));
   } else if (jobStatus === "failed") {
@@ -83,9 +121,18 @@ export function hideProgressDetail() {
   progressStartTime = null;
 }
 
-export function updateProgressDetail(framesProcessed, totalFrames, percentage) {
+export function updateProgressDetail(
+  framesProcessed,
+  totalFrames,
+  percentage,
+  etaSeconds = null,
+  elapsedSeconds = null,
+  stage = null,
+  provisionalCount = 0,
+) {
   const framesEl = byId("progress-frames");
-  const percentEl = byId("progress-percent");
+  const stageEl = byId("progress-stage");
+  const provisionalEl = byId("progress-provisional");
   const elapsedEl = byId("progress-elapsed");
 
   if (framesEl) {
@@ -93,16 +140,21 @@ export function updateProgressDetail(framesProcessed, totalFrames, percentage) {
       ? `${framesProcessed} / ${totalFrames || "—"}`
       : "—";
   }
-  if (percentEl) {
-    percentEl.textContent = percentage != null
-      ? `${Math.round(percentage)}%`
-      : "—";
-  }
-  if (elapsedEl && progressStartTime) {
-    const elapsed = Math.round((Date.now() - progressStartTime) / 1000);
-    const mins = Math.floor(elapsed / 60);
-    const secs = elapsed % 60;
-    elapsedEl.textContent = `${mins}分${secs}秒`;
+  if (stageEl) stageEl.textContent = STAGE_LABELS[stage] || "处理中";
+  if (provisionalEl) provisionalEl.textContent = String(provisionalCount || 0);
+  if (elapsedEl) {
+    const localElapsed = progressStartTime
+      ? Math.round((Date.now() - progressStartTime) / 1000)
+      : 0;
+    const elapsed = Number.isFinite(Number(elapsedSeconds))
+      ? Number(elapsedSeconds)
+      : localElapsed;
+    const elapsedText = formatTime(elapsed);
+    if (etaSeconds != null && Number(etaSeconds) >= 0) {
+      elapsedEl.textContent = `${elapsedText} / 约 ${formatTime(etaSeconds)}`;
+    } else {
+      elapsedEl.textContent = `${elapsedText} / 计算中`;
+    }
   }
 }
 

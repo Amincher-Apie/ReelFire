@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="color-scheme" content="dark light">
-  <title>ReelFire - 剪辑预览工作台</title>
+  <title>ReelFire - 剪辑工作台</title>
   <link rel="icon" href="{{ url_for('static', filename='favicon.svg') }}" type="image/svg+xml">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/theme.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
@@ -26,10 +26,20 @@
       </span>
     </a>
 
-    <div class="editor-task-info" id="task-info">
-      <span class="task-job-id" id="header-job-id">—</span>
-      <span class="task-meta" id="header-meta"></span>
-    </div>
+    <nav class="header-nav" aria-label="主导航">
+      <a class="nav-button" href="/">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
+        项目
+      </a>
+      <a class="nav-button" href="/jobs/{{ job_id }}/analysis">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        分析工作台
+      </a>
+      <a class="nav-button active" href="/jobs/{{ job_id }}/editor" aria-current="page">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h10M4 18h16"/><path d="m17 10 3 2-3 2z"/></svg>
+        剪辑工作台
+      </a>
+    </nav>
 
     <div class="header-actions">
       <!-- Auto-save indicator -->
@@ -55,6 +65,17 @@
   </header>
 
   <main id="editor-main" class="editor-main">
+    <div class="editor-page-heading">
+      <div>
+        <p class="eyebrow">EDITING WORKBENCH</p>
+        <h1>剪辑工作台</h1>
+        <p>审核精彩片段、调整边界并生成最终剪辑。</p>
+      </div>
+      <div class="editor-task-info" id="task-info">
+        <span class="task-job-id" id="header-job-id">—</span>
+        <span class="task-meta" id="header-meta"></span>
+      </div>
+    </div>
 
     <!-- 加载中 -->
     <div id="editor-loading" class="state-container">
@@ -132,11 +153,11 @@
       </div>
 
       <!-- 当前视频预览区 -->
-      <section class="editor-video-section" aria-labelledby="video-heading">
+      <section class="editor-video-section editor-surface-card" aria-labelledby="video-heading">
         <h2 id="video-heading" class="editor-section-title">当前视频预览</h2>
         <div class="video-container">
           <video id="editor-video" class="editor-video" preload="metadata" controls
-                 aria-label="视频播放器，使用空格键暂停或播放，左右方向键快退快进">
+                 aria-label="视频播放器，使用空格键暂停或播放，左右方向键逐帧移动，上下方向键切换精彩片段">
             <p>您的浏览器不支持视频播放。</p>
           </video>
           <div id="video-placeholder" class="video-placeholder" hidden>
@@ -165,16 +186,13 @@
           </div>
           <div class="timeline-track-wrapper">
             <div id="timeline-track" class="timeline-track" role="slider"
-                 aria-label="视频时间轴，左右方向键快退快进"
+                 aria-label="视频时间轴，左右方向键逐帧移动，上下方向键切换精彩片段"
                  aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
                  tabindex="0">
               <div class="timeline-segments-bar" id="timeline-segments-bar"
                    role="group" aria-label="YOLO 精彩片段区间"></div>
               <div id="timeline-playhead" class="timeline-playhead" aria-hidden="true"></div>
             </div>
-            <input id="timeline-scrubber" class="timeline-scrubber" type="range"
-                   min="0" max="0" step="0.01" value="0"
-                   aria-label="视频播放位置">
           </div>
           <p class="timeline-hint">拖动时间条预览整段视频；彩色区间为 YOLO 识别出的精彩片段。</p>
         </div>
@@ -198,8 +216,11 @@
 
         <div class="segments-layout">
           <!-- 片段卡片列表 -->
-          <div id="highlight-list" class="segment-card-list" role="list"
-               aria-label="精彩片段列表，可拖拽排序"></div>
+          <div class="segment-browser">
+            <div id="highlight-list" class="segment-card-list" role="list"
+                 aria-label="精彩片段列表，可拖拽排序"></div>
+            <div id="highlight-pagination" class="pagination-toolbar" hidden></div>
+          </div>
 
           <!-- 片段详情面板 -->
           <aside id="segment-detail" class="segment-detail-panel" aria-labelledby="detail-heading">
@@ -247,73 +268,88 @@
 
               <!-- 边界编辑 -->
               <div id="boundary-editor" class="boundary-editor" hidden>
-                <span class="agent-field-label">编辑边界</span>
-                <div class="boundary-row">
-                  <label class="boundary-label">起始<span class="boundary-unit">(秒)</span></label>
-                  <input id="boundary-start" class="boundary-input boundary-start" type="number" min="0" step="0.1" aria-label="片段起始时间（秒）">
-                  <button id="set-start-from-playhead" class="button ghost small playhead-btn" type="button" title="将当前播放位置设为起点">⏵设为起点</button>
-                  <label class="boundary-label">结束<span class="boundary-unit">(秒)</span></label>
-                  <input id="boundary-end" class="boundary-input boundary-end" type="number" min="0" step="0.1" aria-label="片段结束时间（秒）">
-                  <button id="set-end-from-playhead" class="button ghost small playhead-btn" type="button" title="将当前播放位置设为终点">⏵设为终点</button>
+                <h4 class="boundary-heading">编辑边界</h4>
+                <div class="boundary-fields">
+                  <div class="boundary-row">
+                    <label class="boundary-label" for="boundary-start">
+                      起始时间 <span class="boundary-unit">（秒）</span>
+                    </label>
+                    <input id="boundary-start" class="boundary-input boundary-start" type="number" min="0" step="0.1" aria-label="片段起始时间（秒）">
+                    <button id="set-start-from-playhead" class="button ghost small playhead-btn" type="button" title="将当前播放位置设为起点">⏵设为起点</button>
+                  </div>
+                  <div class="boundary-row">
+                    <label class="boundary-label" for="boundary-end">
+                      结束时间 <span class="boundary-unit">（秒）</span>
+                    </label>
+                    <input id="boundary-end" class="boundary-input boundary-end" type="number" min="0" step="0.1" aria-label="片段结束时间（秒）">
+                    <button id="set-end-from-playhead" class="button ghost small playhead-btn" type="button" title="将当前播放位置设为终点">⏵设为终点</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </aside>
+
+        </div>
+      </section>
+
+      <!-- 分析统计入口 + 轨迹 -->
+      <div class="editor-insights-column">
+        <section id="segment-review-card" class="segment-review-card" aria-labelledby="segment-review-heading" hidden>
+          <header class="segment-review-header">
+            <p class="panel-kicker">REVIEW</p>
+            <h2 id="segment-review-heading">片段审核</h2>
+          </header>
+
+          <div class="segment-review-layout">
+            <!-- Agent 评论区 -->
+            <div class="agent-comment-section" aria-labelledby="agent-heading">
+              <div class="agent-comment-header">
+                <h3 id="agent-heading">Agent 评论</h3>
+                <span id="agent-status-badge" class="agent-status-badge"></span>
+              </div>
+
+              <div id="agent-completed-content" hidden>
+                <div class="agent-field">
+                  <span class="agent-field-label">摘要</span>
+                  <p id="agent-summary" class="agent-field-value"></p>
+                </div>
+                <div class="agent-field">
+                  <span class="agent-field-label">标签</span>
+                  <div id="agent-tags" class="agent-tag-list"></div>
+                </div>
+                <div class="agent-field">
+                  <span class="agent-field-label">建议</span>
+                  <div id="agent-suggestions" class="agent-suggestion-list"></div>
+                </div>
+                <div class="agent-field">
+                  <span class="agent-field-label">审核意见</span>
+                  <div id="agent-review" class="agent-review-card"></div>
                 </div>
               </div>
 
-              <!-- Agent 评论区 -->
-              <div class="agent-comment-section" aria-labelledby="agent-heading">
-                <div class="agent-comment-header">
-                  <h4 id="agent-heading">Agent 评论</h4>
-                  <span id="agent-status-badge" class="agent-status-badge"></span>
+              <div id="agent-pending-content" hidden>
+                <div class="agent-placeholder-state pending">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+                  <p>Agent 分析正在进行中，完成后将显示摘要、标签和建议。</p>
                 </div>
-
-                <div id="agent-completed-content" hidden>
-                  <div class="agent-field">
-                    <span class="agent-field-label">摘要</span>
-                    <p id="agent-summary" class="agent-field-value"></p>
-                  </div>
-                  <div class="agent-field">
-                    <span class="agent-field-label">标签</span>
-                    <div id="agent-tags" class="agent-tag-list"></div>
-                  </div>
-                  <div class="agent-field">
-                    <span class="agent-field-label">建议</span>
-                    <div id="agent-suggestions" class="agent-suggestion-list"></div>
-                  </div>
-                  <div class="agent-field">
-                    <span class="agent-field-label">审核意见</span>
-                    <div id="agent-review" class="agent-review-card"></div>
-                  </div>
-                  <div class="agent-field">
-                    <span class="agent-field-label">证据引用</span>
-                    <div id="agent-evidence" class="agent-evidence-list"></div>
-                  </div>
-                  <div class="agent-field">
-                    <span class="agent-field-label">知识库引用</span>
-                    <div id="agent-knowledge" class="agent-evidence-list"></div>
-                  </div>
-                </div>
-
-                <div id="agent-pending-content" hidden>
-                  <div class="agent-placeholder-state pending">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
-                    <p>Agent 分析正在进行中，完成后将显示摘要、标签和建议。</p>
-                  </div>
-                </div>
-
-                <div id="agent-unavailable-content" hidden>
-                  <div class="agent-placeholder-state unavailable">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 20h19z"/><path d="M12 9v4m0 3h.01"/></svg>
-                    <p id="agent-unavailable-message">Agent 服务当前不可用，以下为基于 CV 检测的规则输出。</p>
-                  </div>
-                </div>
-
-                <!-- 逐片段 Agent 评论（per-segment） -->
-                <div id="agent-segment-comment" class="agent-segment-comment"></div>
               </div>
 
+              <div id="agent-unavailable-content" hidden>
+                <div class="agent-placeholder-state unavailable">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.5 20h19z"/><path d="M12 9v4m0 3h.01"/></svg>
+                  <p id="agent-unavailable-message">Agent 服务当前不可用，以下为基于 CV 检测的规则输出。</p>
+                </div>
+              </div>
+
+              <!-- 逐片段 Agent 评论（per-segment） -->
+              <div id="agent-segment-comment" class="agent-segment-comment"></div>
+            </div>
+
+            <div class="segment-review-controls">
               <!-- 人工审核区 -->
               <div id="review-editor" class="review-edit-section" aria-labelledby="review-edit-heading" hidden>
                 <div class="review-edit-header">
-                  <h4 id="review-edit-heading">人工审核决策</h4>
+                  <h3 id="review-edit-heading">人工审核决策</h3>
                 </div>
                 <div class="review-tri-state" role="radiogroup" aria-label="审核决定">
                   <button class="review-state-btn review-option pass" type="button" data-review-value="pass" aria-label="通过">通过</button>
@@ -326,15 +362,48 @@
 
               <!-- 片段操作按钮 -->
               <div id="segment-ops-bar" class="segment-ops-bar" hidden>
+                <button id="export-selected-segment-button" class="button secondary small" type="button">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M12 3v12m0 0 5-5m-5 5-5-5"></path>
+                    <path d="M5 18v2h14v-2"></path>
+                  </svg>
+                  导出此片段
+                </button>
                 <button id="merge-segments-button" class="button ghost small" type="button">合并相邻片段</button>
                 <button id="split-segment-button" class="button ghost small" type="button">拆分片段</button>
               </div>
             </div>
-          </aside>
-        </div>
-      </section>
+          </div>
+        </section>
 
-      <!-- 分析统计入口 + 轨迹 -->
+        <aside id="segment-evidence-card" class="segment-evidence-card" aria-labelledby="segment-evidence-heading">
+          <div class="segment-evidence-header">
+            <div>
+              <p class="panel-kicker">EVIDENCE</p>
+              <h2 id="segment-evidence-heading">选中片段证据</h2>
+            </div>
+            <span id="segment-evidence-count" class="segments-badge">0 项</span>
+          </div>
+          <p id="segment-evidence-summary" class="segment-evidence-summary">
+            选择精彩片段后，这里会集中显示关键帧、检测引用与审核知识。
+          </p>
+          <div class="segment-evidence-groups">
+            <section aria-labelledby="segment-frame-evidence-heading">
+              <h3 id="segment-frame-evidence-heading">视觉证据</h3>
+              <div id="segment-frame-evidence" class="agent-evidence-list"></div>
+            </section>
+            <section aria-labelledby="segment-agent-evidence-heading">
+              <h3 id="segment-agent-evidence-heading">Agent 引用</h3>
+              <div id="segment-agent-evidence" class="agent-evidence-list"></div>
+            </section>
+            <section aria-labelledby="segment-knowledge-evidence-heading">
+              <h3 id="segment-knowledge-evidence-heading">审核知识</h3>
+              <div id="segment-knowledge-evidence" class="agent-evidence-list"></div>
+            </section>
+          </div>
+        </aside>
+      </div>
+
       <section id="stats-dashboard" class="editor-stats-bar" aria-labelledby="stats-heading" hidden>
         <h2 id="stats-heading" class="editor-section-title">分析统计</h2>
 
@@ -362,7 +431,7 @@
         </div>
 
         <div id="trajectory-panel" class="trajectory-section" hidden>
-          <h4>目标跟踪轨迹</h4>
+          <h3>目标跟踪轨迹</h3>
           <div id="trajectory-placeholder" hidden>
             <div class="agent-placeholder-state unavailable">
               <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 3v18"/></svg>
@@ -407,7 +476,7 @@
         <span class="toolbar-sep" aria-hidden="true"></span>
         <button id="view-report-button" class="button ghost" type="button">查看 JSON 报告</button>
         <button id="export-review-button" class="button ghost" type="button">导出审核</button>
-        <a id="back-workbench-link" href="/jobs/{{ job_id }}/analysis" class="button ghost">返回剪辑工作台</a>
+        <a id="back-workbench-link" href="/jobs/{{ job_id }}/analysis" class="button ghost">返回分析工作台</a>
       </footer>
     </div>
 

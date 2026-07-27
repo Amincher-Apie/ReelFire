@@ -76,7 +76,8 @@ class ApiTestCase(unittest.TestCase):
         html = page.get_data(as_text=True)
         login_html = login.get_data(as_text=True)
         self.assertEqual(page.status_code, 200)
-        self.assertEqual(history_page.status_code, 200)
+        self.assertEqual(history_page.status_code, 302)
+        self.assertEqual(history_page.headers["Location"], "/")
         self.assertEqual(login.status_code, 200)
         self.assertEqual(self.client.get("/login").status_code, 302)
         self.assertEqual(
@@ -93,12 +94,29 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(html.count('id="app"'), 1)
         self.assertEqual(html.count('id="agent-provider-badge"'), 1)
         self.assertEqual(html.count('id="agent-run-note"'), 1)
-        self.assertEqual(html.count('id="nav-upload"'), 1)
-        self.assertEqual(html.count('id="nav-history"'), 1)
+        self.assertEqual(html.count('id="nav-projects"'), 1)
         self.assertEqual(html.count('id="nav-analysis"'), 1)
         self.assertEqual(html.count('id="nav-editor"'), 1)
+        self.assertNotIn('id="nav-upload"', html)
+        self.assertNotIn('id="nav-history"', html)
+        self.assertEqual(html.count('id="project-view-cards"'), 1)
+        self.assertEqual(html.count('id="project-view-list"'), 1)
+        self.assertEqual(html.count('id="projects-grid"'), 1)
+        self.assertEqual(html.count('id="projects-list"'), 1)
+        self.assertEqual(html.count('id="projects-pagination"'), 1)
+        self.assertEqual(html.count('id="project-form-slot"'), 1)
+        self.assertEqual(html.count('id="analysis-project-id"'), 1)
+        self.assertNotIn('id="recent-jobs"', html)
+        self.assertNotIn('id="view-project-detail"', html)
+        self.assertNotIn('id="view-editor"', html)
+        self.assertIn("进入剪辑工作台", html)
         self.assertEqual(html.count('id="analysis-progress-panel"'), 1)
         self.assertEqual(html.count('id="keyframe-chunk-tabs"'), 1)
+        self.assertEqual(html.count('id="segment-pagination"'), 1)
+        self.assertEqual(html.count('id="keyframe-group-pagination"'), 1)
+        self.assertEqual(html.count('id="keyframe-pagination"'), 1)
+        self.assertEqual(html.count('id="keyframe-mode-segment"'), 1)
+        self.assertEqual(html.count('id="keyframe-mode-all"'), 1)
         self.assertNotIn('class="media-tabs"', html)
         self.assertEqual(html.count("app.js"), 1)
         self.assertNotIn("onclick=", html)
@@ -138,8 +156,12 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(html.lower().count("<!doctype html>"), 1)
         self.assertEqual(html.lower().count("<html"), 1)
         self.assertEqual(html.count('id="highlight-list"'), 1)
+        self.assertEqual(html.count('id="highlight-pagination"'), 1)
         self.assertEqual(html.count('id="editor-video"'), 1)
-        self.assertEqual(html.count('id="timeline-scrubber"'), 1)
+        self.assertEqual(html.count('class="editor-video-section editor-surface-card"'), 1)
+        self.assertEqual(html.count('id="timeline-track"'), 1)
+        self.assertEqual(html.count('id="timeline-scrubber"'), 0)
+        self.assertEqual(html.count('role="slider"'), 1)
         self.assertEqual(html.count('id="clip-sequence"'), 1)
         self.assertEqual(html.count('id="sequence-save-state"'), 1)
         self.assertEqual(html.count('id="agent-run-panel"'), 1)
@@ -147,6 +169,15 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(html.count('id="agent-retry-button"'), 1)
         self.assertEqual(html.count('id="live-analysis-panel"'), 1)
         self.assertEqual(html.count('id="live-analysis-progress"'), 1)
+        self.assertEqual(html.count('id="segment-evidence-card"'), 1)
+        self.assertEqual(html.count('class="editor-insights-column"'), 1)
+        self.assertEqual(html.count('id="segment-frame-evidence"'), 1)
+        self.assertEqual(html.count('id="segment-agent-evidence"'), 1)
+        self.assertEqual(html.count('id="segment-knowledge-evidence"'), 1)
+        self.assertLess(
+            html.index('id="segment-evidence-card"'),
+            html.index('id="stats-dashboard"'),
+        )
         self.assertIn('id="save-review-button"', html)
         self.assertIn(
             'id="save-review-button" class="button secondary" type="button" disabled',
@@ -160,6 +191,10 @@ class ApiTestCase(unittest.TestCase):
         self.assertIn("左移、右移按钮", html)
         self.assertIn(f'/jobs/{job_id}/analysis', html)
         self.assertIn('剪辑工作台', html)
+        self.assertNotIn('剪辑预览工作台', html)
+        self.assertEqual(html.count('id="segments-count"'), 1)
+        self.assertEqual(html.count('id="add-segment-button"'), 1)
+        self.assertIn("返回分析工作台", html)
         self.assertIn(f'data-job-id="{job_id}"', analysis_html)
         self.assertIn('data-initial-view="analysis"', analysis_html)
         self.assertEqual(html.count("editor.js"), 1)
@@ -176,13 +211,33 @@ class ApiTestCase(unittest.TestCase):
             job_id,
             {
                 "stage": "detecting",
-                "message": "已完成 1/2 个分析分块",
+                "message": "已完成 2/2 个分析分块",
                 "percent": 50.0,
                 "total_chunks": 2,
-                "completed_chunks": 1,
+                "completed_chunks": 2,
                 "processed_frames": 20,
                 "total_frames": 40,
                 "current_chunk": None,
+                "provisional_segments": [
+                    {
+                        "id": "seg_union_seg_c0001_01",
+                        "order": 1,
+                        "start": 2.0,
+                        "end": 8.0,
+                        "duration": 6.0,
+                        "score": 0.91,
+                        "source_keyframes": [
+                            "kf_c0001_01",
+                            "kf_c0002_01",
+                        ],
+                        "source_segment_ids": [
+                            "seg_c0001_01",
+                            "seg_c0002_01",
+                        ],
+                        "source": "merged",
+                        "provisional": True,
+                    }
+                ],
                 "video": {
                     "duration": 20.0,
                     "width": 1280,
@@ -213,8 +268,18 @@ class ApiTestCase(unittest.TestCase):
                         "index": 2,
                         "start": 10.0,
                         "end": 20.0,
-                        "status": "queued",
-                        "provisional_segments": [],
+                        "status": "completed",
+                        "provisional_segments": [
+                            {
+                                "id": "seg_c0002_01",
+                                "order": 1,
+                                "start": 4.0,
+                                "end": 8.0,
+                                "score": 0.91,
+                                "source_keyframes": ["kf_c0002_01"],
+                                "provisional": True,
+                            }
+                        ],
                     },
                 ],
             },
@@ -226,10 +291,21 @@ class ApiTestCase(unittest.TestCase):
         self.assertFalse(live_payload["actions_enabled"])
         self.assertTrue(live_payload["live_analysis"]["ready"])
         self.assertFalse(live_payload["live_analysis"]["final"])
-        self.assertEqual(live_payload["live_analysis"]["completed_chunks"], 1)
+        self.assertEqual(live_payload["live_analysis"]["completed_chunks"], 2)
         self.assertEqual(
             [item["id"] for item in live_payload["highlights"]],
-            ["seg_c0001_01"],
+            ["seg_union_seg_c0001_01"],
+        )
+        self.assertEqual(
+            (
+                live_payload["highlights"][0]["start"],
+                live_payload["highlights"][0]["end"],
+            ),
+            (2.0, 8.0),
+        )
+        self.assertEqual(
+            live_payload["highlights"][0]["source_segment_ids"],
+            ["seg_c0001_01", "seg_c0002_01"],
         )
         self.assertEqual(
             live_payload["highlights"][0]["agent_comment_status"],
@@ -348,7 +424,10 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(detail.status_code, 200)
         self.assertEqual(detail.get_json()["job"]["progress"]["stage"], "created")
         self.assertEqual(listing.status_code, 200)
-        self.assertEqual(listing.get_json()["jobs"], [])
+        self.assertEqual(
+            [item["job_id"] for item in listing.get_json()["jobs"]],
+            [job_id],
+        )
 
     def test_create_job_without_file_returns_400(self) -> None:
         response = self.client.post("/api/jobs", data={})

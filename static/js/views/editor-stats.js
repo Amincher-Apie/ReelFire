@@ -216,9 +216,7 @@ export function renderTrajectoryPanel() {
   const panel = byId("trajectory-panel");
   if (!panel) return;
 
-  const hasTrajectory = editorState.keyframes.some((kf) =>
-    Array.isArray(kf.trajectory) && kf.trajectory.length > 0
-  );
+  const hasTrajectory = editorTrajectoryBoxes().length > 0;
 
   panel.hidden = false;
   const placeholder = byId("trajectory-placeholder");
@@ -237,6 +235,49 @@ export function renderTrajectoryPanel() {
   }
 }
 
+function editorTrajectoryBoxes() {
+  const selected = editorState.segments.find(
+    (segment) => segment.id === editorState.selectedSegmentId,
+  ) || editorState.segments[0];
+  const boxes = [];
+  const tracks = selected?.tracking?.tracks;
+  if (Array.isArray(tracks)) {
+    tracks.forEach((track) => {
+      if (!Array.isArray(track.points)) return;
+      track.points.forEach((point) => {
+        boxes.push({
+          trackId: (
+            track.track_key
+            || `${selected.id}:${track.track_id ?? 0}`
+          ),
+          x: Number(point.x) || 0,
+          y: Number(point.y) || 0,
+          w: Number(point.w) || 0,
+          h: Number(point.h) || 0,
+          timestamp: Number(point.timestamp) || 0,
+        });
+      });
+    });
+  }
+  if (boxes.length) return boxes;
+
+  editorState.keyframes.forEach((kf) => {
+    const trajectory = kf.trajectory;
+    if (!Array.isArray(trajectory)) return;
+    trajectory.forEach((box) => {
+      boxes.push({
+        trackId: `legacy:${box.track_id || 0}`,
+        x: Number(box.x) || 0,
+        y: Number(box.y) || 0,
+        w: Number(box.w) || 0,
+        h: Number(box.h) || 0,
+        timestamp: Number(kf.timestamp) || 0,
+      });
+    });
+  });
+  return boxes;
+}
+
 export function drawTrajectory(canvas) {
   if (!canvas) return;
   const W = canvas.parentElement ? canvas.parentElement.clientWidth - 32 : 500;
@@ -247,21 +288,7 @@ export function drawTrajectory(canvas) {
   ctx.fillStyle = colors.bg;
   ctx.fillRect(0, 0, W, H);
 
-  const allBoxes = [];
-  editorState.keyframes.forEach((kf) => {
-    const traj = kf.trajectory;
-    if (!Array.isArray(traj)) return;
-    traj.forEach((box) => {
-      allBoxes.push({
-        trackId: box.track_id || 0,
-        x: Number(box.x) || 0,
-        y: Number(box.y) || 0,
-        w: Number(box.w) || 0,
-        h: Number(box.h) || 0,
-        timestamp: Number(kf.timestamp) || 0,
-      });
-    });
-  });
+  const allBoxes = editorTrajectoryBoxes();
 
   if (!allBoxes.length) return;
 

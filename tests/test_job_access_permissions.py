@@ -264,7 +264,7 @@ class JobAccessPermissionsTestCase(unittest.TestCase):
         self.assertEqual(ids_a, {job_a})
         self.assertEqual(ids_b, {job_b})
 
-    def test_guest_can_use_current_job_but_has_no_history(self) -> None:
+    def test_guest_sees_own_jobs_until_guest_identity_changes(self) -> None:
         guest = self.app.test_client()
         login = guest.post("/api/auth/guest", json={})
         self.assertEqual(login.status_code, 201, login.get_json())
@@ -279,11 +279,18 @@ class JobAccessPermissionsTestCase(unittest.TestCase):
         self.assertEqual(upload.status_code, 201, upload.get_json())
         job_id = upload.get_json()["job_id"]
 
-        self.assertEqual(guest.get("/api/jobs").get_json()["jobs"], [])
+        self.assertEqual(
+            [
+                item["job_id"]
+                for item in guest.get("/api/jobs").get_json()["jobs"]
+            ],
+            [job_id],
+        )
         self.assertEqual(guest.get(f"/api/jobs/{job_id}").status_code, 200)
 
         next_guest = self.app.test_client()
         next_guest.post("/api/auth/guest", json={})
+        self.assertEqual(next_guest.get("/api/jobs").get_json()["jobs"], [])
         denied = next_guest.get(f"/api/jobs/{job_id}")
         self.assertEqual(denied.status_code, 403, denied.get_json())
 

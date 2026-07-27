@@ -132,7 +132,10 @@ class ProjectUploadPersistenceTestCase(unittest.TestCase):
             "Renamed project",
         )
 
-        archived = self.client.delete(f"/api/projects/{project['id']}")
+        archived = self.client.patch(
+            f"/api/projects/{project['id']}",
+            json={"status": "archived"},
+        )
         self.assertEqual(archived.status_code, 200, archived.get_json())
         self.assertEqual(
             archived.get_json()["project"]["status"],

@@ -310,6 +310,15 @@ def _restore_server_extensions(
     return restored
 
 
+def restore_server_segment_extensions(
+    normalized: list[dict[str, Any]],
+    source: object,
+) -> list[dict[str, Any]]:
+    """Restore server-owned fields after client fields have been validated."""
+
+    return _restore_server_extensions(normalized, source)
+
+
 def validate_editor_segments(
     value: object,
     video_duration: object,

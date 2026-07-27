@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import math
 import os
 from datetime import datetime, timezone
@@ -28,6 +29,7 @@ DEFAULT_QUERIES = (
     "画面没有检测到目标时如何审核？",
     "person 低置信度时如何处理？",
 )
+LOGGER = logging.getLogger(__name__)
 
 
 class EmbeddingServiceError(RuntimeError):
@@ -70,15 +72,49 @@ def _request_json(url: str, payload: dict[str, Any], timeout: float) -> dict[str
         headers={"Content-Type": "application/json"},
         method="POST",
     )
+    started = datetime.now(timezone.utc)
     try:
         with urlopen(request, timeout=timeout) as response:
-            return json.load(response)
+            result = json.load(response)
+            elapsed = datetime.now(timezone.utc) - started
+            LOGGER.info(
+                "ollama_embedding_request_succeeded endpoint=post:embed "
+                "duration_ms=%d",
+                int(elapsed.total_seconds() * 1000),
+            )
+            return result
     except HTTPError as exc:
+        elapsed = datetime.now(timezone.utc) - started
+        LOGGER.warning(
+            "ollama_embedding_request_failed endpoint=post:embed "
+            "duration_ms=%d exception_type=%s status=%d retryable=%s",
+            int(elapsed.total_seconds() * 1000),
+            type(exc).__name__,
+            int(exc.code),
+            str(exc.code == 429 or 500 <= exc.code < 600).lower(),
+        )
         detail = exc.read().decode("utf-8", errors="replace")
         raise EmbeddingServiceError(
             f"Ollama returned HTTP {exc.code}: {detail}"
         ) from exc
     except (URLError, TimeoutError) as exc:
+        elapsed = datetime.now(timezone.utc) - started
+        reason = getattr(exc, "reason", None)
+        timed_out = isinstance(exc, TimeoutError) or isinstance(
+            reason,
+            TimeoutError,
+        )
+        errno = getattr(reason, "errno", None)
+        LOGGER.warning(
+            "ollama_embedding_request_failed endpoint=post:embed "
+            "duration_ms=%d exception_type=%s reason_type=%s errno=%s "
+            "timeout=%s retryable=true",
+            int(elapsed.total_seconds() * 1000),
+            type(exc).__name__,
+            type(reason).__name__ if reason is not None else "none",
+            errno if isinstance(errno, int) else "-",
+            str(timed_out).lower(),
+        )
         raise EmbeddingServiceError(f"Ollama request failed: {exc}") from exc
 
 

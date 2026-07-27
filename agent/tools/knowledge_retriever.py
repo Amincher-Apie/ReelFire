@@ -8,6 +8,9 @@ import os
 from pathlib import Path
 from typing import Any, Callable
 
+from agent.retrieval.openai_compatible import (
+    request_openai_compatible_embeddings,
+)
 from agent.retrieval.ollama_topk import (
     build_entry_text,
     cosine_similarity,
@@ -20,6 +23,17 @@ DEFAULT_KNOWLEDGE_PATH = ROOT / "agent" / "knowledge" / "media_review_rules.json
 Embedder = Callable[[list[str]], list[list[float]]]
 
 
+def _embedding_timeout() -> float:
+    raw = os.getenv("EMBEDDING_TIMEOUT_SECONDS", "5").strip()
+    try:
+        value = float(raw)
+    except ValueError:
+        return 5.0
+    if not math.isfinite(value) or value <= 0:
+        return 5.0
+    return min(value, 30.0)
+
+
 class OllamaEmbedder:
     """Small callable adapter around Ollama's local embedding endpoint."""
 
@@ -29,14 +43,14 @@ class OllamaEmbedder:
         self,
         base_url: str | None = None,
         model: str | None = None,
-        timeout: float = 180,
+        timeout: float | None = None,
     ) -> None:
         self.base_url = base_url or os.getenv(
             "OLLAMA_BASE_URL",
             "http://127.0.0.1:11434",
         )
         self.model = model or os.getenv("OLLAMA_EMBED_MODEL")
-        self.timeout = timeout
+        self.timeout = _embedding_timeout() if timeout is None else float(timeout)
         if not self.model:
             raise ValueError("Set OLLAMA_EMBED_MODEL or pass an embedding model.")
 
@@ -47,6 +61,65 @@ class OllamaEmbedder:
             texts,
             timeout=self.timeout,
         )
+
+
+class OpenAICompatibleEmbedder:
+    """Callable adapter for OpenAI-compatible embedding services."""
+
+    provider = "openai_compatible"
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+        timeout: float | None = None,
+    ) -> None:
+        self.base_url = base_url or os.getenv("EMBEDDING_BASE_URL", "")
+        self.model = model or os.getenv("EMBEDDING_MODEL", "")
+        self.api_key = (
+            api_key
+            if api_key is not None
+            else os.getenv("EMBEDDING_API_KEY", "")
+        )
+        self.timeout = _embedding_timeout() if timeout is None else float(timeout)
+        if not self.base_url:
+            raise ValueError(
+                "Set EMBEDDING_BASE_URL for openai_compatible embeddings."
+            )
+        if not self.model:
+            raise ValueError(
+                "Set EMBEDDING_MODEL for openai_compatible embeddings."
+            )
+
+    def __call__(self, texts: list[str]) -> list[list[float]]:
+        return request_openai_compatible_embeddings(
+            self.base_url,
+            self.model,
+            texts,
+            api_key=self.api_key,
+            timeout=self.timeout,
+        )
+
+
+def build_embedder_from_env() -> Embedder | None:
+    """Build the configured embedder while preserving legacy Ollama settings."""
+
+    provider = os.getenv("EMBEDDING_PROVIDER", "").strip().casefold()
+    if not provider:
+        provider = "ollama" if os.getenv("OLLAMA_EMBED_MODEL") else "none"
+    if provider in {"none", "disabled", "rule_only"}:
+        return None
+    if provider == "ollama":
+        return OllamaEmbedder(
+            base_url=os.getenv("EMBEDDING_BASE_URL") or None,
+            model=os.getenv("EMBEDDING_MODEL") or None,
+        )
+    if provider in {"openai", "openai_compatible"}:
+        return OpenAICompatibleEmbedder()
+    raise ValueError(
+        "EMBEDDING_PROVIDER must be ollama, openai_compatible, or none."
+    )
 
 
 class KnowledgeRetrieverTool:

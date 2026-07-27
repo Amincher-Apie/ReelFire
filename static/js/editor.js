@@ -4,20 +4,29 @@ import { loadUser } from "./utils/user.js";
 import { byId, safeOn } from "./utils/dom.js";
 import { editorState } from "./state/editor-state.js";
 import { setEditorView } from "./views/editor-video.js";
-import { loadEditorData } from "./views/editor-segments.js";
+import {
+  loadEditorData,
+  startAgentRun,
+  stopAgentPolling,
+} from "./views/editor-segments.js";
 import { setReviewStatus, setReviewNote, applyBoundaryChange, reorderSegment, undo, redo } from "./views/editor-review.js";
 import { showStatsDialog } from "./views/editor-stats.js";
 import { saveReview, createRoughCut, exportReview, showReportDialog } from "./views/editor-actions.js";
 import { showAddSegmentDialog, addManualSegment, deleteSegment, setPlayheadAsStart,
          setPlayheadAsEnd, mergeSelectedSegments, showSplitDialog } from "./views/segment-ops.js";
-import { showExportDialog, initExportCenter } from "./views/export-center.js";
+import {
+  showExportDialog,
+  showSelectedSegmentExportDialog,
+  initExportCenter,
+} from "./views/export-center.js";
 
-function initEditor() {
+async function initEditor() {
   initTheme();
-  loadUser();
+  await loadUser();
 
   const pathParts = window.location.pathname.split("/").filter(Boolean);
   const jobId = pathParts.length >= 2 ? pathParts[1] : null;
+  byId("header-job-id").textContent = jobId || "—";
 
   if (!jobId) {
     setEditorView("error");
@@ -25,8 +34,20 @@ function initEditor() {
     return;
   }
 
+  // Start the core data request before optional control wiring so a
+  // nonessential editor feature cannot leave the workbench loading forever.
+  try {
+    loadEditorData(jobId);
+  } catch (error) {
+    setEditorView("error");
+    byId("editor-error-message").textContent =
+      error instanceof Error ? error.message : "剪辑数据初始化失败。";
+    return;
+  }
+
   // buttons
   safeOn("editor-retry-button", "click", () => loadEditorData(jobId));
+  safeOn("agent-retry-button", "click", () => startAgentRun(true));
   safeOn("save-review-button", "click", saveReview);
   safeOn("rough-cut-button", "click", createRoughCut);
   safeOn("view-report-button", "click", showReportDialog);
@@ -38,6 +59,11 @@ function initEditor() {
 
   // Export center
   safeOn("open-export-button", "click", showExportDialog);
+  safeOn(
+    "export-selected-segment-button",
+    "click",
+    showSelectedSegmentExportDialog,
+  );
   initExportCenter();
 
   // undo/redo buttons (P2)
@@ -143,8 +169,8 @@ function initEditor() {
       return e.returnValue;
     }
   });
+  window.addEventListener("pagehide", stopAgentPolling);
 
-  loadEditorData(jobId);
 }
 
 initEditor();

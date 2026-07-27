@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -12,6 +14,7 @@ from urllib.request import Request, urlopen
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_PROMPT_PATH = ROOT / "agent" / "prompts" / "review_agent_v3.md"
+LOGGER = logging.getLogger(__name__)
 
 
 class ModelProviderError(RuntimeError):
@@ -115,10 +118,24 @@ class OllamaChatClient:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
+        started = time.monotonic()
         try:
             with urlopen(request, timeout=self.timeout) as response:
                 payload = json.load(response)
+                LOGGER.info(
+                    "ollama_chat_request_succeeded endpoint=post:chat "
+                    "duration_ms=%d",
+                    int((time.monotonic() - started) * 1000),
+                )
         except HTTPError as exc:
+            LOGGER.warning(
+                "ollama_chat_request_failed endpoint=post:chat "
+                "duration_ms=%d exception_type=%s status=%d retryable=%s",
+                int((time.monotonic() - started) * 1000),
+                type(exc).__name__,
+                int(exc.code),
+                str(exc.code == 429 or 500 <= exc.code < 600).lower(),
+            )
             detail = exc.read().decode("utf-8", errors="replace")
             raise ModelProviderError(
                 f"Ollama returned HTTP {exc.code}: {detail[:300]}",
@@ -127,6 +144,22 @@ class OllamaChatClient:
                 status_code=exc.code,
             ) from exc
         except (URLError, TimeoutError) as exc:
+            reason = getattr(exc, "reason", None)
+            timed_out = isinstance(exc, TimeoutError) or isinstance(
+                reason,
+                TimeoutError,
+            )
+            errno = getattr(reason, "errno", None)
+            LOGGER.warning(
+                "ollama_chat_request_failed endpoint=post:chat "
+                "duration_ms=%d exception_type=%s reason_type=%s errno=%s "
+                "timeout=%s retryable=true",
+                int((time.monotonic() - started) * 1000),
+                type(exc).__name__,
+                type(reason).__name__ if reason is not None else "none",
+                errno if isinstance(errno, int) else "-",
+                str(timed_out).lower(),
+            )
             raise ModelProviderError(
                 f"Ollama request failed: {exc}",
                 provider_code="ollama_unavailable",

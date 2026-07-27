@@ -44,6 +44,7 @@ class HighlightExtractor:
         smooth_frames: int = 5,
         min_duration: float = 1.0,
         merge_gap: float = 1.0,
+        max_duration: float = 18.0,
     ) -> None:
         self.enemy_classes = enemy_classes or DEFAULT_ENEMY_CLASSES
         self.pre_buffer = float(pre_buffer)
@@ -51,6 +52,7 @@ class HighlightExtractor:
         self.smooth_frames = int(smooth_frames)
         self.min_duration = float(min_duration)
         self.merge_gap = float(merge_gap)
+        self.max_duration = max(float(max_duration), self.min_duration)
 
     def _frame_has_enemy(self, detections: list[dict[str, Any]]) -> bool:
         """判断一帧的检测结果中是否包含敌人。"""
@@ -148,6 +150,54 @@ class HighlightExtractor:
 
         return merged
 
+    def _limit_segment_duration(
+        self,
+        segments: list[dict[str, Any]],
+        frames: list[dict[str, Any]],
+        duration: float,
+    ) -> list[dict[str, Any]]:
+        """Trim long engagements around their strongest analyzed moment."""
+
+        limited: list[dict[str, Any]] = []
+        for segment in segments:
+            start = float(segment["start"])
+            end = float(segment["end"])
+            if end - start <= self.max_duration:
+                limited.append(segment)
+                continue
+            candidates = [
+                frame
+                for frame in frames
+                if start <= float(frame.get("timestamp", -1.0)) <= end
+            ]
+            peak = max(
+                candidates,
+                key=lambda frame: float(frame.get("highlight_score", 0.0)),
+                default=None,
+            )
+            center = (
+                float(peak.get("timestamp", (start + end) / 2.0))
+                if peak is not None
+                else (start + end) / 2.0
+            )
+            trimmed_start = center - self.max_duration * 0.4
+            trimmed_start = min(
+                max(start, trimmed_start),
+                max(start, end - self.max_duration),
+            )
+            trimmed_end = min(end, trimmed_start + self.max_duration)
+            trimmed = dict(segment)
+            trimmed.update(
+                {
+                    "start": round(trimmed_start, 3),
+                    "end": round(trimmed_end, 3),
+                    "duration": round(trimmed_end - trimmed_start, 3),
+                    "trimmed_from_long_event": True,
+                }
+            )
+            limited.append(trimmed)
+        return limited
+
     def extract(
         self,
         frame_results: list[dict[str, Any]],
@@ -189,6 +239,11 @@ class HighlightExtractor:
 
         # 生成片段
         segments = self._build_segments(events, duration)
+        segments = self._limit_segment_duration(
+            segments,
+            sorted_frames,
+            duration,
+        )
 
         # 给每个片段补充检测详情（用于 Agent 后续分析）
         for seg in segments:
@@ -417,6 +472,7 @@ class HighlightExtractor:
             "smooth_frames": self.smooth_frames,
             "min_duration": self.min_duration,
             "merge_gap": self.merge_gap,
+            "max_duration": self.max_duration,
         }
 
     def _dedup_segments(

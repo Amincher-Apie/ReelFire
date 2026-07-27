@@ -19,18 +19,41 @@ let exportPollTimer = null;
 
 // ── dialog ──────────────────────────────────────────────────────────────
 
-export function showExportDialog() {
+export function showExportDialog(options = {}) {
   const dialog = byId("export-dialog");
   if (!dialog) return;
 
-  // Reset config
+  const requestedSegmentId = editorState.segments.some(
+    (segment) => segment.id === options.segmentId,
+  ) ? options.segmentId : null;
   exportConfig = {
     ...EXPORT_CONFIG_DEFAULTS,
+    mode: options.mode === "single" ? "single" : "collection",
+    segmentId: requestedSegmentId,
     filename: "reelfire_export_" + (editorState.jobId || "output").slice(0, 8),
   };
+  if (exportConfig.mode === "single" && !exportConfig.segmentId) {
+    exportConfig.segmentId = editorState.selectedSegmentId
+      || editorState.segments[0]?.id
+      || null;
+  }
 
+  byId("export-config-panel").hidden = false;
+  byId("export-progress-panel").hidden = true;
+  byId("export-result-panel").hidden = true;
+  byId("export-single-results").hidden = true;
+  byId("export-collection-result").hidden = true;
   renderExportConfig();
   dialog.showModal();
+}
+
+export function showSelectedSegmentExportDialog() {
+  const segmentId = editorState.selectedSegmentId;
+  if (!segmentId) {
+    showToast("请先选择要导出的片段", "info");
+    return;
+  }
+  showExportDialog({ mode: "single", segmentId });
 }
 
 export function closeExportDialog() {
@@ -117,7 +140,9 @@ function renderSingleSegmentSelector() {
 
 export function setExportMode(mode) {
   exportConfig.mode = mode;
-  exportConfig.segmentId = null;
+  exportConfig.segmentId = mode === "single"
+    ? editorState.selectedSegmentId || editorState.segments[0]?.id || null
+    : null;
   renderExportConfig();
 }
 

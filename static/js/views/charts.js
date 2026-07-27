@@ -3,14 +3,55 @@ import { appState } from "../state/app-state.js";
 import { byId } from "../utils/dom.js";
 import { getCanvasColors, setupHiDPI } from "../utils/canvas.js";
 
-export function renderWorkbenchCharts(report) {
+export function renderWorkbenchCharts(
+  report,
+  visibleSegments = appState.segments,
+  segmentStartIndex = 0,
+) {
   const card = byId("workbench-charts-card");
   if (!card) return;
   card.hidden = false;
 
   drawDetectionClassChart(report);
-  drawSegmentScoreChart();
-  drawWorkbenchTrajectory();
+  drawSegmentScoreChart(visibleSegments, segmentStartIndex);
+  drawWorkbenchTrajectory(report);
+}
+
+function detectionClassSummary(report) {
+  const tagStats = report?.segment_tags?.tags;
+  if (tagStats && typeof tagStats === "object" && !Array.isArray(tagStats)) {
+    const entries = Object.entries(tagStats)
+      .map(([label, stats]) => ({
+        label,
+        count: Number(stats?.count) || 0,
+      }))
+      .filter((item) => item.label && item.count > 0)
+      .sort((left, right) => right.count - left.count);
+    if (entries.length) return entries;
+  }
+
+  const summary = report?.segment_tags?.summary;
+  if (!Array.isArray(summary)) return [];
+  return summary
+    .map((item) => {
+      if (item && typeof item === "object") {
+        return {
+          label: String(item.label || ""),
+          count: Number(item.count) || 0,
+        };
+      }
+      const value = String(item || "").trim();
+      const countStart = value.lastIndexOf("(");
+      const countEnd = value.endsWith(")") ? value.length - 1 : -1;
+      if (countStart <= 0 || countEnd <= countStart) {
+        return { label: value, count: 0 };
+      }
+      return {
+        label: value.slice(0, countStart),
+        count: Number(value.slice(countStart + 1, countEnd)) || 0,
+      };
+    })
+    .filter((item) => item.label && item.count > 0);
 }
 
 export function drawDetectionClassChart(report) {
@@ -18,8 +59,8 @@ export function drawDetectionClassChart(report) {
   const empty = byId("detection-chart-empty");
   if (!canvas) return;
 
-  const summary = (report.segment_tags && report.segment_tags.summary) ? report.segment_tags.summary : [];
-  if (!Array.isArray(summary) || !summary.length) {
+  const summary = detectionClassSummary(report);
+  if (!summary.length) {
     canvas.hidden = true;
     if (empty) empty.hidden = false;
     return;
@@ -69,12 +110,16 @@ export function drawDetectionClassChart(report) {
   ctx.stroke();
 }
 
-export function drawSegmentScoreChart() {
+export function drawSegmentScoreChart(
+  visibleSegments = appState.segments,
+  segmentStartIndex = 0,
+) {
   const canvas = byId("segment-score-chart");
   const empty = byId("segment-chart-empty");
   if (!canvas) return;
 
-  if (!appState.segments || !appState.segments.length) {
+  const segs = Array.isArray(visibleSegments) ? visibleSegments : [];
+  if (!segs.length) {
     canvas.hidden = true;
     if (empty) empty.hidden = false;
     return;
@@ -86,7 +131,6 @@ export function drawSegmentScoreChart() {
   const H = 200;
   const ctx = setupHiDPI(canvas, W, H);
   const colors = getCanvasColors();
-  const segs = appState.segments;
 
   const barMaxW = Math.min(36, (W - 80) / segs.length);
   const barGap = Math.max(3, (W - 80 - barMaxW * segs.length) / (segs.length + 1));
@@ -105,7 +149,11 @@ export function drawSegmentScoreChart() {
     ctx.fillStyle = colors.textFaint;
     ctx.font = "9px " + getComputedStyle(document.body).fontFamily;
     ctx.textAlign = "center";
-    ctx.fillText(seg.id || ("#" + (i + 1)), x + barMaxW / 2, chartBottom + 14);
+    ctx.fillText(
+      seg.id || ("#" + (segmentStartIndex + i + 1)),
+      x + barMaxW / 2,
+      chartBottom + 14,
+    );
 
     ctx.fillStyle = colors.textMuted;
     ctx.font = "600 9px " + getComputedStyle(document.body).fontFamily;
@@ -119,16 +167,58 @@ export function drawSegmentScoreChart() {
   ctx.stroke();
 }
 
-export function drawWorkbenchTrajectory() {
+function workbenchTrajectoryBoxes(report) {
+  const boxes = [];
+  const segments = Array.isArray(report?.segments)
+    ? report.segments
+    : appState.segments;
+  segments.forEach((segment, segmentIndex) => {
+    const tracks = segment?.tracking?.tracks;
+    if (!Array.isArray(tracks)) return;
+    tracks.forEach((track) => {
+      if (!Array.isArray(track.points)) return;
+      track.points.forEach((point) => {
+        boxes.push({
+          trackId: (
+            track.track_key
+            || `${segment.id || segmentIndex}:${track.track_id ?? 0}`
+          ),
+          x: Number(point.x) || 0,
+          y: Number(point.y) || 0,
+          w: Number(point.w) || 0,
+          h: Number(point.h) || 0,
+          timestamp: Number(point.timestamp) || 0,
+        });
+      });
+    });
+  });
+  if (boxes.length) return boxes;
+
+  appState.keyframes.forEach((kf) => {
+    const trajectory = kf.trajectory;
+    if (!Array.isArray(trajectory)) return;
+    trajectory.forEach((box) => {
+      boxes.push({
+        trackId: `legacy:${box.track_id || 0}`,
+        x: Number(box.x) || 0,
+        y: Number(box.y) || 0,
+        w: Number(box.w) || 0,
+        h: Number(box.h) || 0,
+        timestamp: Number(kf.timestamp) || 0,
+      });
+    });
+  });
+  return boxes;
+}
+
+export function drawWorkbenchTrajectory(report = appState.report) {
   const canvas = byId("workbench-trajectory-canvas");
   const empty = byId("trajectory-chart-empty");
   if (!canvas) return;
 
-  const hasTrajectory = appState.keyframes.some((kf) =>
-    Array.isArray(kf.trajectory) && kf.trajectory.length > 0
-  );
+  const allBoxes = workbenchTrajectoryBoxes(report);
 
-  if (!hasTrajectory) {
+  if (!allBoxes.length) {
     canvas.hidden = true;
     if (empty) empty.hidden = false;
     return;
@@ -143,27 +233,6 @@ export function drawWorkbenchTrajectory() {
 
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, W, H);
-
-  const allBoxes = [];
-  appState.keyframes.forEach((kf) => {
-    const traj = kf.trajectory;
-    if (!Array.isArray(traj)) return;
-    traj.forEach((box) => {
-      allBoxes.push({
-        trackId: box.track_id || 0,
-        x: Number(box.x) || 0,
-        y: Number(box.y) || 0,
-        w: Number(box.w) || 0,
-        h: Number(box.h) || 0,
-      });
-    });
-  });
-
-  if (!allBoxes.length) {
-    canvas.hidden = true;
-    if (empty) empty.hidden = false;
-    return;
-  }
 
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   allBoxes.forEach((b) => {

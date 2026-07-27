@@ -8,6 +8,8 @@ from agent.tools.feedback_analyzer import (
 from agent.tools.knowledge_retriever import (
     KnowledgeRetrieverTool,
     OllamaEmbedder,
+    OpenAICompatibleEmbedder,
+    build_embedder_from_env,
 )
 from agent.tools.report_parser import ReportParserTool, ReportValidationError
 from agent.tools.rule_validator import OutputValidationError, RuleValidatorTool
@@ -18,6 +20,8 @@ __all__ = [
     "FeedbackValidationError",
     "KnowledgeRetrieverTool",
     "OllamaEmbedder",
+    "OpenAICompatibleEmbedder",
+    "build_embedder_from_env",
     "OutputValidationError",
     "ReportParserTool",
     "ReportValidationError",

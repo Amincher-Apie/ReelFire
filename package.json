@@ -1,8 +1,9 @@
 {
   "name": "reelfire-browser-acceptance",
   "private": true,
+  "type": "module",
   "scripts": {
-    "test:js": "node --check static/js/app.js && node --check static/js/editor.js && node --check static/js/login.js && node --check tests/browser_acceptance.cjs",
+    "test:js": "node --check static/js/app.js && node --check static/js/editor.js && node --check static/js/login.js && node --check static/js/utils/editor-shortcuts.js && node --check static/js/utils/pagination.js && node --check static/js/utils/timeline.js && node --check static/js/views/projects.js && node --check static/js/views/analysis.js && node --check static/js/views/editor-segments.js && node --check static/js/views/editor-video.js && node --check static/js/views/export-center.js && node --check static/js/views/segment-ops.js && node --check tests/browser_acceptance.cjs && node --test tests/editor-shortcuts.test.mjs tests/pagination.test.mjs tests/timeline.test.mjs",
     "test:browser": "node tests/browser_acceptance.cjs"
   },
   "devDependencies": {

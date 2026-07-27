@@ -30,6 +30,7 @@ from services.editor_input_validation import (
     adapt_legacy_segments,
     merge_editor_segments,
     normalize_stored_editor_segments,
+    restore_server_segment_extensions,
     validate_editor_segments,
 )
 from services.ffmpeg_service import (
@@ -85,6 +86,8 @@ logger = logging.getLogger(__name__)
 
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
+
+MAX_SYNC_BROWSER_PREVIEW_SECONDS = 5 * 60
 
 
 def _services() -> tuple[JobService, FileService, AnalysisService]:
@@ -621,7 +624,12 @@ def create_job():
     except Exception:
         jobs.discard_workspace(job_id)
         raise
-    return jsonify(ok=True, job_id=job_id, status=job["status"]), 201
+    return jsonify(
+        ok=True,
+        job_id=job_id,
+        project_id=int(project["id"]),
+        status=job["status"],
+    ), 201
 
 
 @api_bp.get("/jobs")
@@ -1289,7 +1297,7 @@ def get_editor_contract(job_id: str):
     job_dir = jobs.job_dir(job_id)
     preview_video = source_video
     preview_status = "source_unverified" if live_ready else "source"
-    if report_ready:
+    if report_ready and duration <= MAX_SYNC_BROWSER_PREVIEW_SECONDS:
         try:
             preview_video = ensure_browser_preview(
                 source_video,
@@ -1303,28 +1311,36 @@ def get_editor_contract(job_id: str):
                 job_id,
             )
             preview_status = "source_unverified"
+    elif report_ready:
+        preview_status = "source_unverified"
     preview_relative = preview_video.relative_to(job_dir).as_posix()
-    comments, missing_comment_status = (
-        _agent_comments(job_dir) if report_ready else ({}, "pending")
-    )
+    comments, missing_comment_status = _agent_comments(job_dir)
 
     if report_ready:
         raw_segments = report.get("segments", [])
     else:
-        raw_segments = []
-        for chunk in progress.get("chunks", []):
-            if not isinstance(chunk, dict):
-                continue
-            chunk_status = chunk.get("status")
-            if chunk_status not in {None, "completed"}:
-                continue
-            provisional = chunk.get("provisional_segments", [])
-            if isinstance(provisional, list):
-                raw_segments.extend(
-                    segment
-                    for segment in provisional
-                    if isinstance(segment, dict)
-                )
+        merged_provisional = progress.get("provisional_segments")
+        if isinstance(merged_provisional, list):
+            raw_segments = [
+                segment
+                for segment in merged_provisional
+                if isinstance(segment, dict)
+            ]
+        else:
+            raw_segments = []
+            for chunk in progress.get("chunks", []):
+                if not isinstance(chunk, dict):
+                    continue
+                chunk_status = chunk.get("status")
+                if chunk_status not in {None, "completed"}:
+                    continue
+                provisional = chunk.get("provisional_segments", [])
+                if isinstance(provisional, list):
+                    raw_segments.extend(
+                        segment
+                        for segment in provisional
+                        if isinstance(segment, dict)
+                    )
         raw_segments = [
             {**segment, "order": index}
             for index, segment in enumerate(raw_segments, start=1)
@@ -1340,7 +1356,7 @@ def get_editor_contract(job_id: str):
                 )
             )
         else:
-            segments = validate_editor_segments(
+            segments = normalize_stored_editor_segments(
                 raw_segments,
                 duration,
             )
@@ -1351,6 +1367,11 @@ def get_editor_contract(job_id: str):
         score = segment["score"]
         segment_id = str(segment["id"])
         agent = comments.get(segment_id)
+        if agent is None:
+            for source_segment_id in segment.get("source_segment_ids", []):
+                agent = comments.get(str(source_segment_id))
+                if agent is not None:
+                    break
         highlights.append(
             {
                 "id": segment_id,
@@ -1368,6 +1389,8 @@ def get_editor_contract(job_id: str):
                 "source_segment_ids": segment["source_segment_ids"],
                 "review": segment["review"],
                 "review_note": segment["review_note"],
+                "evidence": segment.get("evidence"),
+                "tracking": segment.get("tracking"),
                 "agent_comment": agent["comment"] if agent else None,
                 "agent_comment_status": (
                     "ready" if agent else missing_comment_status
@@ -1471,6 +1494,8 @@ def get_editor_contract(job_id: str):
                 or len(report.get("analysis_chunks", []))
             ),
             "chunks": live_chunks,
+            "agent_completed_segments": len(comments),
+            "agent_visible_segments": len(raw_segments),
         },
         actions_enabled=report_ready,
     )
@@ -1519,6 +1544,10 @@ def _store_editor_segments(
     ]
     try:
         normalized = validate_editor_segments(ordered, duration)
+        normalized = restore_server_segment_extensions(
+            normalized,
+            segments,
+        )
     except EditorSegmentValidationError as exc:
         raise FileValidationError(str(exc)) from exc
     updated = jobs.update_report(

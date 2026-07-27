@@ -19,8 +19,8 @@ class HighlightScorer:
         if prev_frame is None:
             return 0.0
 
-        gray1 = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-        gray2 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray1 = self._analysis_gray(prev_frame)
+        gray2 = self._analysis_gray(frame)
 
         diff = cv2.absdiff(gray1, gray2)
         mean_diff = float(np.mean(diff))
@@ -32,8 +32,8 @@ class HighlightScorer:
         if prev_frame is None:
             return 0.0
 
-        gray1 = cv2.cvtColor(prev_frame, cv2.COLOR_BGR2GRAY)
-        gray2 = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray1 = self._analysis_gray(prev_frame)
+        gray2 = self._analysis_gray(frame)
 
         try:
             flow = cv2.calcOpticalFlowFarneback(
@@ -46,6 +46,18 @@ class HighlightScorer:
             score = 0.0
 
         return score
+
+    @staticmethod
+    def _analysis_gray(frame, maximum_width=320):
+        height, width = frame.shape[:2]
+        if width > maximum_width:
+            target_height = max(2, int(round(height * maximum_width / width)))
+            frame = cv2.resize(
+                frame,
+                (maximum_width, target_height),
+                interpolation=cv2.INTER_AREA,
+            )
+        return cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
     def calculate_kill_notification_score(self, frame):
         h, w = frame.shape[:2]

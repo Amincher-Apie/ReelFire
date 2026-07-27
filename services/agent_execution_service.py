@@ -9,6 +9,7 @@ import re
 import shutil
 import threading
 import uuid
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from time import perf_counter
@@ -17,7 +18,11 @@ from typing import TYPE_CHECKING, Any, Callable
 from agent.integrations import to_backend_agent_call
 from agent.providers import DifyChatClient, OllamaChatClient
 from agent.service import AgentService
-from agent.tools import AdviceGeneratorTool, KnowledgeRetrieverTool, OllamaEmbedder
+from agent.tools import (
+    AdviceGeneratorTool,
+    KnowledgeRetrieverTool,
+    build_embedder_from_env,
+)
 from services.agent_call_service import (
     complete_agent_call,
     fail_agent_call,
@@ -76,7 +81,10 @@ class AgentExecutionService:
             thread_name_prefix="reelfire-agent",
         )
         self._active: set[int] = set()
+        self._active_segments: set[tuple[str, str]] = set()
         self._active_lock = threading.Lock()
+        self._segment_report_lock = threading.Lock()
+        self._final_segment_maps: dict[str, dict[str, str]] = {}
         self._shutdown = False
 
     def enqueue(
@@ -112,6 +120,319 @@ class AgentExecutionService:
             ) from exc
         return future
 
+    def enqueue_segment(
+        self,
+        job_id: str,
+        analysis_report: dict[str, Any],
+    ):
+        """Queue one provisional segment without blocking the YOLO producer."""
+
+        raw_segments = analysis_report.get("segments")
+        if not isinstance(raw_segments, list) or len(raw_segments) != 1:
+            raise AgentExecutionUnavailableError(
+                "Segment Agent input must contain exactly one segment"
+            )
+        segment_id = str(raw_segments[0].get("id", "")).strip()
+        if not segment_id:
+            raise AgentExecutionUnavailableError(
+                "Segment Agent input is missing segment id"
+            )
+        key = (job_id, segment_id)
+        with self._active_lock:
+            if self._shutdown:
+                raise AgentExecutionUnavailableError(
+                    "Agent background service is closed"
+                )
+            if key in self._active_segments:
+                return None
+            self._active_segments.add(key)
+        try:
+            return self._executor.submit(
+                self._run_segment,
+                job_id,
+                segment_id,
+                analysis_report,
+            )
+        except Exception as exc:
+            with self._active_lock:
+                self._active_segments.discard(key)
+            raise AgentExecutionUnavailableError(
+                "Segment Agent queue is unavailable"
+            ) from exc
+
+    def _run_segment(
+        self,
+        job_id: str,
+        segment_id: str,
+        analysis_report: dict[str, Any],
+    ) -> None:
+        key = (job_id, segment_id)
+        try:
+            with self.app.app_context():
+                service, provider_config = self._build_service()
+                result = service.run_analysis_report(
+                    analysis_report,
+                    provider=provider_config,
+                )
+                if result.get("status") == "failed":
+                    LOGGER.warning(
+                        "Segment Agent failed job=%s segment=%s",
+                        job_id,
+                        segment_id,
+                    )
+                    return
+                comments = result.get("segment_comments")
+                if (
+                    not isinstance(comments, list)
+                    or len(comments) != 1
+                    or comments[0].get("segment_id") != segment_id
+                ):
+                    raise AgentOutputValidationError(
+                        "Segment Agent output did not match its segment"
+                    )
+                self._merge_segment_result(job_id, result)
+        except Exception:
+            LOGGER.exception(
+                "Segment Agent execution failed job=%s segment=%s",
+                job_id,
+                segment_id,
+            )
+        finally:
+            with self._active_lock:
+                self._active_segments.discard(key)
+
+    def _merge_segment_result(
+        self,
+        job_id: str,
+        result: dict[str, Any],
+        *,
+        replace_non_streaming: bool = False,
+    ) -> None:
+        with self._segment_report_lock:
+            path = self.jobs.agent_report_path(job_id)
+            existing: dict[str, Any] = {}
+            if path.is_file():
+                try:
+                    candidate = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, json.JSONDecodeError):
+                    candidate = {}
+                if isinstance(candidate, dict):
+                    existing = candidate
+            if existing and existing.get("streaming") is not True:
+                if not replace_non_streaming:
+                    return
+                existing = {}
+
+            comments_by_id = {
+                str(item.get("segment_id")): item
+                for item in existing.get("segment_comments", [])
+                if isinstance(item, dict) and item.get("segment_id")
+            }
+            for item in result.get("segment_comments", []):
+                if isinstance(item, dict) and item.get("segment_id"):
+                    provisional_id = str(item["segment_id"])
+                    target_id = self._final_segment_maps.get(
+                        job_id,
+                        {},
+                    ).get(provisional_id, provisional_id)
+                    comments_by_id[target_id] = {
+                        **item,
+                        "segment_id": target_id,
+                    }
+            comments = list(comments_by_id.values())
+            degraded = (
+                result.get("status") == "degraded"
+                or existing.get("status") == "degraded"
+            )
+            merged = {
+                "schema_version": "1.0",
+                "job_id": job_id,
+                "status": "degraded" if degraded else "completed",
+                "streaming": True,
+                "completed_segment_count": len(comments),
+                "provider": result.get("provider", {}),
+                "summary": f"已完成 {len(comments)} 个候选片段的 Agent 分析。",
+                "tags": result.get("tags", []),
+                "suggestions": result.get("suggestions", []),
+                "segment_comments": comments,
+                "review": result.get("review"),
+                "evidence_refs": result.get("evidence_refs", []),
+                "knowledge_refs": result.get("knowledge_refs", []),
+                "trace": result.get("trace", {}),
+                "errors": result.get("errors", []),
+            }
+            self.jobs.write_agent_report(job_id, merged)
+
+    @staticmethod
+    def _single_segment_report(
+        report: dict[str, Any],
+        segment: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Limit a retry request to one segment and its local frame evidence."""
+
+        start = float(segment.get("start", 0.0))
+        end = float(segment.get("end", start))
+        partial = deepcopy(report)
+        partial["segments"] = [deepcopy(segment)]
+        for field in ("samples", "keyframes"):
+            values = report.get(field)
+            if not isinstance(values, list):
+                continue
+            partial[field] = [
+                deepcopy(item)
+                for item in values
+                if isinstance(item, dict)
+                and start <= float(item.get("timestamp", -1.0)) <= end
+            ]
+        if isinstance(partial.get("samples"), list):
+            partial["total_sampled_frames"] = len(partial["samples"])
+        return partial
+
+    def _run_segmented_report(
+        self,
+        service: AgentService,
+        provider_config: dict[str, str],
+        report: dict[str, Any],
+        staging_dir: Path,
+    ) -> dict[str, Any]:
+        """Run a completed report as independent, incrementally published calls."""
+
+        job_id = str(report.get("job_id", "")).strip()
+        segments = report.get("segments")
+        if not isinstance(segments, list) or len(segments) <= 1:
+            return service.run_analysis_report(
+                report,
+                provider=provider_config,
+                output_dir=staging_dir,
+            )
+
+        existing: dict[str, Any] = {}
+        existing_path = self.jobs.agent_report_path(job_id)
+        if existing_path.is_file():
+            try:
+                candidate = json.loads(existing_path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                candidate = {}
+            if isinstance(candidate, dict) and candidate.get("streaming") is True:
+                existing = candidate
+        completed_ids = {
+            str(item.get("segment_id"))
+            for item in existing.get("segment_comments", [])
+            if isinstance(item, dict) and item.get("segment_id")
+        }
+        pending_segments = [
+            segment
+            for segment in segments
+            if isinstance(segment, dict)
+            and str(segment.get("id", "")).strip() not in completed_ids
+        ]
+
+        last_result: dict[str, Any] | None = None
+        replace_non_streaming = not bool(existing)
+        for segment in pending_segments:
+            segment_id = str(segment.get("id", "")).strip()
+            if not segment_id:
+                raise AgentOutputValidationError(
+                    "Agent 分片输入缺少 segment id"
+                )
+            partial = self._single_segment_report(report, segment)
+            result = service.run_analysis_report(
+                partial,
+                provider=provider_config,
+            )
+            if result.get("status") == "failed":
+                return result
+            comments = result.get("segment_comments")
+            if (
+                not isinstance(comments, list)
+                or len(comments) != 1
+                or comments[0].get("segment_id") != segment_id
+            ):
+                raise AgentOutputValidationError(
+                    "Agent 分片输出与输入片段不匹配"
+                )
+            self._merge_segment_result(
+                job_id,
+                result,
+                replace_non_streaming=replace_non_streaming,
+            )
+            replace_non_streaming = False
+            last_result = result
+
+        merged_path = self.jobs.agent_report_path(job_id)
+        if not merged_path.is_file():
+            raise AgentOutputValidationError("Agent 分片结果未生成")
+        merged = self._read_json_object(merged_path)
+        if last_result is not None:
+            merged["trace"] = last_result.get("trace", merged.get("trace", {}))
+        staging_dir.joinpath("agent_report.json").write_text(
+            json.dumps(merged, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+        staging_dir.joinpath("agent_trace.json").write_text(
+            json.dumps(
+                {
+                    "job_id": job_id,
+                    "status": merged.get("status"),
+                    "provider": merged.get("provider", {}),
+                    "trace": merged.get("trace", {}),
+                    "errors": merged.get("errors", []),
+                    "streaming": True,
+                    "completed_segment_count": merged.get(
+                        "completed_segment_count",
+                        0,
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        return merged
+
+    def finalize_segments(
+        self,
+        job_id: str,
+        segments: list[dict[str, Any]],
+    ) -> None:
+        """Map provisional Agent comments onto final reconciled segment IDs."""
+
+        mapping: dict[str, str] = {}
+        for segment in segments:
+            final_id = str(segment.get("id", "")).strip()
+            if not final_id:
+                continue
+            agent_segment_id = str(
+                segment.get("agent_segment_id", "")
+            ).strip()
+            if agent_segment_id:
+                mapping[agent_segment_id] = final_id
+            for source_id in segment.get("source_segment_ids", []):
+                normalized = str(source_id).strip()
+                if normalized:
+                    mapping[normalized] = final_id
+        with self._segment_report_lock:
+            self._final_segment_maps[job_id] = mapping
+            path = self.jobs.agent_report_path(job_id)
+            if not path.is_file():
+                return
+            try:
+                report = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                return
+            if not isinstance(report, dict) or report.get("streaming") is not True:
+                return
+            remapped: dict[str, dict[str, Any]] = {}
+            for item in report.get("segment_comments", []):
+                if not isinstance(item, dict) or not item.get("segment_id"):
+                    continue
+                current_id = str(item["segment_id"])
+                target_id = mapping.get(current_id, current_id)
+                remapped[target_id] = {**item, "segment_id": target_id}
+            report["segment_comments"] = list(remapped.values())
+            report["completed_segment_count"] = len(remapped)
+            self.jobs.write_agent_report(job_id, report)
+
     def _run(
         self,
         agent_call_id: int,
@@ -125,7 +446,7 @@ class AgentExecutionService:
                 mark_agent_call_running(
                     agent_call_id,
                     model_name=self._configured_model_name(),
-                    input_summary="读取真实 CV analysis_report.json",
+                    input_summary="读取 CV 报告并逐片段执行 Agent",
                 )
                 report = self.jobs.read_report(job_id)
                 service, provider_config = self._build_service()
@@ -133,10 +454,11 @@ class AgentExecutionService:
                     job_id,
                     agent_call_id,
                 )
-                result = service.run_analysis_report(
+                result = self._run_segmented_report(
+                    service,
+                    provider_config,
                     report,
-                    provider=provider_config,
-                    output_dir=staging_dir,
+                    staging_dir,
                 )
                 backend = to_backend_agent_call(
                     result,
@@ -213,9 +535,8 @@ class AgentExecutionService:
         elif self.provider == "ollama":
             client = OllamaChatClient()
         embedder = (
-            OllamaEmbedder()
+            build_embedder_from_env()
             if self.provider != "rule_only"
-            and os.getenv("OLLAMA_EMBED_MODEL")
             else None
         )
         model = client.model if client is not None else "deterministic-v1"

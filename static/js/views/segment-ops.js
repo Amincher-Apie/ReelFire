@@ -259,21 +259,18 @@ function requireEditorReview() {
 
 // ── drag reorder ────────────────────────────────────────────────────────
 
-let dragSrcIndex = null;
-
-export function initDragReorder(container) {
+export function initDragReorder(container, pageStartIndex = 0) {
   if (!container) return;
 
-  container.addEventListener("dragstart", (e) => {
+  container.ondragstart = (e) => {
     const card = e.target.closest(".segment-card");
     if (!card) return;
-    dragSrcIndex = Array.from(container.children).indexOf(card);
     card.classList.add("dragging");
     e.dataTransfer.effectAllowed = "move";
     e.dataTransfer.setData("text/plain", card.dataset.segmentId || "");
-  });
+  };
 
-  container.addEventListener("dragover", (e) => {
+  container.ondragover = (e) => {
     e.preventDefault();
     e.dataTransfer.dropEffect = "move";
     const card = e.target.closest(".segment-card");
@@ -290,37 +287,46 @@ export function initDragReorder(container) {
     } else {
       container.insertBefore(dragging, card);
     }
-  });
+  };
 
-  container.addEventListener("dragend", (e) => {
+  container.ondragend = (e) => {
     const card = e.target.closest(".segment-card");
     if (card) card.classList.remove("dragging");
 
-    // Calculate new order from DOM positions
     const children = Array.from(container.children);
-    const changed = children.some((child, i) => {
-      const segId = child.dataset.segmentId;
-      const seg = editorState.segments.find((s) => s.id === segId);
-      return seg && seg.order !== i + 1;
-    });
+    const renderedIds = children.map((child) => child.dataset.segmentId);
+    const originalIds = editorState.segments
+      .slice(pageStartIndex, pageStartIndex + children.length)
+      .map((segment) => segment.id);
+    const changed = renderedIds.some((segmentId, index) => (
+      segmentId !== originalIds[index]
+    ));
 
     if (changed) {
       pushUndo();
-      children.forEach((child, i) => {
-        const segId = child.dataset.segmentId;
-        const seg = editorState.segments.find((s) => s.id === segId);
-        if (seg) seg.order = i + 1;
+      const segmentsById = new Map(
+        editorState.segments.map((segment) => [segment.id, segment]),
+      );
+      const reorderedPage = renderedIds
+        .map((segmentId) => segmentsById.get(segmentId))
+        .filter(Boolean);
+      editorState.segments.splice(
+        pageStartIndex,
+        reorderedPage.length,
+        ...reorderedPage,
+      );
+      editorState.segments.forEach((segment, index) => {
+        segment.order = index + 1;
       });
-      editorState.segments.sort((a, b) => (a.order || 0) - (b.order || 0));
       markDirty();
       renderTimeline();
+      renderSegmentList();
       renderStatsDashboard();
       showToast("片段顺序已更新", "info");
     }
-    dragSrcIndex = null;
-  });
+  };
 
-  container.addEventListener("drop", (e) => {
+  container.ondrop = (e) => {
     e.preventDefault();
-  });
+  };
 }

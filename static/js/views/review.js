@@ -3,17 +3,16 @@ import { appState } from "../state/app-state.js";
 import api from "../api/client.js";
 import { byId } from "../utils/dom.js";
 import { showToast, setButtonLoading } from "../utils/ui.js";
-import { renderReport, loadReport, logTool } from "./analysis.js";
+import {
+  loadReport,
+  logTool,
+  persistVisibleKeyframeReview,
+  renderReport,
+} from "./analysis.js";
 
 export function collectReview() {
-  return [...document.querySelectorAll(".keyframe-card")].map((card) => {
-    const index = Number(card.dataset.frameIndex);
-    const frame = { ...appState.keyframes[index] };
-    frame.decision = card.querySelector(".review-decision").value;
-    frame.keep = frame.decision === "keep";
-    frame.note = card.querySelector(".review-note").value.trim();
-    return frame;
-  });
+  persistVisibleKeyframeReview();
+  return appState.keyframes.map((frame) => ({ ...frame }));
 }
 
 export async function saveReview() {

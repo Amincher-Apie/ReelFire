@@ -61,10 +61,8 @@ def require_job_access(public_job_id: str) -> dict[str, Any]:
 
 
 def get_visible_job_ids() -> set[str]:
-    """Return indexed jobs owned by the user; guests have no history."""
+    """Return indexed jobs owned by the current account or guest identity."""
     user = require_authenticated_user()
-    if user["is_guest"]:
-        return set()
 
     rows = get_db().execute(
         """

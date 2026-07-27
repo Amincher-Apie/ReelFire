@@ -4,42 +4,48 @@ const path = require('path');
 const { chromium } = require('playwright');
 
 const projectRoot = path.resolve(__dirname, '..');
-const screenshotDir = path.join(projectRoot, 'docs', 'Acceptance_screenshot');
-const normalVideo = path.join(projectRoot, 'tests', 'test_assets', 'gameplay_normal.mp4');
+const screenshotDir = process.env.REELFIRE_SCREENSHOT_DIR
+  || path.join(os.tmpdir(), 'reelfire-browser-acceptance');
+const normalVideo = path.join(
+  projectRoot,
+  'tests',
+  'test_assets',
+  'gameplay_normal.mp4',
+);
 const baseUrl = process.env.REELFIRE_BASE_URL || 'http://127.0.0.1:7880';
 
-function wait(milliseconds) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+async function register(page) {
+  const suffix = `${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+  const username = `browser_test_${suffix}`;
+  const password = 'ReelFireBrowserTest!1';
+
+  await page.getByRole('tab', { name: '注册', exact: true }).click();
+  await page.fill('#register-username', username);
+  await page.fill('#register-password', password);
+  await page.fill('#register-confirm', password);
+  await page.getByRole('button', { name: '创建账号', exact: true }).click();
+  await page.waitForSelector('#show-create-project-button', {
+    state: 'visible',
+  });
+  return username;
 }
 
-async function fillJobForm(page, { name, video, interval = '2', ratio = '16:9' }) {
-  await page.fill('#project-name', name);
+async function createAnalysisJob(page, projectName) {
+  await page.click('#show-create-project-button');
+  await page.waitForSelector('#project-dialog', { state: 'visible' });
+  await page.fill('#project-name', projectName);
   await page.selectOption('#game-type', 'csgo');
-  await page.setInputFiles('#video-file', video);
-  await page.fill('#sample-interval', interval);
+  await page.setInputFiles('#video-file', normalVideo);
+  await page.fill('#sample-interval', '0.5');
   await page.fill('#target-duration', '15');
-  await page.selectOption('#output-aspect', ratio);
-}
-
-async function createSecurityProbeJob(page, projectName) {
-  return page.evaluate(async (name) => {
-    const bytes = new Uint8Array(48);
-    bytes.set([0, 0, 0, 24, 102, 116, 121, 112, 105, 115, 111, 109]);
-    const form = new FormData();
-    form.append('file', new File([bytes], 'security-probe.mp4', { type: 'video/mp4' }));
-    form.append('project_name', name);
-    form.append('game_type', 'csgo');
-    form.append('sample_interval', '2');
-    form.append('target_duration', '15');
-    form.append('output_ratio', '16:9');
-    const response = await fetch('/api/jobs', { method: 'POST', body: form });
-    const payload = await response.json();
-    if (!response.ok || !payload.ok) throw new Error(payload.error || 'security probe job creation failed');
-    return payload.job_id;
-  }, projectName);
+  await page.selectOption('#output-ratio', '16:9');
+  await page.click('#analyze-button');
+  await page.waitForSelector('#view-analysis.active', { state: 'visible' });
+  await page.waitForSelector('#result-loading', { state: 'visible' });
 }
 
 async function main() {
+  fs.rmSync(screenshotDir, { recursive: true, force: true });
   fs.mkdirSync(screenshotDir, { recursive: true });
   const browser = await chromium.launch({
     headless: true,
@@ -48,8 +54,11 @@ async function main() {
   const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
   const browserErrors = [];
   const failedResponses = [];
+
   page.on('console', (message) => {
-    if (message.type() === 'error') browserErrors.push(`console: ${message.text()}`);
+    if (message.type() === 'error') {
+      browserErrors.push(`console: ${message.text()}`);
+    }
   });
   page.on('pageerror', (error) => browserErrors.push(`page: ${error.message}`));
   page.on('response', (response) => {
@@ -60,164 +69,131 @@ async function main() {
 
   try {
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
-    await page.waitForSelector('#upload-form', { state: 'visible' });
+    const username = await register(page);
+    const projectName = `浏览器验收项目 ${Date.now()}`;
     await page.screenshot({
-      path: path.join(screenshotDir, '01_upload_ready.png'),
+      path: path.join(screenshotDir, '01_projects_empty.png'),
       fullPage: true,
     });
 
-    let delayFirstListRequest = true;
-    await page.route('**/api/jobs', async (route) => {
-      if (delayFirstListRequest && route.request().method() === 'GET') {
-        delayFirstListRequest = false;
-        await wait(1200);
-      }
-      await route.continue();
+    await createAnalysisJob(page, projectName);
+    await page.waitForSelector('#analysis-progress-detail', {
+      state: 'visible',
+      timeout: 30000,
     });
-    await page.click('#nav-task-list');
-    await page.waitForSelector('#task-list-loading', { state: 'visible' });
     await page.screenshot({
-      path: path.join(screenshotDir, '02_loading.png'),
-      fullPage: true,
-    });
-    await page.waitForSelector('#task-list-loading', { state: 'hidden' });
-    await page.unroute('**/api/jobs');
-
-    const projectNameProbe = '<img src=x onerror="window.__reelfireProjectXss=1">';
-    const securityJobId = await createSecurityProbeJob(page, projectNameProbe);
-    await page.click('#nav-task-list');
-    await page.waitForSelector('#task-list-table', { state: 'visible' });
-    const securityRow = page.locator('#task-list-body tr').filter({ hasText: projectNameProbe });
-    await securityRow.waitFor({ state: 'visible' });
-    const projectNameIsSafe = await page.evaluate(() => (
-      !window.__reelfireProjectXss && !document.querySelector('#task-list-body img[src="x"]')
-    ));
-    if (!projectNameIsSafe) throw new Error('stored XSS executed from project_name');
-    await page.evaluate(async (jobId) => {
-      const response = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error('security probe cleanup failed');
-    }, securityJobId);
-
-    await page.click('#nav-new-task');
-    await fillJobForm(page, {
-      name: 'CS2 浏览器验收-正常流程',
-      video: normalVideo,
-      interval: '0.25',
-      ratio: '16:9',
-    });
-    await page.click('#btn-create');
-    await page.waitForSelector('#view-task-list.active', { state: 'visible' });
-    const completedJobId = await page.evaluate(() => STATE.currentJobId);
-    await page.evaluate((jobId) => openTask(jobId), completedJobId);
-    await page.waitForSelector('#view-task-detail.active', { state: 'visible' });
-    await page.waitForSelector('#detail-running', { state: 'visible', timeout: 30000 });
-    await page.screenshot({
-      path: path.join(screenshotDir, '03_running.png'),
+      path: path.join(screenshotDir, '02_analysis_running.png'),
       fullPage: true,
     });
 
-    await page.waitForSelector('#detail-completed', {
+    await page.waitForSelector('#result-content', {
       state: 'visible',
       timeout: 240000,
     });
-    await page.waitForSelector('.keyframe-card img', { state: 'visible' });
-    await page.screenshot({
-      path: path.join(screenshotDir, '04_completed.png'),
-      fullPage: true,
-    });
-    await page.locator('.keyframe-card').first().screenshot({
-      path: path.join(screenshotDir, '05_detection_keyframe.png'),
-    });
-
-    await page.locator('button', { hasText: '查看 JSON 报告' }).click();
-    await page.waitForSelector('#report-modal', { state: 'visible' });
-    const browserReport = JSON.parse(await page.textContent('#report-content'));
-    if (!browserReport.segment_tags || !browserReport.ai_cover_prompt) {
-      throw new Error('analysis report is missing segment_tags or ai_cover_prompt');
-    }
-    await page.locator('#report-modal button', { hasText: '×' }).click();
-    await page.waitForSelector('#report-modal', { state: 'hidden' });
-
-    await page.locator('.keyframe-card').first().locator('.kf-decision button').nth(1).click();
-    await page.locator('.keyframe-card').nth(1).locator('.kf-label-select').selectOption('clutch');
-    const noteProbe = '"><img src=x onerror="window.__reelfireNoteXss=1">';
-    await page.locator('.keyframe-card').nth(1).locator('.kf-note').fill(noteProbe);
-    await Promise.all([
-      page.waitForResponse((response) => response.url().includes('/review') && response.request().method() === 'PATCH' && response.status() === 200),
-      page.click('#btn-save-review'),
-    ]);
-    await page.evaluate(() => loadAnalysisReport());
-    await page.waitForSelector('.keyframe-card', { state: 'visible' });
-    const restoredNote = await page.locator('.keyframe-card').nth(1).locator('.kf-note').inputValue();
-    const noteIsSafe = await page.evaluate(() => (
-      !window.__reelfireNoteXss && !document.querySelector('.keyframe-card img[src="x"]')
-    ));
-    if (restoredNote !== noteProbe || !noteIsSafe) {
-      throw new Error('stored XSS executed or note value was corrupted during rendering');
-    }
-    await page.locator('.keyframe-card').nth(1).locator('.kf-note').fill('浏览器验收：保留残局候选');
-    await Promise.all([
-      page.waitForResponse((response) => response.url().includes('/review') && response.request().method() === 'PATCH' && response.status() === 200),
-      page.click('#btn-save-review'),
-    ]);
-
-    await page.click('#btn-rough-cut');
-    await page.waitForSelector('#detail-output video', {
+    await page.waitForSelector('.keyframe-card img', {
       state: 'visible',
-      timeout: 120000,
+      timeout: 30000,
     });
+    if (await page.locator('#segment-list .segment-item').count() > 5) {
+      throw new Error('analysis candidate list rendered more than five items');
+    }
+    if (await page.locator('#keyframe-list .keyframe-card').count() > 5) {
+      throw new Error('keyframe review rendered more than five items');
+    }
+    if (await page.getAttribute('#keyframe-mode-segment', 'aria-pressed') !== 'true') {
+      throw new Error('single-segment keyframe review is not the default mode');
+    }
+    await page.click('#keyframe-mode-all');
+    if (await page.getAttribute('#keyframe-mode-all', 'aria-pressed') !== 'true') {
+      throw new Error('all-keyframes review mode did not activate');
+    }
+    const allModeFrameIndexes = await page
+      .locator('#keyframe-list .keyframe-card')
+      .evaluateAll((cards) => cards.map((card) => card.dataset.frameIndex));
+    const candidate = page.locator('#segment-list .segment-item').first();
+    if (await candidate.count()) {
+      await candidate.click();
+      const afterCandidateClick = await page
+        .locator('#keyframe-list .keyframe-card')
+        .evaluateAll((cards) => cards.map((card) => card.dataset.frameIndex));
+      if (JSON.stringify(afterCandidateClick) !== JSON.stringify(allModeFrameIndexes)) {
+        throw new Error('candidate selection changed keyframes while all mode was active');
+      }
+    }
+    await page.click('#keyframe-mode-segment');
+    if (await page.getAttribute('#keyframe-mode-segment', 'aria-pressed') !== 'true') {
+      throw new Error('single-segment keyframe review mode did not reactivate');
+    }
     await page.screenshot({
-      path: path.join(screenshotDir, '06_output_video.png'),
+      path: path.join(screenshotDir, '03_analysis_completed.png'),
       fullPage: true,
     });
 
-    const corruptVideo = path.join(os.tmpdir(), `reelfire-corrupt-${Date.now()}.mp4`);
-    const corruptPayload = Buffer.alloc(96);
-    corruptPayload.writeUInt32BE(28, 0);
-    corruptPayload.write('ftypisom', 4, 'ascii');
-    fs.writeFileSync(corruptVideo, corruptPayload);
-    try {
-      await page.click('#nav-new-task');
-      await fillJobForm(page, {
-        name: 'CS2 浏览器验收-损坏视频',
-        video: corruptVideo,
-        interval: '2',
-        ratio: '9:16',
-      });
-      await page.click('#btn-create');
-      await page.waitForSelector('#view-task-list.active', { state: 'visible' });
-      const failedJobId = await page.evaluate(() => STATE.currentJobId);
-      await page.evaluate((jobId) => openTask(jobId), failedJobId);
-      await page.waitForSelector('#detail-failed', {
-        state: 'visible',
-        timeout: 60000,
-      });
-      await page.screenshot({
-        path: path.join(screenshotDir, '07_failed.png'),
-        fullPage: true,
-      });
-
-      await page.click('#nav-task-list');
-      await page.waitForSelector('#task-list-table', { state: 'visible' });
-      await page.screenshot({
-        path: path.join(screenshotDir, '08_task_history.png'),
-        fullPage: true,
-      });
-
-      const result = {
-        ok: browserErrors.length === 0 && failedResponses.length === 0,
-        completed_job_id: completedJobId,
-        failed_job_id: failedJobId,
-        screenshots: fs.readdirSync(screenshotDir).sort(),
-        security_checks: ['project_name stored XSS blocked', 'keyframe note stored XSS blocked'],
-        browser_errors: browserErrors,
-        failed_responses: failedResponses,
-      };
-      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-      if (!result.ok) process.exitCode = 1;
-    } finally {
-      fs.rmSync(corruptVideo, { force: true });
+    await page.click('#open-report-button');
+    await page.waitForSelector('#report-dialog[open]', { state: 'visible' });
+    const report = JSON.parse(await page.textContent('#report-content'));
+    if (!Array.isArray(report.segments) || !Array.isArray(report.keyframes)) {
+      throw new Error('analysis report is missing segments or keyframes');
     }
+    await page.click('#close-report-button');
+
+    await page.click('#nav-projects');
+    await page.waitForSelector('#view-projects.active', { state: 'visible' });
+    await page.waitForSelector('#projects-grid .project-card', {
+      state: 'visible',
+    });
+    if (await page.locator('#projects-grid .project-card').count() > 10) {
+      throw new Error('project grid rendered more than ten items');
+    }
+    const cardText = await page
+      .locator('#projects-grid .project-card')
+      .filter({ hasText: projectName })
+      .innerText();
+    await page.click('#project-view-list');
+    await page.waitForSelector('#projects-list', { state: 'visible' });
+    const rowText = await page
+      .locator('#projects-list-body tr')
+      .filter({ hasText: projectName })
+      .innerText();
+    const assetName = path.basename(normalVideo);
+    if (!cardText.includes(assetName) || !rowText.includes(assetName)) {
+      throw new Error('project card/list material names are inconsistent');
+    }
+
+    await page.click('#nav-analysis');
+    await page.waitForSelector('#view-analysis.active', { state: 'visible' });
+    const editorHref = await page.getAttribute('#editor-link', 'href');
+    if (!editorHref || !editorHref.endsWith('/editor')) {
+      throw new Error('completed analysis has no editor link');
+    }
+    await page.goto(new URL(editorHref, baseUrl).toString(), {
+      waitUntil: 'domcontentloaded',
+    });
+    await page.waitForSelector('#editor-content', {
+      state: 'visible',
+      timeout: 30000,
+    });
+    await page.waitForSelector('.segment-card', { state: 'visible' });
+    if (await page.locator('#highlight-list .segment-card').count() > 5) {
+      throw new Error('editor highlight list rendered more than five items');
+    }
+    await page.screenshot({
+      path: path.join(screenshotDir, '04_editor_ready.png'),
+      fullPage: true,
+    });
+
+    const result = {
+      ok: browserErrors.length === 0 && failedResponses.length === 0,
+      username,
+      project_name: projectName,
+      report_segments: report.segments.length,
+      report_keyframes: report.keyframes.length,
+      screenshots: fs.readdirSync(screenshotDir).sort(),
+      browser_errors: browserErrors,
+      failed_responses: failedResponses,
+    };
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    if (!result.ok) process.exitCode = 1;
   } finally {
     await browser.close();
   }

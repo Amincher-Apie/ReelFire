@@ -47,6 +47,8 @@ _SEGMENT_FIELDS = (
     "enemy_classes_in_segment",
     "detections_summary",
     "reason",
+    "evidence",
+    "tracking",
 )
 _KEYFRAME_FIELDS = (
     "id",

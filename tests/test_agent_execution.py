@@ -6,6 +6,7 @@ import os
 import sqlite3
 import tempfile
 import unittest
+from copy import deepcopy
 from pathlib import Path
 from unittest.mock import patch
 
@@ -65,17 +66,20 @@ class FakeWorkflow:
         self.output_mode = output_mode
         self.raises = raises
         self.marker = marker
+        self.inputs = []
 
     def run_analysis_report(
         self,
         analysis_report,
         *,
         provider,
-        output_dir,
+        output_dir=None,
     ):
         if self.raises is not None:
             raise self.raises
+        self.inputs.append(analysis_report)
         job_id = analysis_report["job_id"]
+        segment_id = str(analysis_report["segments"][0]["id"])
         result_job_id = (
             "wrong-job"
             if self.output_mode == "wrong_job"
@@ -104,10 +108,10 @@ class FakeWorkflow:
             "suggestions": [],
             "segment_comments": [
                 {
-                    "segment_id": "seg_001",
+                    "segment_id": segment_id,
                     "comment": f"comment-{self.marker}",
                     "review_status": recommendation,
-                    "evidence_refs": ["segment:seg_001"],
+                    "evidence_refs": [f"segment:{segment_id}"],
                 }
             ],
             "review": {
@@ -122,6 +126,8 @@ class FakeWorkflow:
             },
             "errors": errors,
         }
+        if output_dir is None:
+            return result
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         if self.output_mode == "invalid_json":
@@ -597,6 +603,114 @@ class AgentExecutionReliabilityTestCase(unittest.TestCase):
             current = get_agent_call(call["id"])
         self.assertIn(current["status"], {"completed", "needs_review"})
         self.assertNotEqual(current["status"], "failed")
+
+    def test_segment_queue_publishes_and_remaps_incremental_comment(self) -> None:
+        report = self.jobs.read_report(self.job_id)
+        segment = dict(report["segments"][0])
+        segment["id"] = "seg_union_seg_c0001_01"
+        segment["order"] = 1
+        partial = {
+            **report,
+            "segments": [segment],
+        }
+        service = AgentExecutionService(
+            self.app,
+            self.jobs,
+            provider="rule_only",
+        )
+
+        future = service.enqueue_segment(self.job_id, partial)
+        self.assertIsNotNone(future)
+        future.result(timeout=3)
+        streamed = json.loads(
+            self.jobs.agent_report_path(self.job_id).read_text(
+                encoding="utf-8"
+            )
+        )
+        self.assertTrue(streamed["streaming"])
+        self.assertEqual(
+            streamed["segment_comments"][0]["segment_id"],
+            "seg_union_seg_c0001_01",
+        )
+
+        service.finalize_segments(
+            self.job_id,
+            [
+                {
+                    "id": "seg_001",
+                    "agent_segment_id": "seg_union_seg_c0001_01",
+                    "source_segment_ids": ["seg_c0001_01"],
+                }
+            ],
+        )
+        finalized = json.loads(
+            self.jobs.agent_report_path(self.job_id).read_text(
+                encoding="utf-8"
+            )
+        )
+        service.shutdown()
+        self.assertEqual(
+            finalized["segment_comments"][0]["segment_id"],
+            "seg_001",
+        )
+
+    def test_completed_report_retry_calls_agent_once_per_segment(self) -> None:
+        report = self.jobs.read_report(self.job_id)
+        second = deepcopy(report["segments"][0])
+        second.update(
+            {
+                "id": "seg_002",
+                "order": 2,
+                "start": 12.0,
+                "end": 18.0,
+                "duration": 6.0,
+                "source_keyframes": [],
+            }
+        )
+        report["segments"].append(second)
+        report["samples"].append(
+            {
+                "frame_index": 300,
+                "timestamp": 12.5,
+                "objects": [],
+            }
+        )
+        self.jobs.write_report(self.job_id, report)
+        workflow = FakeWorkflow(marker="segmented")
+
+        current = self._run(workflow)
+
+        self.assertEqual(current["status"], "completed")
+        self.assertEqual(
+            [
+                [segment["id"] for segment in item["segments"]]
+                for item in workflow.inputs
+            ],
+            [["seg_001"], ["seg_002"]],
+        )
+        self.assertTrue(
+            all(len(item["segments"]) == 1 for item in workflow.inputs)
+        )
+        self.assertTrue(
+            all(
+                2.0 <= float(sample["timestamp"]) <= 10.0
+                for sample in workflow.inputs[0]["samples"]
+            )
+        )
+        self.assertEqual(
+            [sample["timestamp"] for sample in workflow.inputs[1]["samples"]],
+            [12.5],
+        )
+        published = self.jobs.read_agent_report(self.job_id)
+        self.assertTrue(published["streaming"])
+        self.assertEqual(published["completed_segment_count"], 2)
+        self.assertEqual(
+            {
+                item["segment_id"]
+                for item in published["segment_comments"]
+            },
+            {"seg_001", "seg_002"},
+        )
 
     def test_unavailable_remote_providers_never_report_completed(self) -> None:
         cases = (
