@@ -320,6 +320,37 @@ export function renderAgentCompleted(comment) {
   }
 }
 
+// ── Agent report loading (independent from /editor) ───────────────────
+
+export function loadAgentReport(jobId) {
+  if (!jobId) return;
+
+  api.get("/api/jobs/" + encodeURIComponent(jobId) + "/report-data").then(
+    (payload) => {
+      const reportData = payload.report_data || payload.report || payload;
+      // 兼容多种后端返回格式：report_data.segment_comments / agent_comments / comments
+      const comments = reportData.segment_comments
+        || reportData.agent_comments
+        || reportData.comments
+        || [];
+      editorState.agentComments = Array.isArray(comments)
+        ? comments.map((c) => Object.assign({}, c))
+        : [];
+      // 刷新当前选中片段的 Agent 面板
+      if (editorState.selectedSegmentId) {
+        renderSegmentDetail(editorState.selectedSegmentId);
+      }
+    },
+    (error) => {
+      // Agent 报告不可用不阻塞编辑 — 面板显示 pending 状态
+      editorState.agentComments = [];
+      if (editorState.selectedSegmentId) {
+        renderSegmentDetail(editorState.selectedSegmentId);
+      }
+    }
+  );
+}
+
 // ── data loading ──────────────────────────────────────────────────────
 
 let loadRetries = 0;
@@ -364,17 +395,29 @@ export function normalizeEditorData(payload) {
   if (!payload || typeof payload !== "object") {
     throw new Error("服务端返回了无法识别的数据格式。");
   }
-  if (!payload.job_id) {
+
+  // ── 新后端契约（project-lifecycle）：payload.job.{job_id,status}, payload.highlights[], payload.video.url ──
+  // ── 旧后端契约（feature/frontend）：payload.{job_id,status,segments,agent_comments,keyframes} ──
+  const jobContainer = payload.job || payload;
+  const jobId = jobContainer.job_id;
+  if (!jobId) {
     throw new Error("剪辑预览数据缺少任务编号。");
   }
+  const status = jobContainer.status || "unknown";
 
-  const agentComments = Array.isArray(payload.agent_comments)
-    ? payload.agent_comments.map((c) => Object.assign({}, c))
-    : [];
-
+  // video：新后端返回 video.url（直接可用），旧后端返回 video.path（需拼接 /outputs/）
   const rawVideo = payload.video || {};
+  const videoUrl = rawVideo.url || null;
+  const videoPath = rawVideo.path || null;
 
-  const segments = (Array.isArray(payload.segments) ? payload.segments : [])
+  // highlights → segments（新后端）；segments → segments（旧后端回退）
+  const rawSegments = Array.isArray(payload.highlights)
+    ? payload.highlights
+    : Array.isArray(payload.segments)
+      ? payload.segments
+      : [];
+
+  const segments = rawSegments
     .filter((seg) => seg && typeof seg === "object")
     .map((seg) => {
       const start = Number(seg.start);
@@ -394,9 +437,9 @@ export function normalizeEditorData(payload) {
       };
     });
 
-  // Restore saved reviews from server-side segment data
+  // Restore saved reviews from server-side segment/highlight data
   const reviews = {};
-  (Array.isArray(payload.segments) ? payload.segments : [])
+  rawSegments
     .filter((seg) => seg && typeof seg === "object" && seg.review)
     .forEach((seg) => {
       reviews[seg.id] = {
@@ -406,18 +449,18 @@ export function normalizeEditorData(payload) {
     });
 
   return {
-    job_id: payload.job_id,
-    status: payload.status || "unknown",
+    job_id: jobId,
+    status: status,
     video: {
       duration: Number(rawVideo.duration) || 0,
       filename: rawVideo.filename || "",
-      path: rawVideo.path || null,
+      // 新后端：video.url 直接可用；旧后端：video.path 需拼接
+      url: videoUrl,
+      path: videoPath,
     },
     segments: segments,
-    agent_comments: agentComments,
-    keyframes: Array.isArray(payload.keyframes)
-      ? payload.keyframes.filter((kf) => kf && typeof kf === "object")
-      : [],
+    // agent_comments 不再从 /editor 聚合数据中读取 — 由 /report-data 独立加载
+    agent_comments: [],
     output: payload.output || {},
     reviews: reviews,
   };
@@ -435,8 +478,8 @@ export function applyEditorData(payload) {
   editorState.editorData = data;
   editorState.video = data.video || null;
   editorState.segments = Array.isArray(data.segments) ? data.segments : [];
-  editorState.agentComments = Array.isArray(data.agent_comments) ? data.agent_comments : [];
-  editorState.keyframes = Array.isArray(data.keyframes) ? data.keyframes : [];
+  editorState.agentComments = [];
+  editorState.keyframes = [];
   editorState.output = data.output || null;
   editorState.reviews = data.reviews || {};
   editorState.dirty = false;
@@ -467,6 +510,9 @@ export function applyEditorData(payload) {
 
   // Check for auto-saved draft
   checkDraft();
+
+  // 独立加载完整 Agent 报告（新后端 /report-data，不再从 /editor 聚合数据中内嵌）
+  loadAgentReport(editorState.jobId);
 
   if (editorState.segments.length > 0) {
     selectSegment(editorState.segments[0].id);

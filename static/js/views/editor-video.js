@@ -72,8 +72,10 @@ export function renderVideo() {
   const status = byId("video-status");
   const video = editorState.video;
 
-  if (video && video.path) {
-    videoEl.src = outputUrl(editorState.jobId, video.path);
+  // 新后端返回 video.url（直接可用），旧后端返回 video.path（需拼接 /outputs/）
+  const videoSrc = video && (video.url || (video.path && outputUrl(editorState.jobId, video.path)));
+  if (videoSrc) {
+    videoEl.src = videoSrc;
     videoEl.hidden = false;
     placeholder.hidden = true;
     videoEl.onloadedmetadata = () => {

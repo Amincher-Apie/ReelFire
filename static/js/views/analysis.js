@@ -204,7 +204,7 @@ export async function ensureAgentRun(jobId) {
       );
       const created = await api.post(
         `/api/jobs/${encodeURIComponent(jobId)}/agent-calls`,
-        { prompt_version: "v2", force: false },
+        { force: false },
       );
       call = created.agent_call;
     }

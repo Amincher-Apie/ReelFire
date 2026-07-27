@@ -1,4 +1,10 @@
 // ReelFire — segment operations: add, delete, merge, split, playhead markers
+//
+// ⚠ 后端依赖说明：
+// 以下 CRUD 端点（/segments、/segments/<id>、/segments/merge、/segments/<id>/split）
+// 是否在新后端中保留需由最新 backend 分支确认。
+// 正式的片段写回路径为 PATCH /api/jobs/<job_id>/review（完整 Segment Schema 快照）。
+// 若独立 CRUD 端点被移除，对应 UI 按钮仍会显示但操作将返回错误提示。
 import { editorState } from "../state/editor-state.js";
 import api from "../api/client.js";
 import { byId, createElement } from "../utils/dom.js";
