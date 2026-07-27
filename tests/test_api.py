@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import tempfile
 import threading
 import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+_TEST_ULTRALYTICS_DIR = (
+    Path(tempfile.gettempdir()) / "reelfire-ultralytics-tests"
+)
+_TEST_ULTRALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+os.environ["YOLO_CONFIG_DIR"] = str(_TEST_ULTRALYTICS_DIR)
 
 from app import create_app
 

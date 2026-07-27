@@ -40,7 +40,11 @@ from services.job_access_service import (
     require_job_access,
 )
 from services.job_index_service import create_asset_and_job_index
-from services.job_service import JobService, JobStateConflictError
+from services.job_service import (
+    CorruptDataError,
+    JobService,
+    JobStateConflictError,
+)
 from services.project_service import (
     ProjectOwnerForbiddenError,
     ProjectValidationError,
@@ -58,7 +62,15 @@ from services.review_service import (
     normalize_review_note,
     validate_review_status,
 )
+from services.report_data_service import (
+    ReportDataValidationError,
+    build_job_report_data,
+)
 from services.session_service import require_authenticated_user_id
+from services.statistics_service import (
+    StatisticsValidationError,
+    build_job_statistics,
+)
 
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -213,6 +225,23 @@ def _duration(job: dict[str, Any], report: dict[str, Any]) -> float | None:
             if math.isfinite(value) and value >= 0:
                 return value
     return None
+
+
+def _safe_basename(value: Any) -> str | None:
+    """Return a filename without trusting host-specific path semantics."""
+    if not isinstance(value, str):
+        return None
+    components = [
+        component
+        for component in value.replace("\\", "/").split("/")
+        if component
+    ]
+    if not components:
+        return None
+    filename = components[-1].strip()
+    if not filename or filename in {".", ".."}:
+        return None
+    return filename
 
 
 def _agent_comments(job_dir: Path) -> tuple[dict[str, dict[str, Any]], str]:
@@ -920,6 +949,155 @@ def get_report(job_id: str):
     jobs, _, _ = _services()
     require_job_access(job_id)
     return jsonify(ok=True, report=jobs.read_report(job_id))
+
+
+@api_bp.get("/jobs/<job_id>/statistics")
+def get_job_statistics(job_id: str):
+    jobs, _, _ = _services()
+    access = require_job_access(job_id)
+    job = jobs.get_job(job_id)
+    if (
+        job.get("status") != "completed"
+        or not jobs.report_path(job_id).is_file()
+    ):
+        raise AgentReportNotReadyError(
+            "任务必须 completed 且分析报告已生成"
+        )
+
+    report = jobs.read_report(job_id)
+    reviews = (
+        []
+        if access["is_legacy"]
+        else list_review_history(job_id)
+    )
+    agent_calls = (
+        []
+        if access["is_legacy"]
+        else list_agent_calls(job_id)
+    )
+    try:
+        statistics = build_job_statistics(
+            job_id=job_id,
+            report=report,
+            reviews=reviews,
+            agent_calls=agent_calls,
+        )
+    except StatisticsValidationError as exc:
+        raise CorruptDataError(
+            "analysis_report.json 包含无效的统计字段"
+        ) from exc
+    return jsonify(
+        ok=True,
+        contract_version="1.0",
+        statistics=statistics,
+    )
+
+
+@api_bp.get("/jobs/<job_id>/report-data")
+def get_job_report_data(job_id: str):
+    jobs, _, _ = _services()
+    access = require_job_access(job_id)
+    job = jobs.get_job(job_id)
+    if (
+        job.get("status") != "completed"
+        or not jobs.report_path(job_id).is_file()
+    ):
+        raise AgentReportNotReadyError(
+            "任务必须 completed 且分析报告已生成"
+        )
+
+    report = jobs.read_report(job_id)
+    reviews = (
+        []
+        if access["is_legacy"]
+        else list_review_history(job_id)
+    )
+    agent_calls = (
+        []
+        if access["is_legacy"]
+        else list_agent_calls(job_id)
+    )
+    try:
+        statistics = build_job_statistics(
+            job_id=job_id,
+            report=report,
+            reviews=reviews,
+            agent_calls=agent_calls,
+        )
+    except StatisticsValidationError as exc:
+        raise CorruptDataError(
+            "analysis_report.json 包含无效的统计字段"
+        ) from exc
+
+    agent_report: dict[str, Any] | None = None
+    agent_availability = "unavailable"
+    agent_path = jobs.agent_report_path(job_id)
+    if agent_path.is_file():
+        try:
+            candidate = jobs.read_agent_report(job_id)
+        except CorruptDataError:
+            agent_availability = "invalid"
+        else:
+            if (
+                candidate.get("job_id") == job_id
+                and candidate.get("status") != "failed"
+            ):
+                agent_report = candidate
+                agent_availability = "ready"
+            else:
+                agent_availability = "invalid"
+
+    filename = (
+        _safe_basename(job.get("original_asset_name"))
+        or _safe_basename(job.get("asset_name"))
+    )
+
+    rough_cut = {
+        "available": False,
+        "filename": None,
+        "download_url": None,
+    }
+    output = report.get("output")
+    output = output if isinstance(output, dict) else {}
+    raw_rough_cut = job.get("rough_cut_file") or output.get("video")
+    if isinstance(raw_rough_cut, str) and raw_rough_cut.strip():
+        job_dir = jobs.job_dir(job_id).resolve()
+        candidate_path = (job_dir / raw_rough_cut).resolve()
+        if (
+            job_dir in candidate_path.parents
+            and candidate_path.is_file()
+        ):
+            relative = candidate_path.relative_to(job_dir).as_posix()
+            rough_cut = {
+                "available": True,
+                "filename": candidate_path.name,
+                "download_url": url_for(
+                    "serve_job_output",
+                    job_id=job_id,
+                    filename=relative,
+                ),
+            }
+
+    try:
+        report_data = build_job_report_data(
+            job=job,
+            video={"filename": filename},
+            report=report,
+            statistics=statistics,
+            reviews=reviews,
+            agent_report=agent_report,
+            agent_availability=agent_availability,
+            rough_cut=rough_cut,
+        )
+    except ReportDataValidationError as exc:
+        raise CorruptDataError(
+            "报告数据包含无法安全公开的字段"
+        ) from exc
+    return jsonify(
+        ok=True,
+        contract_version="1.0",
+        report_data=report_data,
+    )
 
 
 @api_bp.get("/jobs/<job_id>/editor")
