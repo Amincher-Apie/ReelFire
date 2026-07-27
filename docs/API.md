@@ -1437,3 +1437,66 @@ reject 表示不采用。
 
 本节不表示已实现前端自动保存、拖动边界、撤销恢复、后台导出、项目重命名/
 删除、任务取消/重试或单片段导出接口。
+
+## Job 文件与 SQLite 索引一致性
+
+ReelFire 保持兼容的双层持久化职责：
+
+- `job.json` 保存任务完整运行信息，是文件任务生命周期的主要持久化记录；
+- SQLite `jobs` 保存账户权限、项目查询和重要生命周期索引；
+- SQLite 镜像 `status/report_json_path/rough_cut_path/error_code/
+  error_message/started_at/completed_at/updated_at`，但不取代完整
+  `job.json`。
+
+后台分析线程不使用 Flask `g` 或请求连接。`JobIndexRepository` 根据配置的
+数据库文件为每次操作创建短生命周期 SQLite 连接，启用外键、5 秒 busy
+timeout 和 WAL，并在明确事务结束后关闭连接。索引路径统一相对于
+`OUTPUTS_DIR` 的父目录，使用 POSIX `/`，拒绝存储根目录外路径和不存在的
+报告/粗剪文件。
+
+应用启动顺序为：完成数据库迁移和用户导入，按 SQLite 状态恢复或清理上次删除
+遗留的隐藏 tombstone，对账已存在的 SQLite 项目任务，再把重启时遗留的
+queued/running 任务同步标记为 failed，最后创建后台 Analysis 与 Agent 执行
+服务。对账只处理已有 SQLite `jobs` 行：以对应 `job.json` 修复生命周期字段，
+按真实文件补齐或清空报告和粗剪路径。SQLite 行对应的工作目录或 `job.json`
+缺失时保留账户和项目数据，将任务索引标记为 failed，并记录
+`JOB_STORAGE_MISSING`。没有 `project_id` 的显式 legacy 文件任务不会被猜测
+owner、自动创建项目或自动认领；具有合法正整数 `project_id` 的项目型任务若
+缺少 SQLite `jobs` 行，则属于持久化一致性错误，不会静默降级为 legacy。
+
+任务状态、报告路径等双写采用文件原子替换加 SQLite 短事务。项目型任务的
+SQLite UPDATE 必须恰好匹配一行；匹配零行会恢复先写入的 `job.json` 或报告
+文件，并抛出明确的一致性错误。分析报告成功写入后才设置
+`report_json_path`；粗剪先把 staging 文件原子发布到正式路径，再更新报告和
+`job.json`/SQLite，任一步失败都会恢复旧报告、旧任务元数据和旧正式输出。
+正式状态全部提交后，旧输出备份清理失败只记录警告并保留待清理文件，不会把
+成功响应改为普通 500。Segment Schema 1.0 的 pass-only 导出规则不变。
+
+删除不是跨 SQLite/文件系统的真正 ACID 事务，而是：
+
+1. 权限、状态和路径全部校验通过后，把 `outputs/<job_id>` 原子重命名为
+   `OUTPUTS_DIR` 内严格命名的隐藏 tombstone；
+2. SQLite 事务删除 `jobs`，外键级联删除 `reviews` 和 `agent_calls`，并仅在
+   没有其他任务引用时删除 `asset`；`project` 永不随任务删除；
+3. 数据库失败时回滚并把 tombstone 恢复为正常任务目录；
+4. 数据库提交后再物理删除 tombstone；最终清理失败时不重新暴露正常任务
+   路径，返回 `JOB_CLEANUP_PENDING`，下次应用启动进行数据库感知处理。
+
+启动时不能仅凭 tombstone 名称认定数据库删除已提交。严格名称中解析出的
+`job_id` 按以下矩阵处理：
+
+- SQLite `jobs` 行不存在且正常目录不存在：数据库删除已提交，可重试删除
+  tombstone；失败则保留并记录清理警告，不重建数据库行；
+- SQLite 行存在且正常目录不存在：删除可能在提交前中断，使用原子重命名把
+  tombstone 恢复为正常目录，再由对账读取 `job.json`；
+- SQLite 行与正常目录同时存在，或 SQLite 行不存在但正常目录存在：状态不
+  明确，为避免数据丢失保留 tombstone 并记录一致性警告，不盲删、不自动创建
+  SQLite 行。
+
+项目型任务删除时，SQLite 删除事务返回“未找到 jobs 行”同样属于一致性错误：
+tombstone 必须恢复为正常目录，不能物理删除任务文件。没有 `project_id` 的
+legacy 文件任务继续允许没有 SQLite 行。
+
+因此该方案应描述为“SQLite 事务 + 文件原子重命名 + 补偿恢复 + 启动清理”，
+不是文件系统与 SQLite 之间的真正 ACID 事务。任务取消、自动重试和后台导出
+任务仍未实现。

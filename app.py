@@ -33,10 +33,13 @@ from services.job_access_service import JobAccessDeniedError, require_job_access
 from services.job_service import (
     CorruptDataError,
     InvalidJobIdError,
+    JobCleanupPendingError,
     JobNotFoundError,
+    JobPersistenceConsistencyError,
     JobService,
     JobStateConflictError,
 )
+from services.job_index_service import JobIndexRepository
 from services.project_service import (
     ProjectAccessDeniedError,
     ProjectNotFoundError,
@@ -104,7 +107,22 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     outputs_dir.mkdir(parents=True, exist_ok=True)
     models_dir.mkdir(parents=True, exist_ok=True)
 
-    jobs = JobService(outputs_dir)
+    init_database_app(app)
+    with app.app_context():
+        init_db()
+        import_legacy_users(app.config["LEGACY_USERS_FILE"])
+
+    index_repository = JobIndexRepository(
+        Path(app.config["DATABASE"]),
+        outputs_dir.resolve().parent,
+    )
+    jobs = JobService(outputs_dir, index_repository)
+    jobs.cleanup_delete_tombstones()
+    jobs.reconcile_job_indexes()
+    jobs.recover_interrupted_jobs()
+    with app.app_context():
+        recover_interrupted_agent_calls()
+
     files = FileService(app.config["ALLOWED_VIDEO_EXTENSIONS"])
     analysis_factory = app.config.get(
         "ANALYSIS_SERVICE_FACTORY",
@@ -116,17 +134,11 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         Path(app.config["MODEL_PATH"]),
     )
     app.extensions["job_service"] = jobs
+    app.extensions["job_index_repository"] = index_repository
     app.extensions["file_service"] = files
     app.extensions["analysis_service"] = analysis
-    jobs.recover_interrupted_jobs()
     if not app.testing:
         atexit.register(analysis.shutdown, False)
-
-    init_database_app(app)
-    with app.app_context():
-        init_db()
-        import_legacy_users(app.config["LEGACY_USERS_FILE"])
-        recover_interrupted_agent_calls()
 
     agent_execution_factory = app.config.get(
         "AGENT_EXECUTION_SERVICE_FACTORY",
@@ -367,6 +379,25 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @app.errorhandler(JobStateConflictError)
     def handle_conflict(exc: JobStateConflictError):
         return jsonify(ok=False, error=str(exc)), 409
+
+    @app.errorhandler(JobCleanupPendingError)
+    def handle_job_cleanup_pending(exc: JobCleanupPendingError):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="JOB_CLEANUP_PENDING",
+            cleanup_pending=True,
+        ), 500
+
+    @app.errorhandler(JobPersistenceConsistencyError)
+    def handle_job_persistence_consistency(
+        exc: JobPersistenceConsistencyError,
+    ):
+        return jsonify(
+            ok=False,
+            error=str(exc),
+            error_code="JOB_PERSISTENCE_CONSISTENCY_ERROR",
+        ), 500
 
     @app.errorhandler(CorruptDataError)
     def handle_corrupt_data(exc: CorruptDataError):

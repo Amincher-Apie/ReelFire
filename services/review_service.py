@@ -114,6 +114,8 @@ def create_review(
     report_updated = False
     updated_report: dict[str, Any] | None = None
     try:
+        updated_report = apply_report_update()
+        report_updated = True
         cursor = connection.execute(
             """
             INSERT INTO reviews (
@@ -141,8 +143,6 @@ def create_review(
                 timestamp,
             ),
         )
-        updated_report = apply_report_update()
-        report_updated = True
         connection.commit()
     except Exception:
         connection.rollback()

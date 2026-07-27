@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -74,6 +75,8 @@ from services.statistics_service import (
     StatisticsValidationError,
     build_job_statistics,
 )
+
+logger = logging.getLogger(__name__)
 
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -496,11 +499,14 @@ def create_job():
             project_name,
             saved_path.name,
             settings,
+            project_id=int(project["id"]),
+            game_type=game_type,
+            original_asset_name=(
+                original_name
+                if original_name != saved_path.name
+                else None
+            ),
         )
-        if original_name != saved_path.name:
-            job = jobs.update_job(job_id, original_asset_name=original_name)
-        job = jobs.update_job(job_id, game_type=game_type)
-        job = jobs.update_job(job_id, project_id=project["id"])
         relative_base = Path(current_app.config["OUTPUTS_DIR"]).resolve().parent
         stored_path = saved_path.resolve().relative_to(relative_base).as_posix()
         job_json_path = (
@@ -934,21 +940,44 @@ def rough_cut(job_id: str):
 
     report_updated = False
     job_updated = False
+    output_published = False
+    backup_path = output_path.with_name(
+        f".{output_path.name}.{uuid4().hex}.backup"
+    )
+    backup_created = False
     previous_rough_cut = job.get("rough_cut_file")
     try:
+        if output_path.is_file():
+            os.replace(output_path, backup_path)
+            backup_created = True
+        os.replace(result_path, output_path)
+        output_published = True
         jobs.update_report(job_id, update_output)
         report_updated = True
         jobs.update_job(job_id, rough_cut_file=relative)
         job_updated = True
-        os.replace(result_path, output_path)
     except Exception:
         if job_updated:
             jobs.update_job(job_id, rough_cut_file=previous_rough_cut)
         if report_updated:
             jobs.write_report(job_id, report)
+        if output_published:
+            output_path.unlink(missing_ok=True)
+        if backup_created and backup_path.is_file():
+            os.replace(backup_path, output_path)
         raise
     finally:
         staging_path.unlink(missing_ok=True)
+        if job_updated:
+            try:
+                backup_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "粗剪已成功提交，但旧输出备份 %s 清理失败，"
+                    "已保留供后续人工或启动清理",
+                    backup_path.name,
+                    exc_info=True,
+                )
 
     return jsonify(
         ok=True,
