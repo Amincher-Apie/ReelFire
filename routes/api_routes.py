@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 from pathlib import Path
@@ -49,13 +50,16 @@ from services.job_service import (
     JobStateConflictError,
 )
 from services.project_service import (
+    ProjectArchivedError,
     ProjectOwnerForbiddenError,
     ProjectValidationError,
-    archive_owned_project,
     create_project,
+    delete_empty_project,
     get_owned_project,
+    get_project_detail,
+    list_project_jobs,
     list_projects_for_owner,
-    update_owned_project,
+    update_project,
 )
 from services.review_service import (
     ReviewPersistenceUnavailableError,
@@ -76,6 +80,8 @@ from services.statistics_service import (
     StatisticsValidationError,
     build_job_statistics,
 )
+
+logger = logging.getLogger(__name__)
 
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
@@ -409,6 +415,31 @@ def _positive_project_id(raw_value: object) -> int:
     return project_id
 
 
+def _project_query_integer(
+    field: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int | None = None,
+) -> int:
+    raw_value = request.args.get(field)
+    if raw_value is None:
+        return default
+    value = raw_value.strip()
+    if not value.isascii() or not value.isdecimal():
+        raise ProjectValidationError(f"{field} 必须是整数")
+    parsed = int(value)
+    if parsed < minimum or (maximum is not None and parsed > maximum):
+        if maximum is None:
+            raise ProjectValidationError(
+                f"{field} 必须大于或等于 {minimum}"
+            )
+        raise ProjectValidationError(
+            f"{field} 必须在 {minimum} 到 {maximum} 之间"
+        )
+    return parsed
+
+
 def _positive_agent_call_id(raw_value: object) -> int:
     if isinstance(raw_value, bool) or not isinstance(raw_value, str):
         raise AgentCallValidationError("agent_call_id 必须是正整数")
@@ -464,34 +495,57 @@ def get_project_route(project_id: int):
     owner_id = require_authenticated_user_id()
     return jsonify(
         ok=True,
-        project=get_owned_project(project_id, owner_id),
+        project=get_project_detail(project_id, owner_id),
     )
 
 
 @api_bp.patch("/projects/<int:project_id>")
 def update_project_route(project_id: int):
     owner_id = require_authenticated_user_id()
-    payload = _json_object()
-    unexpected = set(payload) - {"name"}
-    if unexpected or "name" not in payload:
-        raise ProjectValidationError("Only the name field can be updated")
-    project = update_owned_project(
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise ProjectValidationError("请求体必须是合法的 JSON 对象")
+    return jsonify(
+        ok=True,
+        project=update_project(project_id, owner_id, payload),
+    )
+
+
+@api_bp.get("/projects/<int:project_id>/jobs")
+def list_project_jobs_route(project_id: int):
+    owner_id = require_authenticated_user_id()
+    status = request.args.get("status")
+    if status == "":
+        raise ProjectValidationError("status 不是合法的任务状态")
+    limit = _project_query_integer(
+        "limit",
+        50,
+        minimum=1,
+        maximum=100,
+    )
+    offset = _project_query_integer("offset", 0, minimum=0)
+    jobs, total = list_project_jobs(
         project_id,
         owner_id,
-        name=payload["name"],
+        status=status,
+        limit=limit,
+        offset=offset,
     )
-    return jsonify(ok=True, project=project)
+    return jsonify(
+        ok=True,
+        project_id=project_id,
+        jobs=jobs,
+        total=total,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @api_bp.delete("/projects/<int:project_id>")
-def archive_project_route(project_id: int):
+def delete_project_route(project_id: int):
     owner_id = require_authenticated_user_id()
-    project = archive_owned_project(project_id, owner_id)
-    return jsonify(
-        ok=True,
-        deleted_project_id=project["id"],
-        project=project,
-    )
+    delete_empty_project(project_id, owner_id)
+    return jsonify(ok=True, deleted_project_id=project_id)
 
 
 @api_bp.post("/jobs")
@@ -503,6 +557,10 @@ def create_job():
     if "project_id" in request.form:
         project_id = _positive_project_id(request.form.get("project_id"))
         project = get_owned_project(project_id, owner_id)
+        if project["status"] == "archived":
+            raise ProjectArchivedError(
+                "项目已归档，请恢复为 active 后再上传新任务"
+            )
     else:
         requested_name = request.form.get(
             "project_name", current_app.config["DEFAULT_PROJECT_NAME"]
@@ -533,11 +591,14 @@ def create_job():
             project_name,
             saved_path.name,
             settings,
+            project_id=int(project["id"]),
+            game_type=game_type,
+            original_asset_name=(
+                original_name
+                if original_name != saved_path.name
+                else None
+            ),
         )
-        if original_name != saved_path.name:
-            job = jobs.update_job(job_id, original_asset_name=original_name)
-        job = jobs.update_job(job_id, game_type=game_type)
-        job = jobs.update_job(job_id, project_id=project["id"])
         relative_base = Path(current_app.config["OUTPUTS_DIR"]).resolve().parent
         stored_path = saved_path.resolve().relative_to(relative_base).as_posix()
         job_json_path = (
@@ -995,21 +1056,44 @@ def rough_cut(job_id: str):
 
     report_updated = False
     job_updated = False
+    output_published = False
+    backup_path = output_path.with_name(
+        f".{output_path.name}.{uuid4().hex}.backup"
+    )
+    backup_created = False
     previous_rough_cut = job.get("rough_cut_file")
     try:
+        if output_path.is_file():
+            os.replace(output_path, backup_path)
+            backup_created = True
+        os.replace(result_path, output_path)
+        output_published = True
         jobs.update_report(job_id, update_output)
         report_updated = True
         jobs.update_job(job_id, rough_cut_file=relative)
         job_updated = True
-        os.replace(result_path, output_path)
     except Exception:
         if job_updated:
             jobs.update_job(job_id, rough_cut_file=previous_rough_cut)
         if report_updated:
             jobs.write_report(job_id, report)
+        if output_published:
+            output_path.unlink(missing_ok=True)
+        if backup_created and backup_path.is_file():
+            os.replace(backup_path, output_path)
         raise
     finally:
         staging_path.unlink(missing_ok=True)
+        if job_updated:
+            try:
+                backup_path.unlink(missing_ok=True)
+            except OSError:
+                logger.warning(
+                    "粗剪已成功提交，但旧输出备份 %s 清理失败，"
+                    "已保留供后续人工或启动清理",
+                    backup_path.name,
+                    exc_info=True,
+                )
 
     return jsonify(
         ok=True,

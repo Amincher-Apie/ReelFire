@@ -212,11 +212,36 @@ Editor 1.0 仍只按照上述 `agent_report.json.segment_comments[]` 和带可�
     {
       "segment_id": "seg_001",
       "comment": "该区间的运动变化与场景变化评分较高，建议优先复核。",
+      "review_status": "needs_review",
+      "action_recommendation": "needs_review",
+      "explanation": {
+        "highlight_type": "高运动强度候选",
+        "trigger_rule": "high_motion",
+        "time_range": {"start": 12.4, "end": 20.8},
+        "detections": [],
+        "keyframe_refs": ["ev:keyframe:kf_001"],
+        "detection_box_refs": []
+      },
+      "boundary_suggestion": {
+        "action": "manual_review",
+        "suggested_start": null,
+        "suggested_end": null,
+        "reason": "缺少可验证的目标出现时间，无法自动建议边界"
+      },
       "evidence_refs": ["ev:segment:seg_001", "ev:score:kf_001"]
     }
   ]
 }
 ```
+
+完整 Agent 面板应从 `GET /api/jobs/{job_id}/report-data` 的
+`report_data.agent` 读取。`GET /editor` 仍只在每个 highlight 中提供
+`agent_comment/agent_comment_status/agent_review_status/
+agent_evidence_refs` 简略字段，不复制 `tags/suggestions/explanation` 等完整
+结构，避免形成第二套合同。前端不得直接读取 `agent_calls.result`、
+`result_path` 或任务目录中的 `agent_report.json`，也不得根据 `comment` 反推
+类别、连续帧数或检测框。反馈字段语义与尚未实现的后端接口建议见
+`docs/AGENT_FEEDBACK_CONTRACT.md`。
 
 ## 5. 错误响应
 

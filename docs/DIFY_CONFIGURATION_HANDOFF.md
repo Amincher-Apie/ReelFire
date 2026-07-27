@@ -16,7 +16,7 @@
 | 实际消息接口 | `https://api.dify.ai/v1/chat-messages` |
 | 响应方式 | `blocking` |
 | 应用版本名 | `reelfire-chatflow-v1.0.0` |
-| Prompt 版本 | `review_agent_v2` |
+| Prompt 版本 | `review_agent_v3` |
 | 调用方用户标识 | `reelfire-demo` |
 
 不得改用 Workflow 应用，因为 Workflow 使用另一套运行接口。也不得把当前
@@ -105,7 +105,7 @@ python -m agent.check_dify
 ```json
 {
   "inputs": {},
-  "query": "渲染后的 review_agent_v2 Prompt",
+  "query": "渲染后的 review_agent_v3 Prompt",
   "response_mode": "blocking",
   "conversation_id": "",
   "user": "reelfire-demo"
@@ -194,6 +194,11 @@ Embedding 模型。
 `provider.type=dify` 完成。联调中发现 DeepSeek 会在 API JSON 前返回
 `<think>...</think>`；适配器已安全移除该推理块，并继续只解析后面的业务 JSON。
 应用 Key 不得写入本文档或任何 Git 文件。
+
+同日已把线上 LLM 节点的系统提示词更新为 `review_agent_v3`，确认用户消息仍为
+`sys.query`、回复仍只引用 `LLM.text`，并重新发布。v3 增加逐片段真实类别、
+出现时间、连续帧、置信度、关键帧/检测框、三态建议和边界建议约束；本地规则
+校验器仍负责最终事实重建。
 
 1. 在 Dify 中把版本命名为 `reelfire-chatflow-v1.0.0` 并发布；
 2. 发布后不要继续修改草稿；

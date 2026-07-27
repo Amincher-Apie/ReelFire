@@ -86,7 +86,7 @@ class ReelFireContractTests(unittest.TestCase):
         backend = to_backend_agent_call(result)
 
         self.assertEqual(backend["job_id"], "job_contract_001")
-        self.assertEqual(backend["prompt_version"], "v2")
+        self.assertEqual(backend["prompt_version"], "v3")
         self.assertEqual(backend["result_path"], "agent_report.json")
         self.assertEqual(backend["status"], "needs_review")
         self.assertEqual(
@@ -201,6 +201,62 @@ class ReelFireContractTests(unittest.TestCase):
                 f"ev:segment:{comment['segment_id']}",
             )
             self.assertEqual(comment["review_status"], "needs_review")
+            self.assertEqual(
+                comment["action_recommendation"],
+                "needs_review",
+            )
+            self.assertEqual(
+                comment["explanation"]["trigger_rule"],
+                "enemy_engagement",
+            )
+            self.assertTrue(comment["explanation"]["detections"])
+            for detection in comment["explanation"]["detections"]:
+                self.assertIn("first_seen", detection)
+                self.assertIn("last_seen", detection)
+                self.assertIn("observed_frame_count", detection)
+                self.assertIn("consecutive_frame_count", detection)
+                self.assertIn("average_confidence", detection)
+                self.assertIn("max_confidence", detection)
+            self.assertIn(
+                comment["boundary_suggestion"]["action"],
+                {
+                    "keep",
+                    "review_start",
+                    "review_end",
+                    "review_both",
+                    "manual_review",
+                },
+            )
+
+    def test_explanation_maps_keyframes_boxes_and_low_confidence(self) -> None:
+        report = cv_analysis_report()
+        for sample in report["samples"]:
+            for detected in sample["objects"]:
+                detected["confidence"] = 0.55
+        for frame in report["keyframes"]:
+            for detected in frame["objects"]:
+                detected["confidence"] = 0.55
+
+        result = self.service.run_analysis_report(
+            report,
+            provider={"type": "rule_only"},
+        )
+        comment = result["segment_comments"][0]
+
+        self.assertEqual(comment["review_status"], "needs_review")
+        self.assertEqual(comment["action_recommendation"], "needs_review")
+        self.assertEqual(
+            comment["explanation"]["keyframe_refs"],
+            ["ev:keyframe:kf_001"],
+        )
+        self.assertTrue(comment["explanation"]["detection_box_refs"])
+        self.assertTrue(
+            all(
+                item["consecutive_frame_count"] is None
+                for item in comment["explanation"]["detections"]
+            )
+        )
+        self.assertNotIn("击杀", json.dumps(comment, ensure_ascii=False))
 
     def test_highlight_export_rejects_invalid_track_boundaries(self) -> None:
         highlights = cv_highlight_report()

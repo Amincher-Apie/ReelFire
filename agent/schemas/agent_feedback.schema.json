@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reelfire.local/schemas/agent_feedback.schema.json",
+  "title": "ReelFire Agent Feedback Event",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "feedback_id",
+    "job_id",
+    "segment_id",
+    "decision",
+    "rejection_reason",
+    "original_boundary",
+    "final_boundary",
+    "original_order",
+    "final_order",
+    "reexported",
+    "recorded_at"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "feedback_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "job_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "segment_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "decision": {
+      "enum": [
+        "adopted",
+        "needs_review",
+        "rejected"
+      ]
+    },
+    "rejection_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "not_highlight",
+        "duplicate",
+        "detection_error",
+        "boundary_error",
+        "other",
+        null
+      ]
+    },
+    "original_boundary": {
+      "$ref": "#/$defs/boundary"
+    },
+    "final_boundary": {
+      "$ref": "#/$defs/boundary"
+    },
+    "original_order": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "final_order": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "reexported": {
+      "type": "boolean"
+    },
+    "recorded_at": {
+      "type": "string",
+      "format": "date-time"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "decision": {
+            "const": "rejected"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "rejection_reason": {
+            "type": "string"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "rejection_reason": {
+            "type": "null"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "start",
+        "end"
+      ],
+      "properties": {
+        "start": {
+          "type": "number",
+          "minimum": 0
+        },
+        "end": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    }
+  }
+}

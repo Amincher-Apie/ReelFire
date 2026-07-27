@@ -303,8 +303,10 @@ output_ratio
 
 兼容流程：
 
-- 表单中没有 `project_id` 时，不要求登录，继续按 `project_name` 创建仅由文件系统管理的任务，不写入 SQLite `assets` 和 `jobs`；
+- 上传接口要求登录；表单中没有 `project_id` 时，按 `project_name` 自动创建属于
+  当前用户的 `active` 项目，并正常写入 SQLite `assets` 和 `jobs`；
 - 表单中存在 `project_id` 时（包括空值），必须登录且该项目必须属于当前用户；空值或非正整数返回 `400 PROJECT_INPUT_INVALID`；
+- 指定项目已归档时返回 `409 PROJECT_ARCHIVED`，不会创建工作目录、asset 或 job；
 - 项目型上传以 SQLite 项目的 `name` 作为 `job.json` 中可信的 `project_name`，请求中的冲突值不能改变项目归属；
 - 项目型上传在同一事务中先写入 `assets`、再写入 `jobs`，数据库失败时回滚并清理本次尚未成功返回的任务目录；
 - `jobs.public_job_id` 与响应中的字符串 `job_id` 完全相同。
@@ -648,6 +650,10 @@ Provider 或 FFmpeg。
       "availability": "unavailable",
       "status": null,
       "summary": null,
+      "tags": [],
+      "suggestions": [],
+      "review": null,
+      "evidence_refs": [],
       "segment_comments": [],
       "knowledge_refs": [],
       "calls": {
@@ -690,18 +696,32 @@ Provider 或 FFmpeg。
   片段；Agent 评论也不会改写 CV 数据。
 - `review.latest` 使用 SQLite 审核历史既有的最新优先顺序，仅公开状态、
   标签、备注、片段/关键帧快照和时间。历史只公开总数与固定三态计数。
-- `agent.segment_comments` 和知识引用只读取任务根目录中的正式
-  `agent_report.json`，绝不从 `agent_calls.result` 构造。正式文件不存在时
-  `availability=unavailable` 并返回空数组；文件损坏、Job 不匹配、结构
-  无效或公开内容包含私密路径/非法 JSON 值时 `availability=invalid`，但
-  整个接口仍返回 `200`，且调用历史摘要继续保留。`calls` 仅为 SQLite
-  调用历史的固定五态摘要。
+- `report_data.agent` 是前端完整 Agent 面板唯一正式来源；前端不得直接读取
+  `agent_calls.result`、`result_path` 或任务目录中的 `agent_report.json`。
+  该块固定返回 `availability/status/summary/tags/suggestions/review/
+  evidence_refs/segment_comments/knowledge_refs/calls`。
+- Agent v3 的 `tags[]`、`suggestions[]`、整体 `review`、整体
+  `evidence_refs[]`，以及逐片段 `action_recommendation/explanation/
+  boundary_suggestion` 都经过逐层白名单、枚举、有限数值和路径检查。
+  `observed_frame_count` 保持“观察到的帧数”语义，
+  `consecutive_frame_count` 缺失时保持 `null`，不得相互改写。
+- 历史 Agent v2 报告缺少 v3 字段时仍为 ready，使用
+  `tags=[]/suggestions=[]/review=null/evidence_refs=[]`，并保留旧
+  `segment_comments` 和 `knowledge_refs`。
+- 正式文件不存在时 `availability=unavailable`；文件损坏、Job 不匹配、
+  顶层/嵌套类型错误、非法枚举、非有限数值、私密键或绝对路径时
+  `availability=invalid`。两种情况均返回固定空业务结构，不影响 CV、
+  review、statistics 或 rough_cut，整个接口仍返回 `200`。
+- `status=degraded` 是可公开的安全降级结果，`availability=ready`；业务字段
+  仍经过与 completed 相同的白名单。`calls` 仅为 SQLite 调用历史的固定五态
+  摘要。
 - `rough_cut.available` 只有在相对元数据指向任务目录内真实存在的文件时
   才为 `true`。`download_url` 使用现有受任务权限保护的 `/outputs/...`
   路由；仅有元数据但文件缺失时返回不可用零值。
 - 审核、Agent 或粗剪为空属于正常业务状态，接口仍返回 `200`。
-- 响应使用公开字段白名单，不返回绝对路径、SQLite 内部 ID、用户 ID、
-  Provider 地址、API Key、Authorization、Token 或完整 Agent 调用结果。
+- 响应使用公开字段白名单，不返回绝对路径、SQLite 内部 ID、用户/项目 ID、
+  provider/request_id、trace、errors、Prompt、模型原始响应、API Key、
+  Authorization、Token 或完整 Agent 调用结果。
 
 错误语义：
 
@@ -823,6 +843,39 @@ Agent 评论状态：
 3. 没有可验证结果时返回 `pending`。
 
 后端不得把前端拼接文案或未经 Agent 验证的规则文案标记为 `ready`。
+
+Agent 新版逐片段对象在保留上述兼容字段的基础上增加：
+
+```text
+action_recommendation
+explanation.highlight_type
+explanation.trigger_rule
+explanation.time_range
+explanation.detections[]
+explanation.keyframe_refs[]
+explanation.detection_box_refs[]
+boundary_suggestion
+```
+
+完整语义见 `docs/AGENT_FEEDBACK_CONTRACT.md`。完整字段只通过
+`GET /api/jobs/<job_id>/report-data` 的严格白名单公开；Editor 接口继续只提供
+`agent_comment/agent_comment_status/agent_review_status/
+agent_evidence_refs` 简略字段，不复制完整 Agent 面板。不得把
+`detection_count` 改写成连续帧数，也不得由前端根据文字反推证据。
+
+### 6.2.1 反馈接口待后端实现的冻结语义
+
+Agent 已冻结 `agent/schemas/agent_feedback.schema.json`，建议后端后续提供：
+
+```text
+POST /api/jobs/{job_id}/segments/{segment_id}/feedback
+GET  /api/jobs/{job_id}/feedback
+GET  /api/statistics/agent-feedback
+```
+
+这些路由当前尚未在本分支实现，不能作为已上线接口调用。后端实现时必须保留
+`decision/rejection_reason/original_boundary/final_boundary/original_order/
+final_order/reexported/recorded_at` 的冻结含义。
 
 ### 6.3 当前错误
 
@@ -957,16 +1010,22 @@ output.rough_cut_url
 
 ---
 
-## 9. 已实现：SQLite 项目与上传任务归属
+## 9. 已实现：SQLite 项目生命周期与上传任务归属
 
 已实现接口：
 
 ```http
 POST /api/projects
 GET  /api/projects
+GET  /api/projects/<project_id>
+PATCH /api/projects/<project_id>
+GET  /api/projects/<project_id>/jobs
+DELETE /api/projects/<project_id>
 ```
 
-两个接口均要求登录。`owner_id` 只来自当前 Session，客户端不得指定。
+所有项目接口均要求登录，并且只能访问当前用户自己的项目。`owner_id` 只来自
+当前 Session，客户端不得指定或修改；不存在的项目返回 404，其他用户的项目
+返回 403。
 
 `POST /api/projects` 接收：
 
@@ -980,6 +1039,61 @@ GET  /api/projects
 
 成功返回 `201`，其中 `status` 固定为 `active`。`GET /api/projects`
 仅返回当前登录用户自己的项目。
+
+`GET /api/projects/<project_id>` 返回项目基础字段，以及直接从 SQLite `jobs`
+统计的 `job_count` 和固定状态键 `jobs_by_status`：
+
+```json
+{
+  "ok": true,
+  "project": {
+    "id": 1,
+    "name": "CS2 教学素材",
+    "description": "课程演示项目",
+    "game_type": "cs2",
+    "status": "active",
+    "created_at": "2026-07-27T12:00:00+00:00",
+    "updated_at": "2026-07-27T12:00:00+00:00",
+    "job_count": 2,
+    "jobs_by_status": {
+      "created": 0,
+      "queued": 0,
+      "running": 0,
+      "completed": 2,
+      "failed": 0
+    }
+  }
+}
+```
+
+`PATCH /api/projects/<project_id>` 只允许提交 `name/description/game_type/status`：
+`name` 去空白后长度为 1–100；`description` 为字符串或 null、最多 1000；
+`game_type` 为字符串或 null、最多 50；`status` 只支持 `active/archived`。
+请求必须是非空 JSON 对象，未知字段返回 400。更新使用 SQLite
+`BEGIN IMMEDIATE` 短事务并刷新 `updated_at`，不会修改项目内任务。
+
+`archived` 只阻止向该项目新增上传，`POST /api/jobs` 返回
+`409 PROJECT_ARCHIVED`；历史任务仍可读取、审核和下载。PATCH 恢复为
+`active` 后可继续上传。自动创建项目仍默认为 `active`。
+
+`GET /api/projects/<project_id>/jobs` 只查询 SQLite，不扫描 outputs。支持：
+
+```text
+status = created | queued | running | completed | failed（可选）
+limit  = 1..100（默认 50）
+offset = >= 0（默认 0）
+```
+
+响应包含 `jobs/total/limit/offset`。任务摘要公开 `job_id/status`、生命周期
+时间、错误码/错误信息，以及由 SQLite 路径是否非空计算的
+`report_available/rough_cut_available`；不公开内部存储路径。
+
+`DELETE /api/projects/<project_id>` 只允许删除没有任何 jobs 的项目。服务在
+`BEGIN IMMEDIATE` 事务内再次统计 jobs，非空返回
+`409 PROJECT_NOT_EMPTY` 并提示先逐个删除任务。空项目删除不扫描或删除任意
+文件目录，不删除用户，也不影响其他项目。该接口不会级联批量删除项目任务，
+因此不能绕过 JobService 的 tombstone 任务删除流程；当前未实现批量删除项目
+任务。
 
 当前数据关系：
 
@@ -1003,6 +1117,9 @@ GET  /api/projects
 | 401 | `AUTH_REQUIRED` | 项目接口或项目型上传未登录 |
 | 403 | `PROJECT_ACCESS_DENIED` | 项目属于其他用户 |
 | 404 | `PROJECT_NOT_FOUND` | 项目不存在 |
+| 409 | `PROJECT_ARCHIVED` | 归档项目禁止新增任务 |
+| 409 | `PROJECT_NOT_EMPTY` | 项目仍包含任务，必须先逐个删除任务 |
+| 409 | `PROJECT_STATE_CONFLICT` | 项目状态并发变化，需要刷新重试 |
 
 旧文件型任务可能没有 SQLite `jobs` 索引，并继续保留兼容访问。
 
@@ -1435,5 +1552,68 @@ reject 表示不采用。
 最新审核非 approved 仍返回 409；approved 但无 pass 时不调用 FFmpeg，
 返回 `409 没有已通过的片段可以导出`。
 
-本节不表示已实现前端自动保存、拖动边界、撤销恢复、后台导出、项目重命名/
-删除、任务取消/重试或单片段导出接口。
+本节不表示已实现前端自动保存、拖动边界、撤销恢复、后台导出、任务取消/重试
+或单片段导出接口。
+
+## Job 文件与 SQLite 索引一致性
+
+ReelFire 保持兼容的双层持久化职责：
+
+- `job.json` 保存任务完整运行信息，是文件任务生命周期的主要持久化记录；
+- SQLite `jobs` 保存账户权限、项目查询和重要生命周期索引；
+- SQLite 镜像 `status/report_json_path/rough_cut_path/error_code/
+  error_message/started_at/completed_at/updated_at`，但不取代完整
+  `job.json`。
+
+后台分析线程不使用 Flask `g` 或请求连接。`JobIndexRepository` 根据配置的
+数据库文件为每次操作创建短生命周期 SQLite 连接，启用外键、5 秒 busy
+timeout 和 WAL，并在明确事务结束后关闭连接。索引路径统一相对于
+`OUTPUTS_DIR` 的父目录，使用 POSIX `/`，拒绝存储根目录外路径和不存在的
+报告/粗剪文件。
+
+应用启动顺序为：完成数据库迁移和用户导入，按 SQLite 状态恢复或清理上次删除
+遗留的隐藏 tombstone，对账已存在的 SQLite 项目任务，再把重启时遗留的
+queued/running 任务同步标记为 failed，最后创建后台 Analysis 与 Agent 执行
+服务。对账只处理已有 SQLite `jobs` 行：以对应 `job.json` 修复生命周期字段，
+按真实文件补齐或清空报告和粗剪路径。SQLite 行对应的工作目录或 `job.json`
+缺失时保留账户和项目数据，将任务索引标记为 failed，并记录
+`JOB_STORAGE_MISSING`。没有 `project_id` 的显式 legacy 文件任务不会被猜测
+owner、自动创建项目或自动认领；具有合法正整数 `project_id` 的项目型任务若
+缺少 SQLite `jobs` 行，则属于持久化一致性错误，不会静默降级为 legacy。
+
+任务状态、报告路径等双写采用文件原子替换加 SQLite 短事务。项目型任务的
+SQLite UPDATE 必须恰好匹配一行；匹配零行会恢复先写入的 `job.json` 或报告
+文件，并抛出明确的一致性错误。分析报告成功写入后才设置
+`report_json_path`；粗剪先把 staging 文件原子发布到正式路径，再更新报告和
+`job.json`/SQLite，任一步失败都会恢复旧报告、旧任务元数据和旧正式输出。
+正式状态全部提交后，旧输出备份清理失败只记录警告并保留待清理文件，不会把
+成功响应改为普通 500。Segment Schema 1.0 的 pass-only 导出规则不变。
+
+删除不是跨 SQLite/文件系统的真正 ACID 事务，而是：
+
+1. 权限、状态和路径全部校验通过后，把 `outputs/<job_id>` 原子重命名为
+   `OUTPUTS_DIR` 内严格命名的隐藏 tombstone；
+2. SQLite 事务删除 `jobs`，外键级联删除 `reviews` 和 `agent_calls`，并仅在
+   没有其他任务引用时删除 `asset`；`project` 永不随任务删除；
+3. 数据库失败时回滚并把 tombstone 恢复为正常任务目录；
+4. 数据库提交后再物理删除 tombstone；最终清理失败时不重新暴露正常任务
+   路径，返回 `JOB_CLEANUP_PENDING`，下次应用启动进行数据库感知处理。
+
+启动时不能仅凭 tombstone 名称认定数据库删除已提交。严格名称中解析出的
+`job_id` 按以下矩阵处理：
+
+- SQLite `jobs` 行不存在且正常目录不存在：数据库删除已提交，可重试删除
+  tombstone；失败则保留并记录清理警告，不重建数据库行；
+- SQLite 行存在且正常目录不存在：删除可能在提交前中断，使用原子重命名把
+  tombstone 恢复为正常目录，再由对账读取 `job.json`；
+- SQLite 行与正常目录同时存在，或 SQLite 行不存在但正常目录存在：状态不
+  明确，为避免数据丢失保留 tombstone 并记录一致性警告，不盲删、不自动创建
+  SQLite 行。
+
+项目型任务删除时，SQLite 删除事务返回“未找到 jobs 行”同样属于一致性错误：
+tombstone 必须恢复为正常目录，不能物理删除任务文件。没有 `project_id` 的
+legacy 文件任务继续允许没有 SQLite 行。
+
+因此该方案应描述为“SQLite 事务 + 文件原子重命名 + 补偿恢复 + 启动清理”，
+不是文件系统与 SQLite 之间的真正 ACID 事务。任务取消、自动重试和后台导出
+任务仍未实现。
