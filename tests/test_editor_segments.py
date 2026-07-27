@@ -34,7 +34,7 @@ def load_segments() -> list[dict]:
 
 
 class EditorSegmentValidationTestCase(unittest.TestCase):
-    def test_valid_cv_segments_are_sorted_copied_and_preserve_extensions(self) -> None:
+    def test_valid_cv_segments_are_sorted_copied_and_drop_extensions(self) -> None:
         source = load_segments()
         original = deepcopy(source)
 
@@ -46,16 +46,12 @@ class EditorSegmentValidationTestCase(unittest.TestCase):
             "seg_003",
         ])
         self.assertEqual([item["order"] for item in result], [1, 2, 3])
-        self.assertEqual(result[0]["detected_classes"], ["enemy"])
-        self.assertEqual(result[0]["detections_summary"][0]["track_id"], 7)
-        self.assertEqual(result[1]["peak_enemy_count"], 2)
-        self.assertEqual(result[2]["reason"], "enemy_engagement")
+        self.assertNotIn("detected_classes", result[0])
+        self.assertNotIn("detections_summary", result[0])
+        self.assertNotIn("peak_enemy_count", result[1])
+        self.assertNotIn("reason", result[2])
         self.assertEqual(source, original)
         self.assertIsNot(result[0], source[1])
-        self.assertIsNot(
-            result[0]["detections_summary"],
-            source[1]["detections_summary"],
-        )
 
     def test_empty_segments_and_boundary_scores_are_valid(self) -> None:
         self.assertEqual(validate_editor_segments([], 30.0), [])
@@ -108,16 +104,6 @@ class EditorSegmentValidationTestCase(unittest.TestCase):
             ("bool score", [{**valid, "score": True}]),
             ("negative score", [{**valid, "score": -0.1}]),
             ("score above one", [{**valid, "score": 1.1}]),
-            (
-                "missing source keyframes",
-                [
-                    {
-                        key: value
-                        for key, value in valid.items()
-                        if key != "source_keyframes"
-                    }
-                ],
-            ),
             ("null source keyframes", [{**valid, "source_keyframes": None}]),
             ("object source keyframes", [{**valid, "source_keyframes": {}}]),
             ("numeric source keyframe", [{**valid, "source_keyframes": [1]}]),
@@ -146,8 +132,13 @@ class EditorSegmentValidationTestCase(unittest.TestCase):
                     "order": 1,
                     "start": 1.0,
                     "end": 2.0,
+                    "duration": 1.0,
                     "score": None,
                     "source_keyframes": [],
+                    "source": "cv",
+                    "source_segment_ids": [],
+                    "review": "pass",
+                    "review_note": "",
                 }
             ],
         )

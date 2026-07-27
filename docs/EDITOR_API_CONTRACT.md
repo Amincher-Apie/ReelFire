@@ -205,3 +205,107 @@ Editor 1.0 仍只按照上述 `agent_report.json.segment_comments[]` 和带可�
 - 用户重排片段后，前端必须将 `order` 规范化为连续的 `1..N` 再保存审核。
 - `agent_comment_status != ready` 时必须明确展示状态，不得伪造评论。
 - 未知新增字段必须忽略，避免前端因兼容性扩展而失败。
+
+## Editor Segment Schema 1.0（冻结）
+
+`GET /api/jobs/{job_id}/editor` 保持 `contract_version="1.0"`，并额外返回
+`segment_schema_version="1.0"`。`highlights[]`、PATCH 审核请求和审核快照
+使用同一个 Segment Schema 1.0。
+
+| 字段 | 类型 | 规则与默认值 |
+| --- | --- | --- |
+| `id` | `string` | 非空、去除首尾空白、数组内唯一、最多 100 字符；当前任务缺失时拒绝 |
+| `order` | 正整数 | 输入值唯一；排序后规范为连续 `1..N` |
+| `start` | `number` | 有限数字，`0 <= start < end`，布尔值无效 |
+| `end` | `number` | 有限数字，`start < end <= video_duration` |
+| `duration` | `number` | 忽略客户端值，由后端以 `round(end-start, 3)` 重算 |
+| `score` | `number \| null` | 数字范围 `0..1`；`cv` 必须为数字，其他来源允许 `null` |
+| `source_keyframes` | `string[]` | 默认 `[]`；元素去空白后非空且不重复 |
+| `source` | `string` | `cv/manual/merged/split`；默认 `cv` |
+| `source_segment_ids` | `string[]` | 默认 `[]`；元素非空、唯一，不能包含当前 `id` |
+| `review` | `string` | `""/pass/needs_review/reject`；历史存储缺失默认 `pass`，全新 Segment 缺失默认 `""`，显式空串保持 |
+| `review_note` | `string` | 默认 `""`；兼容输入 `null` 并转为空串，去除首尾空白，最多 500 字符 |
+
+`cv/manual` 的 `source_segment_ids` 必须为空；`merged` 至少包含两个不同
+来源 ID；`split` 必须且只能包含一个来源 ID。后端不按数组位置重写已有 ID。
+服务端原 Segment 已有的 `peak_enemy_count`、`detected_classes`、
+`thumbnail`、`chunk_id` 及未来新增的所有非冻结扩展证据字段在编辑保存时继续
+保留。客户端只能控制冻结字段，未知字段一律忽略，不能新增或覆盖服务端证据。
+持久化保留服务端扩展字段不改变 Editor 或 report-data 的公开白名单。
+
+人工新增示例：
+
+```json
+{
+  "id": "seg_manual_8f3a",
+  "order": 2,
+  "start": 30.0,
+  "end": 42.0,
+  "duration": 12.0,
+  "score": null,
+  "source_keyframes": [],
+  "source": "manual",
+  "source_segment_ids": [],
+  "review": "pass",
+  "review_note": "自动检测遗漏，人工补充"
+}
+```
+
+合并示例：
+
+```json
+{
+  "id": "seg_merged_01",
+  "order": 3,
+  "start": 50.0,
+  "end": 72.0,
+  "duration": 22.0,
+  "score": 0.91,
+  "source_keyframes": ["kf_010", "kf_012"],
+  "source": "merged",
+  "source_segment_ids": ["seg_004", "seg_005"],
+  "review": "pass",
+  "review_note": "相邻交火合并"
+}
+```
+
+拆分示例：
+
+```json
+{
+  "id": "seg_split_01a",
+  "order": 4,
+  "start": 80.0,
+  "end": 89.0,
+  "duration": 9.0,
+  "score": 0.72,
+  "source_keyframes": ["kf_020"],
+  "source": "split",
+  "source_segment_ids": ["seg_006"],
+  "review": "needs_review",
+  "review_note": ""
+}
+```
+
+`Segment.review` 是用户片段级决定：空串表示未审核，`pass` 表示采用，
+`needs_review` 表示待复核，`reject` 表示不采用。`agent_review_status` 是
+Agent 建议；顶层 `status=approved|pending|rejected` 是整次审核快照状态。
+三者相互独立，不得映射或混用。PATCH
+保存完整规范化 Segment 到 `analysis_report.json`；同时提交顶层 `status`
+时，审核快照保存相同数组。刷新后 Editor 从持久化报告恢复。
+
+历史报告完全缺少新字段时读取为 `source="cv"`、`source_segment_ids=[]`、
+`review="pass"`、`review_note=""`。当前 PATCH 按稳定 `id` 查找服务端现有
+Segment；请求省略 `review/review_note/source/source_segment_ids` 时继承
+服务端值，显式空串则清空。全新 Segment 缺少 review 时默认 `""`，不会自动
+进入导出。服务端原 Segment 的所有非冻结扩展字段均按 `id` 深拷贝保留；客户端
+未知字段一律忽略，不能新增或覆盖服务端证据，也不写入报告或审核快照。
+
+PATCH 只从排序后第一个 pass 片段更新 `recommended_clip`；全为
+空串/needs_review/reject 仍允许保存并保留旧推荐。非 legacy 粗剪仍要求最新
+顶层状态为 approved，且只导出 pass 片段。其他状态不计入 `segment_count`
+或 `segment_ids`。没有 pass 时不调用 FFmpeg，返回
+`409 没有已通过的片段可以导出`。
+
+本版本不声称实现前端自动保存、拖动边界 UI、撤销恢复、后台导出任务或
+单片段导出接口。

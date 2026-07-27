@@ -1291,3 +1291,96 @@ queued → initializing → sampling → detecting → finalizing → completed
 视频帧按分块保存在内存中；已完成分块释放帧数组，只保留检测元数据和落盘
 关键帧。因此帧图像内存上限由单个分块和 YOLO 微批大小决定，不再随整段视频
 时长线性增长。
+
+## Editor Segment Schema 1.0（冻结）
+
+Editor、人工审核快照和项目粗剪使用同一 Schema。Editor GET 继续返回
+`contract_version="1.0"`，并新增 `segment_schema_version="1.0"`。
+
+| 字段 | 类型 | 校验、默认值与规范化 |
+| --- | --- | --- |
+| `id` | `string` | 去空白后非空、唯一、最多 100 字符；非 legacy 不可缺失 |
+| `order` | 正整数 | 输入唯一；按值排序后重编号为连续 `1..N` |
+| `start/end` | `number` | 有限且 `0 <= start < end <= video_duration`，布尔值无效 |
+| `duration` | `number` | 后端忽略客户端值并设置 `round(end-start, 3)` |
+| `score` | `number \| null` | 数字范围 `0..1`；cv 必须有数字，其他来源可为 null |
+| `source_keyframes` | `string[]` | 默认 `[]`；元素去空白、非空、唯一 |
+| `source` | `string` | `cv/manual/merged/split`；默认 `cv` |
+| `source_segment_ids` | `string[]` | 默认 `[]`；非空、唯一，不含自身 ID |
+| `review` | `string` | `""/pass/needs_review/reject`；历史存储缺失默认 `pass`，全新 Segment 缺失默认 `""`，显式空串保持 |
+| `review_note` | `string` | 默认 `""`；兼容 null 并转空串，去首尾空白，最多 500 字符 |
+
+来源规则：cv/manual 不得有来源 ID；merged 至少两个；split 恰好一个。
+服务端原 Segment 已有的所有非冻结扩展证据字段在编辑保存时继续保留，包括未来
+新增字段；客户端只能控制冻结字段，未知字段一律忽略，不能新增或覆盖服务端证据。
+这些服务端扩展字段的持久化保留不扩大 Editor 或 report-data 的公开白名单。
+
+人工新增、合并、拆分示例：
+
+```json
+[
+  {
+    "id": "seg_manual_8f3a",
+    "order": 2,
+    "start": 30.0,
+    "end": 42.0,
+    "duration": 12.0,
+    "score": null,
+    "source_keyframes": [],
+    "source": "manual",
+    "source_segment_ids": [],
+    "review": "pass",
+    "review_note": "自动检测遗漏，人工补充"
+  },
+  {
+    "id": "seg_merged_01",
+    "order": 3,
+    "start": 50.0,
+    "end": 72.0,
+    "duration": 22.0,
+    "score": 0.91,
+    "source_keyframes": ["kf_010", "kf_012"],
+    "source": "merged",
+    "source_segment_ids": ["seg_004", "seg_005"],
+    "review": "pass",
+    "review_note": "相邻交火合并"
+  },
+  {
+    "id": "seg_split_01a",
+    "order": 4,
+    "start": 80.0,
+    "end": 89.0,
+    "duration": 9.0,
+    "score": 0.72,
+    "source_keyframes": ["kf_020"],
+    "source": "split",
+    "source_segment_ids": ["seg_006"],
+    "review": "needs_review",
+    "review_note": ""
+  }
+]
+```
+
+PATCH `/api/jobs/{job_id}/review` 顶层仍只接受 `segments/status/labels/note/
+keyframes/recommended_clip`。片段 `review/review_note` 不得放到顶层。规范化
+数组写回报告；带顶层 status 时也写入审核快照。
+
+片段 `review` 是用户人工决定；`agent_review_status` 是 Agent 建议；顶层
+`status=approved|pending|rejected` 是整次审核快照状态，三者相互独立且不得
+映射。片段空 review 表示未审核，pass 表示采用，needs_review 表示待复核，
+reject 表示不采用。
+
+历史存储缺失字段默认 `source="cv"`、`source_segment_ids=[]`、
+`review="pass"`、`review_note=""`。PATCH 按 `id` 从服务端原 Segment 继承
+请求省略的 review/review_note/source/source_segment_ids；显式空串不继承。
+全新 Segment 缺少 review 时默认 `""`，不会自动进入导出。服务端原 Segment
+的所有非冻结扩展字段均按 `id` 深拷贝保留；客户端未知字段一律忽略，不能新增或
+覆盖服务端证据，也不进入报告或审核快照。
+
+全空串/needs_review/reject 合法保存，且不覆盖已有 `recommended_clip`。
+非 legacy 粗剪只向 FFmpeg 传 pass 片段，输出元数据也只包含 pass。
+最新审核非 approved 仍返回 409；approved 但无 pass 时不调用 FFmpeg，
+返回 `409 没有已通过的片段可以导出`。
+
+本节不表示已实现前端自动保存、拖动边界、撤销恢复、后台导出、项目重命名/
+删除、任务取消/重试或单片段导出接口。
