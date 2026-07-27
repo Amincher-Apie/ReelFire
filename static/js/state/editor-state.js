@@ -22,6 +22,9 @@ export const editorState = {
   saveVersion: null,
   segmentThumbnails: {},   // {segmentId: thumbnailUrl}
 
+  // Agent report (loaded independently via /report-data)
+  agentReport: null,       // { availability, status, summary, tags, suggestions, review, evidence_refs, knowledge_refs }
+
   // Export
   exports: [],
   activeExportId: null,

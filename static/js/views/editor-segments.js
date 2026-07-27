@@ -175,7 +175,8 @@ export function renderSegmentDetail(segmentId) {
   const seg = editorState.segments.find((s) => s.id === segmentId);
   if (!seg) return;
 
-  const comment = findAgentComment(segmentId);
+  // 逐片段评论 — 按 segment_id 匹配
+  const segmentComment = findAgentComment(segmentId);
 
   byId("detail-placeholder").hidden = true;
   byId("detail-content").hidden = false;
@@ -188,8 +189,8 @@ export function renderSegmentDetail(segmentId) {
   byId("detail-type").textContent = src === "manual" ? "手动添加" : src === "merged" ? "合并片段" : src === "split" ? "拆分片段" : "自动检测";
   byId("detail-confidence").textContent = formatNumber(Number(seg.score) * 100, 0) + "%";
 
-  const agentStatus = comment ? comment.status : "pending";
-  renderAgentComment(agentStatus, comment);
+  // Agent 状态来自整体 agentReport，不再从单条 segmentComment.status 读取
+  renderAgentComment(segmentComment);
 }
 
 export function findAgentComment(segmentId) {
@@ -198,98 +199,116 @@ export function findAgentComment(segmentId) {
   );
 }
 
-export function renderAgentComment(status, comment) {
+export function renderAgentComment(segmentComment) {
+  const agent = editorState.agentReport;
+  const avail = agent ? agent.availability : null;
+  const agentStatus = !agent ? "pending" : avail === "unavailable" ? "unavailable" : "completed";
+
+  // ── 状态徽标 ──
   const badge = byId("agent-status-badge");
-  badge.className = "agent-status-badge " + status;
+  badge.className = "agent-status-badge " + agentStatus;
   const badgeText =
-    status === "completed"
+    agentStatus === "completed"
       ? "Agent 已完成"
-      : status === "pending"
+      : agentStatus === "pending"
       ? "待 Agent 分析"
       : "Agent 不可用";
   badge.textContent = badgeText;
 
+  // ── 切换内容区 ──
   byId("agent-completed-content").hidden = true;
   byId("agent-pending-content").hidden = true;
   byId("agent-unavailable-content").hidden = true;
 
-  if (status === "completed" && comment) {
-    renderAgentCompleted(comment);
+  if (agentStatus === "completed" && agent) {
+    // 整体 Agent 面板 — 读取 agentReport（summary/tags/suggestions/review/evidences/knowledges）
+    renderAgentOverall(agent);
+    // 逐片段评论 — 读取 segmentComment（comment/review_status/action_recommendation/explanation/boundary_suggestion/evidence_refs）
+    renderSegmentCommentDetail(segmentComment);
     byId("agent-completed-content").hidden = false;
-  } else if (status === "pending") {
+  } else if (agentStatus === "pending") {
     byId("agent-pending-content").hidden = false;
   } else {
     const msg =
-      comment && comment.error
-        ? comment.error
+      agent && agent.error
+        ? agent.error
         : "Agent 服务当前不可用，以下为基于 CV 检测的规则输出。";
     byId("agent-unavailable-message").textContent = msg;
     byId("agent-unavailable-content").hidden = false;
   }
 }
 
-export function renderAgentCompleted(comment) {
-  byId("agent-summary").textContent = comment.summary || "Agent 未生成摘要。";
+// ── 整体 Agent 报告（agent-level） ──
 
+function renderAgentOverall(agent) {
+  // 摘要：来自 agent.summary
+  byId("agent-summary").textContent = agent.summary || "Agent 未生成摘要。";
+
+  // 标签：来自 agent.tags
   const tagsContainer = byId("agent-tags");
   clearChildren(tagsContainer);
-  (comment.tags || []).forEach((tag) => {
-    const t = createElement("span", "agent-tag", tag.name);
-    t.title = tag.description || "";
+  (agent.tags || []).forEach((tag) => {
+    const tagName = typeof tag === "string" ? tag : (tag.name || tag.label || "");
+    const tagDesc = typeof tag === "object" ? (tag.description || "") : "";
+    const t = createElement("span", "agent-tag", tagName);
+    if (tagDesc) t.title = tagDesc;
     tagsContainer.append(t);
   });
-  if (!comment.tags || !comment.tags.length) {
+  if (!agent.tags || !agent.tags.length) {
     tagsContainer.append(createElement("span", "agent-tag", "无标签"));
   }
 
+  // 建议：来自 agent.suggestions
   const suggestionsContainer = byId("agent-suggestions");
   clearChildren(suggestionsContainer);
-  (comment.suggestions || []).forEach((sug) => {
+  (agent.suggestions || []).forEach((sug) => {
     const item = createElement("div", "agent-suggestion-item");
     const titleSpan = createElement("strong");
-    titleSpan.textContent = sug.title;
+    titleSpan.textContent = sug.title || sug.action || "";
     const prioritySpan = createElement(
       "span",
       "agent-suggestion-priority " + (sug.priority || "low"),
       sug.priority === "high" ? "高" : sug.priority === "medium" ? "中" : "低"
     );
     titleSpan.append(prioritySpan);
-    const actionP = createElement("p", "", sug.action || "");
+    const actionP = createElement("p", "", sug.action || sug.description || "");
     item.append(titleSpan, actionP);
     suggestionsContainer.append(item);
   });
-  if (!comment.suggestions || !comment.suggestions.length) {
+  if (!agent.suggestions || !agent.suggestions.length) {
     suggestionsContainer.append(
       createElement("p", "agent-field-value", "无建议。")
     );
   }
 
+  // 审核意见：来自 agent.review
   const reviewContainer = byId("agent-review");
   clearChildren(reviewContainer);
-  if (comment.review) {
-    const rec = comment.review.recommendation || "needs_review";
+  if (agent.review) {
+    const rec = agent.review.recommendation || "needs_review";
     const recLabel =
       rec === "pass" ? "通过" : rec === "reject" ? "不通过" : "待复核";
     const recSpan = createElement("span", "agent-review-rec " + rec, recLabel);
     const confSpan = createElement(
       "span",
       "agent-review-confidence",
-      "置信度 " + formatNumber(Number(comment.review.confidence) * 100, 0) + "%"
+      "置信度 " + formatNumber(Number(agent.review.confidence) * 100, 0) + "%"
     );
     reviewContainer.append(recSpan, confSpan);
 
-    if (comment.review.reasons && comment.review.reasons.length) {
+    if (agent.review.reasons && agent.review.reasons.length) {
       const reasonsList = createElement("ul", "agent-review-reasons");
-      comment.review.reasons.forEach((r) => {
+      agent.review.reasons.forEach((r) => {
         reasonsList.append(createElement("li", "", r));
       });
       reviewContainer.append(reasonsList);
     }
   }
 
+  // 证据引用：来自 agent.evidence_refs
   const evidenceContainer = byId("agent-evidence");
   clearChildren(evidenceContainer);
-  (comment.evidence_refs || []).forEach((ref) => {
+  (agent.evidence_refs || []).forEach((ref) => {
     const item = createElement("div", "agent-evidence-item");
     item.append(
       createElement("span", "agent-evidence-type", ref.type || "ref"),
@@ -297,15 +316,16 @@ export function renderAgentCompleted(comment) {
     );
     evidenceContainer.append(item);
   });
-  if (!comment.evidence_refs || !comment.evidence_refs.length) {
+  if (!agent.evidence_refs || !agent.evidence_refs.length) {
     evidenceContainer.append(
       createElement("p", "agent-field-value", "无证据引用。")
     );
   }
 
+  // 知识库引用：来自 agent.knowledge_refs
   const knowledgeContainer = byId("agent-knowledge");
   clearChildren(knowledgeContainer);
-  (comment.knowledge_refs || []).forEach((ref) => {
+  (agent.knowledge_refs || []).forEach((ref) => {
     const item = createElement("div", "agent-evidence-item");
     item.append(
       createElement("span", "agent-evidence-type", "知识库"),
@@ -313,11 +333,92 @@ export function renderAgentCompleted(comment) {
     );
     knowledgeContainer.append(item);
   });
-  if (!comment.knowledge_refs || !comment.knowledge_refs.length) {
+  if (!agent.knowledge_refs || !agent.knowledge_refs.length) {
     knowledgeContainer.append(
       createElement("p", "agent-field-value", "无知识库引用。")
     );
   }
+}
+
+// ── 逐片段 Agent 评论（per-segment） ──
+
+function renderSegmentCommentDetail(segmentComment) {
+  const container = byId("agent-segment-comment");
+  if (!container) return;
+
+  if (!segmentComment) {
+    container.innerHTML = '<p class="agent-field-value">该片段暂无 Agent 评论。</p>';
+    return;
+  }
+
+  const parts = [];
+
+  // review_status
+  if (segmentComment.review_status) {
+    const statusMap = { pass: "通过", reject: "不通过", needs_review: "待复核" };
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">审核决策</span>' +
+      '<span class="agent-review-rec ' + segmentComment.review_status + '">' +
+      (statusMap[segmentComment.review_status] || segmentComment.review_status) +
+      '</span></div>'
+    );
+  }
+
+  // action_recommendation
+  if (segmentComment.action_recommendation) {
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">操作建议</span>' +
+      '<p class="agent-field-value">' + escapeHtml(segmentComment.action_recommendation) + '</p></div>'
+    );
+  }
+
+  // comment
+  if (segmentComment.comment) {
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">评论</span>' +
+      '<p class="agent-field-value">' + escapeHtml(segmentComment.comment) + '</p></div>'
+    );
+  }
+
+  // explanation
+  if (segmentComment.explanation) {
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">解释</span>' +
+      '<p class="agent-field-value">' + escapeHtml(segmentComment.explanation) + '</p></div>'
+    );
+  }
+
+  // boundary_suggestion
+  if (segmentComment.boundary_suggestion && typeof segmentComment.boundary_suggestion === "object") {
+    const bs = segmentComment.boundary_suggestion;
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">边界建议</span>' +
+      '<p class="agent-field-value">起始: ' + (bs.start != null ? bs.start + 's' : '—') +
+      ' · 结束: ' + (bs.end != null ? bs.end + 's' : '—') + '</p></div>'
+    );
+  }
+
+  // per-segment evidence_refs
+  if (segmentComment.evidence_refs && segmentComment.evidence_refs.length) {
+    const refsHtml = segmentComment.evidence_refs.map((ref) =>
+      '<span class="agent-evidence-item">' +
+      '<span class="agent-evidence-type">' + (ref.type || "ref") + '</span> ' +
+      '<span class="agent-evidence-source">' + (ref.source_id || ref.ref_id || "") + '</span>' +
+      '</span>'
+    ).join("");
+    parts.push(
+      '<div class="agent-field"><span class="agent-field-label">相关证据</span>' +
+      '<div class="agent-evidence-list">' + refsHtml + '</div></div>'
+    );
+  }
+
+  container.innerHTML = parts.length ? parts.join("") : '<p class="agent-field-value">该片段暂无 Agent 评论。</p>';
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = String(text);
+  return div.innerHTML;
 }
 
 // ── Agent report loading (independent from /editor) ───────────────────
@@ -327,15 +428,18 @@ export function loadAgentReport(jobId) {
 
   api.get("/api/jobs/" + encodeURIComponent(jobId) + "/report-data").then(
     (payload) => {
-      const reportData = payload.report_data || payload.report || payload;
-      // 兼容多种后端返回格式：report_data.segment_comments / agent_comments / comments
-      const comments = reportData.segment_comments
-        || reportData.agent_comments
-        || reportData.comments
-        || [];
-      editorState.agentComments = Array.isArray(comments)
-        ? comments.map((c) => Object.assign({}, c))
+      // 新后端契约：payload.report_data.agent.{segment_comments, summary, tags, ...}
+      const reportData = payload.report_data || {};
+      const agent = reportData.agent || {};
+
+      // 整体 Agent 数据（availability/status/summary/tags/suggestions/review/evidences/knowledges）
+      editorState.agentReport = agent;
+
+      // 逐片段评论（segment_id/comment/review_status/action_recommendation/explanation/boundary_suggestion/evidence_refs）
+      editorState.agentComments = Array.isArray(agent.segment_comments)
+        ? agent.segment_comments.map((c) => Object.assign({}, c))
         : [];
+
       // 刷新当前选中片段的 Agent 面板
       if (editorState.selectedSegmentId) {
         renderSegmentDetail(editorState.selectedSegmentId);
@@ -343,6 +447,7 @@ export function loadAgentReport(jobId) {
     },
     (error) => {
       // Agent 报告不可用不阻塞编辑 — 面板显示 pending 状态
+      editorState.agentReport = null;
       editorState.agentComments = [];
       if (editorState.selectedSegmentId) {
         renderSegmentDetail(editorState.selectedSegmentId);
@@ -478,6 +583,7 @@ export function applyEditorData(payload) {
   editorState.editorData = data;
   editorState.video = data.video || null;
   editorState.segments = Array.isArray(data.segments) ? data.segments : [];
+  editorState.agentReport = null;
   editorState.agentComments = [];
   editorState.keyframes = [];
   editorState.output = data.output || null;
