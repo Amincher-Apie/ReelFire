@@ -86,11 +86,37 @@
           "confidence_min": 0.4019
         }
       ],
-      "reason": "enemy_engagement",
+      "reason": "enemy_engagement_double_kill",
+      "evidence": {
+        "triggered_rule": "enemy_engagement",
+        "kill_count": 2,
+        "kill_type": "double_kill",
+        "engagement_duration": 3.467,
+        "max_confidence": 0.6858,
+        "avg_confidence": 0.5463,
+        "enemy_classes": [
+          "enemy"
+        ],
+        "weapon_detected": true,
+        "tracks": [
+          {
+            "track_id": 2,
+            "class": "enemy",
+            "avg_confidence": 0.4068,
+            "duration_tracked": 0.033
+          },
+          {
+            "track_id": 11,
+            "class": "enemy",
+            "avg_confidence": 0.6858,
+            "duration_tracked": 0.434
+          }
+        ]
+      },
       "id": "seg_001",
       "order": 1,
       "source_keyframes": [],
-      "score": 0.65
+      "score": 0.7686
     },
     {
       "start": 50.767,
@@ -208,7 +234,69 @@
           "confidence_min": 0.368
         }
       ],
-      "reason": "enemy_engagement",
+      "reason": "enemy_engagement_multi_kill",
+      "evidence": {
+        "triggered_rule": "enemy_engagement",
+        "kill_count": 8,
+        "kill_type": "multi_kill",
+        "engagement_duration": 4.633,
+        "max_confidence": 0.7752,
+        "avg_confidence": 0.564,
+        "enemy_classes": [
+          "enemy"
+        ],
+        "weapon_detected": true,
+        "tracks": [
+          {
+            "track_id": 112,
+            "class": "enemy",
+            "avg_confidence": 0.5163,
+            "duration_tracked": 0.334
+          },
+          {
+            "track_id": 115,
+            "class": "enemy",
+            "avg_confidence": 0.4158,
+            "duration_tracked": 0.2
+          },
+          {
+            "track_id": 116,
+            "class": "enemy",
+            "avg_confidence": 0.6284,
+            "duration_tracked": 0.234
+          },
+          {
+            "track_id": 119,
+            "class": "enemy",
+            "avg_confidence": 0.7281,
+            "duration_tracked": 0.0
+          },
+          {
+            "track_id": 122,
+            "class": "enemy",
+            "avg_confidence": 0.3957,
+            "duration_tracked": 0.034
+          },
+          {
+            "track_id": 125,
+            "class": "enemy",
+            "avg_confidence": 0.7752,
+            "duration_tracked": 0.133
+          },
+          {
+            "track_id": 126,
+            "class": "enemy",
+            "avg_confidence": 0.4858,
+            "duration_tracked": 0.2
+          },
+          {
+            "track_id": 127,
+            "class": "enemy",
+            "avg_confidence": 0.5671,
+            "duration_tracked": 0.134
+          }
+        ]
+      },
       "id": "seg_002",
       "order": 2,
       "source_keyframes": [],
@@ -260,11 +348,31 @@
           "confidence_min": 0.6403
         }
       ],
-      "reason": "enemy_engagement",
+      "reason": "enemy_engagement_single_kill",
+      "evidence": {
+        "triggered_rule": "enemy_engagement",
+        "kill_count": 1,
+        "kill_type": "single_kill",
+        "engagement_duration": 0.667,
+        "max_confidence": 0.638,
+        "avg_confidence": 0.638,
+        "enemy_classes": [
+          "enemy"
+        ],
+        "weapon_detected": true,
+        "tracks": [
+          {
+            "track_id": 159,
+            "class": "enemy",
+            "avg_confidence": 0.638,
+            "duration_tracked": 0.467
+          }
+        ]
+      },
       "id": "seg_003",
       "order": 3,
       "source_keyframes": [],
-      "score": 0.65
+      "score": 0.5638
     }
   ],
   "stats": {
@@ -274,7 +382,13 @@
     "video_duration": 66.57,
     "frames_analyzed": 1997,
     "frames_with_enemy": 51,
-    "enemy_presence_ratio": 0.0255
+    "enemy_presence_ratio": 0.0255,
+    "total_kills": 11,
+    "kill_type_counts": {
+      "double_kill": 1,
+      "multi_kill": 1,
+      "single_kill": 1
+    }
   },
   "config": {
     "enemy_classes": [

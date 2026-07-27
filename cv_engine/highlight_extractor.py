@@ -270,16 +270,106 @@ class HighlightExtractor:
             seg["detected_classes"] = sorted(classes_set)
             seg["enemy_classes_in_segment"] = sorted(enemy_classes_set)
 
+            # ===== P1: evidence 字段 + 连杀识别 =====
+            # 统计独立敌人 track 数（按 track_id 去重）
+            enemy_tracks = [
+                e for e in seg["detections_summary"]
+                if e.get("class") in self.enemy_classes
+            ]
+            kill_count = len(enemy_tracks)
+            if kill_count <= 1:
+                kill_type = "single_kill"
+            elif kill_count == 2:
+                kill_type = "double_kill"
+            elif kill_count == 3:
+                kill_type = "triple_kill"
+            else:
+                kill_type = "multi_kill"
+
+            # 升级 reason 字段（保留原值作为 triggered_rule）
+            seg["reason"] = f"enemy_engagement_{kill_type}"
+
+            # 计算交火时长（敌人出现到消失）
+            engagement_duration = round(
+                seg.get("enemy_disappear_at", seg["end"])
+                - seg.get("enemy_appear_at", seg["start"]),
+                3,
+            )
+
+            # 置信度统计（所有敌人 track）
+            all_enemy_confs: list[float] = []
+            for e in enemy_tracks:
+                c = e.get("confidence")
+                if isinstance(c, (int, float)):
+                    all_enemy_confs.append(float(c))
+
+            max_conf = max(all_enemy_confs) if all_enemy_confs else 0.0
+            avg_conf = (
+                round(sum(all_enemy_confs) / len(all_enemy_confs), 4)
+                if all_enemy_confs
+                else 0.0
+            )
+
+            # 武器是否被检测到
+            weapon_detected = any(
+                "weapon" in str(e.get("class", "")).lower()
+                or "rifle" in str(e.get("class", "")).lower()
+                or "pistol" in str(e.get("class", "")).lower()
+                for e in seg["detections_summary"]
+            )
+
+            # 构造 tracks 简表（只含敌人，供 Agent 引用）
+            tracks_evidence = [
+                {
+                    "track_id": e.get("track_id"),
+                    "class": e.get("class"),
+                    "avg_confidence": e.get("confidence", 0.0),
+                    "duration_tracked": round(
+                        float(e.get("last_seen", 0)) - float(e.get("first_seen", 0)),
+                        3,
+                    ),
+                }
+                for e in enemy_tracks
+            ]
+
+            seg["evidence"] = {
+                "triggered_rule": "enemy_engagement",
+                "kill_count": kill_count,
+                "kill_type": kill_type,
+                "engagement_duration": engagement_duration,
+                "max_confidence": round(max_conf, 4),
+                "avg_confidence": avg_conf,
+                "enemy_classes": sorted(enemy_classes_set),
+                "weapon_detected": weapon_detected,
+                "tracks": tracks_evidence,
+            }
+
         # 补充统一字段（id/order/score/source_keyframes）
-        max_peak = max((s["peak_enemy_count"] for s in segments), default=1) or 1
+        # score 升级：连杀加分（single=0.5, double=0.7, triple=0.85, multi=1.0）
+        kill_type_score = {
+            "single_kill": 0.5,
+            "double_kill": 0.7,
+            "triple_kill": 0.85,
+            "multi_kill": 1.0,
+        }
         for idx, seg in enumerate(segments, start=1):
             seg["id"] = f"seg_{idx:03d}"
             seg["order"] = idx
             seg["source_keyframes"] = []
-            peak = seg.get("peak_enemy_count", 1)
-            seg["score"] = round(0.3 + 0.7 * (peak / max_peak), 4)
+            kt = seg["evidence"]["kill_type"]
+            base = kill_type_score.get(kt, 0.5)
+            # 置信度微调（+0~0.1）
+            conf_bonus = min(0.1, seg["evidence"]["max_confidence"] * 0.1)
+            seg["score"] = round(min(1.0, base + conf_bonus), 4)
 
         total_seg_duration = sum(s["duration"] for s in segments)
+        # 连杀统计
+        kill_type_counts = {}
+        total_kills = 0
+        for s in segments:
+            kt = s["evidence"]["kill_type"]
+            kill_type_counts[kt] = kill_type_counts.get(kt, 0) + 1
+            total_kills += s["evidence"]["kill_count"]
         stats = {
             "total_segments": len(segments),
             "total_duration": round(total_seg_duration, 3),
@@ -290,6 +380,8 @@ class HighlightExtractor:
             "enemy_presence_ratio": round(
                 sum(1 for p in presence if p) / max(len(presence), 1), 4
             ),
+            "total_kills": total_kills,
+            "kill_type_counts": kill_type_counts,
         }
 
         return {
@@ -547,11 +639,16 @@ def main() -> None:
     print(f"片段数: {stats['total_segments']}")
     print(f"精彩总时长: {stats['total_duration']:.2f}s / {duration:.2f}s ({stats['highlight_ratio']*100:.1f}%)")
     print(f"有敌人的帧: {stats['frames_with_enemy']} ({stats['enemy_presence_ratio']*100:.1f}%)")
+    print(f"总击杀数: {stats.get('total_kills', 0)}")
+    print(f"连杀分布: {stats.get('kill_type_counts', {})}")
     print(f"\n片段列表:")
     for i, seg in enumerate(segments, 1):
+        ev = seg.get("evidence", {})
         print(
             f"  [{i}] {seg['start']:.2f}s - {seg['end']:.2f}s "
-            f"(时长 {seg['duration']:.2f}s, 峰值敌人 {seg['peak_enemy_count']})"
+            f"(时长 {seg['duration']:.2f}s | {ev.get('kill_type', '?')} "
+            f"击杀={ev.get('kill_count', 0)} 置信度={ev.get('max_confidence', 0):.2f} "
+            f"分数={seg.get('score', 0):.2f})"
         )
 
     # 保存片段 JSON
