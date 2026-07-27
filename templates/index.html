@@ -11,7 +11,12 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/charts.css') }}">
   <script type="module" src="{{ url_for('static', filename='js/app.js') }}"></script>
 </head>
-<body data-page="app" data-theme="dark">
+<body
+  data-page="app"
+  data-theme="dark"
+  data-initial-view="{{ initial_view|default('projects') }}"
+  data-job-id="{{ job_id|default('', true) }}"
+>
 <a class="skip-link" href="#main-content">跳到主要内容</a>
 
 <div id="app" class="app-shell">
@@ -25,18 +30,18 @@
     </a>
 
     <nav class="header-nav" aria-label="主导航">
-      <button id="nav-projects" class="nav-button active" type="button" data-view="projects">
+      <a id="nav-projects" class="nav-button active" href="/" data-view="projects"{% if initial_view == 'projects' %} aria-current="page"{% endif %}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="m16 10 5-3v10l-5-3z"/></svg>
         项目
-      </button>
-      <button id="nav-analysis" class="nav-button" type="button" data-view="analysis">
+      </a>
+      <a id="nav-analysis" class="nav-button{% if initial_view == 'analysis' %} active{% endif %}{% if not job_id %} disabled{% endif %}" href="{% if job_id %}/jobs/{{ job_id }}/analysis{% else %}#{% endif %}" data-view="analysis"{% if initial_view == 'analysis' %} aria-current="page"{% endif %}{% if not job_id %} aria-disabled="true" tabindex="-1" title="请先上传视频或从历史记录选择任务"{% endif %}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
         分析工作台
-      </button>
-      <button id="nav-history" class="nav-button" type="button" data-view="history">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5M12 7v5l3 2"/></svg>
-        历史记录
-      </button>
+      </a>
+      <a id="nav-editor" class="nav-button{% if not job_id %} disabled{% endif %}" href="{% if job_id %}/jobs/{{ job_id }}/editor{% else %}#{% endif %}" data-view="editor"{% if not job_id %} aria-disabled="true" tabindex="-1" title="请先完成视频分析"{% endif %}>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 18h16M8 3v6m8 6v6"/><rect x="7" y="9" width="10" height="6" rx="1"/></svg>
+        剪辑工作台
+      </a>
     </nav>
 
     <div class="header-actions">
@@ -303,6 +308,30 @@
                 <strong id="progress-elapsed">—</strong>
               </div>
             </div>
+
+            <!-- Chunk-level analysis progress -->
+            <section id="analysis-progress-panel" class="analysis-progress-panel" hidden aria-labelledby="analysis-chunk-heading">
+              <div class="progress-heading">
+                <div>
+                  <strong id="analysis-chunk-heading">分块分析进度</strong>
+                  <span id="analysis-progress-count">0 / 0</span>
+                </div>
+                <strong id="analysis-progress-percent">0%</strong>
+              </div>
+              <progress id="analysis-progress-bar" max="100" value="0">0%</progress>
+              <p id="analysis-progress-detail-text" aria-live="polite">等待后台返回分析分块。</p>
+              <div id="analysis-chunk-track" class="analysis-chunk-track" role="list" aria-label="视频分析分块"></div>
+              <div id="partial-results" class="partial-results" hidden>
+                <div>
+                  <h4>已产生的候选片段</h4>
+                  <div id="partial-segment-list" class="partial-segment-list"></div>
+                </div>
+                <div>
+                  <h4>已产生的关键帧</h4>
+                  <div id="partial-keyframe-list" class="partial-keyframe-list"></div>
+                </div>
+              </div>
+            </section>
           </div>
 
           <div id="result-error" class="state-container error" hidden>
@@ -360,6 +389,8 @@
                   <a id="editor-link" class="button primary small" href="#" hidden>剪辑预览工作台</a>
                 </div>
               </div>
+              <div id="keyframe-chunk-tabs" class="keyframe-chunk-tabs" role="tablist" aria-label="按视频时间段选择关键帧"></div>
+              <p id="keyframe-chunk-summary" class="keyframe-chunk-summary"></p>
               <div id="keyframe-list" class="keyframe-grid"></div>
             </article>
 
@@ -392,21 +423,23 @@
           </div>
         </section>
 
-        <aside class="panel agent-panel" aria-labelledby="agent-heading">
+        <aside id="analysis-agent-panel" class="panel agent-panel" aria-labelledby="agent-heading">
           <div class="panel-header">
             <div>
               <p class="panel-kicker">WORKFLOW</p>
               <h2 id="agent-heading">Agent 工作流</h2>
             </div>
-            <span class="capability-badge neutral">规则基线</span>
+            <span id="agent-provider-badge" class="capability-badge neutral">等待 Agent</span>
           </div>
 
-          <p class="panel-note">当前展示真实 CV 报告解析与规则输出；独立 Agent 服务尚未接入，不会伪造模型调用。</p>
+          <p id="agent-run-note" class="panel-note" aria-live="polite">
+            YOLO 完成后会自动启动 Agent，并在这里显示排队、运行、完成或降级状态。
+          </p>
 
           <ol id="agent-flow" class="agent-flow">
             <li class="agent-node pending" data-step="1"><span>1</span><div><strong>视觉报告解析</strong><small>等待任务完成</small></div></li>
             <li class="agent-node pending" data-step="2"><span>2</span><div><strong>检测标签汇总</strong><small>等待真实检测</small></div></li>
-            <li class="agent-node pending" data-step="3"><span>3</span><div><strong>知识检索与建议</strong><small>独立 Agent 待接入</small></div></li>
+            <li class="agent-node pending" data-step="3"><span>3</span><div><strong>知识检索与建议</strong><small>等待 Agent 调用</small></div></li>
             <li class="agent-node pending" data-step="4"><span>4</span><div><strong>人工审核与输出</strong><small>等待复核</small></div></li>
           </ol>
 

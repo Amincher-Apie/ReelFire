@@ -7,9 +7,13 @@ export const appState = {
   report: null,
   keyframes: [],
   segments: [],
+  analysisChunks: [],
+  activeKeyframeChunkId: null,
   selectedFile: null,
   previewUrl: null,
   pollTimer: null,
+  agentPollTimer: null,
+  agentCallId: null,
   toolCalls: [],
 };
 

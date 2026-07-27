@@ -1480,10 +1480,13 @@ td:first-child {
 }
 
 .project-game-badge {
+  margin-left: 10px;
   padding: 3px 10px;
   border-radius: 99px;
   font-size: 11px;
   font-weight: 600;
+  letter-spacing: normal;
+  vertical-align: middle;
   background: var(--panel-soft);
   color: var(--text-muted);
 }
@@ -1561,6 +1564,14 @@ td:first-child {
 
 .project-detail-panel {
   margin-top: 20px;
+  padding-bottom: 8px;
+}
+
+.project-detail-panel h3 {
+  padding: 18px 20px 6px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1690,7 +1701,7 @@ td:first-child {
 
 /* Dialog body */
 .dialog-body {
-  padding: 16px 0;
+  padding: 16px 22px;
 }
 
 .dialog-hint {
@@ -1704,6 +1715,148 @@ td:first-child {
   gap: 8px;
   margin-top: 18px;
   justify-content: flex-end;
+}
+
+/* ── Chunk-level analysis progress ────────────────────────────────── */
+
+.analysis-progress-panel {
+  width: min(100%, 760px);
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--panel-soft);
+  text-align: left;
+}
+
+.progress-heading,
+.progress-heading > div {
+  display: flex;
+  align-items: center;
+}
+
+.progress-heading {
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.progress-heading > div {
+  gap: 8px;
+}
+
+.progress-heading span,
+.analysis-progress-panel > p {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.analysis-progress-panel progress {
+  width: 100%;
+  height: 10px;
+  margin: 12px 0 8px;
+  accent-color: var(--primary);
+}
+
+.analysis-chunk-track {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.analysis-chunk,
+.chunk-empty,
+.partial-segment {
+  display: inline-flex;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text-faint);
+  background: var(--panel);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.analysis-chunk.running {
+  color: var(--warning, #f0a030);
+  border-color: color-mix(in srgb, var(--warning, #f0a030) 42%, var(--border));
+}
+
+.analysis-chunk.completed {
+  color: var(--success, #2ea043);
+  border-color: color-mix(in srgb, var(--success, #2ea043) 42%, var(--border));
+}
+
+.partial-results {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.partial-results h4 {
+  margin: 0 0 8px;
+  font-size: 11px;
+}
+
+.partial-segment-list,
+.partial-keyframe-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.partial-keyframe-list img {
+  width: 96px;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #06080d;
+  object-fit: cover;
+}
+
+/* ── Keyframe chunk tabs ──────────────────────────────────────────── */
+
+.keyframe-chunk-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.keyframe-chunk-tab {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-muted);
+  background: var(--panel-soft);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 750;
+  transition: border-color 180ms ease, color 180ms ease, background 180ms ease;
+}
+
+.keyframe-chunk-tab:hover,
+.keyframe-chunk-tab:focus-visible {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--primary) 52%, var(--border));
+}
+
+.keyframe-chunk-tab.active {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--primary) 58%, transparent);
+  background: var(--primary-soft);
+}
+
+.keyframe-chunk-summary {
+  min-height: 20px;
+  margin: 0 0 12px;
+  color: var(--text-faint);
+  font-size: 11px;
 }
 
 @media (max-width: 900px) {

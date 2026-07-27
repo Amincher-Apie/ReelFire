@@ -590,6 +590,10 @@
   margin: 0;
   font-size: 16px;
   letter-spacing: -0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .detail-score-badge {
@@ -1305,15 +1309,16 @@
 }
 
 .stat-chart-card {
-  padding: 14px;
+  padding: 20px 18px 18px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--panel);
 }
 
 .stat-chart-card h4 {
-  margin: 0 0 10px;
+  margin: 0 0 14px;
   font-size: 12px;
+  font-weight: 700;
   color: var(--text-muted);
 }
 
@@ -1798,7 +1803,7 @@
 }
 
 .export-panel {
-  padding: 8px 0;
+  padding: 16px 22px;
 }
 
 .export-mode-selector,

@@ -155,8 +155,10 @@ export async function mergeSelectedSegments() {
   } catch (err) {
     showToast(err.message || "合并失败", "error");
     // Fallback: merge locally
+    // Use short ID: "M-" + timestamp suffix to prevent exponential growth
+    const shortId = "M-" + Date.now().toString(36).slice(-4);
     const merged = {
-      id: "merged_" + seg1.id + "_" + seg2.id,
+      id: shortId,
       start: Math.min(seg1.start, seg2.start),
       end: Math.max(seg1.end, seg2.end),
       score: Math.max(seg1.score || 0, seg2.score || 0),
@@ -216,11 +218,13 @@ export async function splitSegment(segId, splitTime) {
     }
   } catch (err) {
     showToast(err.message || "拆分失败", "error");
-    // Fallback: split locally
+    // Fallback: split locally — use single-letter suffix for brevity
     const seg = editorState.segments.find((s) => s.id === segId);
     if (!seg) return;
+    // Truncate base ID to prevent runaway names from repeated splits
+    const baseId = segId.length > 12 ? segId.slice(0, 8) + "…" : segId;
     const segA = {
-      id: segId + "_a",
+      id: baseId + "a",
       start: seg.start,
       end: splitTime,
       score: seg.score || 0,
@@ -229,7 +233,7 @@ export async function splitSegment(segId, splitTime) {
       type: "split",
     };
     const segB = {
-      id: segId + "_b",
+      id: baseId + "b",
       start: splitTime,
       end: seg.end,
       score: seg.score || 0,
@@ -252,11 +256,24 @@ export async function splitSegment(segId, splitTime) {
 
 // ── segment playback ────────────────────────────────────────────────────
 
+let _activePlaybackListener = null;
+
+function _clearPlaybackListener(video) {
+  if (_activePlaybackListener && video) {
+    video.removeEventListener("timeupdate", _activePlaybackListener);
+    _activePlaybackListener = null;
+  }
+}
+
 export function playSegment(segId) {
   const seg = editorState.segments.find((s) => s.id === segId);
   if (!seg || !editorState.videoElement) return;
 
   const video = editorState.videoElement;
+
+  // Remove any previous playback listener
+  _clearPlaybackListener(video);
+
   video.currentTime = seg.start;
   selectSegment(segId);
 
@@ -266,9 +283,10 @@ export function playSegment(segId) {
   const onTimeUpdate = () => {
     if (video.currentTime >= seg.end) {
       video.pause();
-      video.removeEventListener("timeupdate", onTimeUpdate);
+      _clearPlaybackListener(video);
     }
   };
+  _activePlaybackListener = onTimeUpdate;
   video.addEventListener("timeupdate", onTimeUpdate);
 }
 

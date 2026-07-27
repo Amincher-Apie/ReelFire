@@ -458,6 +458,14 @@ def get_editor(job_id: str):
     keyframes = report.get("keyframes") or []
     output = report.get("output") or {}
 
+    # 获取源视频文件路径（用于编辑器预览播放）
+    job_dir = jobs.job_dir(job_id)
+    input_video = jobs.get_input_video(job_id)
+    try:
+        input_video_relative = input_video.resolve().relative_to(job_dir.resolve()).as_posix()
+    except (ValueError, OSError):
+        input_video_relative = None
+
     # 尝试读取 Agent 报告（agent_report.json）
     agent_comments = []
     try:
@@ -476,10 +484,11 @@ def get_editor(job_id: str):
             "height": video.get("height"),
             "fps": video.get("fps"),
             "has_audio": video.get("has_audio", False),
+            "filename": input_video.name if input_video_relative else "",
             "path": (
                 output.get("video")
                 if output.get("video")
-                else None
+                else input_video_relative
             ),
         },
         segments=segments,
