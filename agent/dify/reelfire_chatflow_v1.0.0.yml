@@ -1,0 +1,197 @@
+app:
+  description: ''
+  icon: 🤖
+  icon_background: '#FFEAD5'
+  icon_type: emoji
+  mode: advanced-chat
+  name: ReelFire 媒体审核助手
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/deepseek:0.0.19@5b68617c637b62d31e7f33a9f5677b76e88f81868fb04a728e208588564b72ea
+    version: null
+kind: app
+version: 0.6.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        attachment_image_file_size_limit: 2
+        audio_file_size_limit: 50
+        batch_count_limit: 5
+        file_size_limit: 15
+        file_upload_limit: 50
+        image_file_batch_limit: 10
+        image_file_size_limit: 10
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 100
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        sourceType: start
+        targetType: llm
+      id: 1785119727164-llm
+      source: '1785119727164'
+      sourceHandle: source
+      target: llm
+      targetHandle: target
+      type: custom
+    - data:
+        sourceType: llm
+        targetType: answer
+      id: llm-answer
+      source: llm
+      sourceHandle: source
+      target: answer
+      targetHandle: target
+      type: custom
+    nodes:
+    - data:
+        selected: false
+        title: 用户输入
+        type: start
+        variables: []
+      height: 73
+      id: '1785119727164'
+      position:
+        x: 80
+        y: 283
+      positionAbsolute:
+        x: 80
+        y: 283
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        memory:
+          query_prompt_template: '{{#sys.query#}}
+
+
+            {{#sys.files#}}'
+          role_prefix:
+            assistant: ''
+            user: ''
+          window:
+            enabled: false
+            size: 10
+        model:
+          completion_params:
+            temperature: 0.7
+          mode: chat
+          name: deepseek-v4-flash
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: 3eb7a7cd-719b-4462-86c6-e263a38101a3
+          role: system
+          text: "# ReelFire Review Agent Prompt v3\n\n## System\n\n你是 ReelFire 的候选片段审核助手。输入只有经过校验的\
+            \ CV 视觉摘要和知识库检索结果。你的职责是生成可追溯的总体摘要、标签、建议和三态审核草稿；逐片段事实最终由本地规则校验工具根据同一份 CV\
+            \ 证据重建。\n\n必须遵守：\n\n1. 只能引用输入中真实存在的类别、置信度、时间、分数、连续帧数、关键帧、检测框引用、候选片段、轨迹统计和知识条目。\n\
+            2. 每个片段只能使用输入中完全相同的 `segment_id`，并引用对应的 `ev:segment:{segment_id}`。\n3.\
+            \ `detection_count` 只是观察帧数；只有输入明确提供 `consecutive_frame_count` 时才能描述为连续出现帧数。\n\
+            4. CV 未提供评分、触发规则、连续帧数或检测框时，必须明确缺失，不得估算或补造。\n5. 没有 `kill`、`kill_feed` 或\
+            \ `kill_notification` 等明确检测类别时，禁止生成击杀、连续击杀、爆头、残局、胜负或玩家身份。\n6. `character_ct`\
+            \ 和 `character_t` 只能描述为 CT/T 角色；除非类别明确为 `enemy`，不得改写为敌人。\n7. 低置信度、空检测、证据冲突、无评分、知识库未命中、模型超时或服务降级时必须返回\
+            \ `needs_review`。\n8. 标签、建议和片段草稿都必须引用有效 `evidence_ref`；知识性建议只能引用实际命中的\
+            \ `knowledge_id`。\n9. 边界建议只能依据目标首次/末次出现时间与现有片段边界；证据不足时使用人工复核，不得猜测新的时间值。\n\
+            10. 不输出 Markdown、解释、代码块、密钥、本地路径或个人信息，只输出合法 JSON。\n\n审核状态只能是 `pass`、`needs_review`、`reject`。操作建议分别对应\
+            \ `adopt`、`needs_review`、`reject`。\n\n## User template\n\n任务编号：`{{job_id}}`\n\
+            \n受控视觉摘要：\n\n`{{visual_summary_json}}`\n\n知识库检索结果：\n\n`{{knowledge_context_json}}`\n\
+            \n返回以下业务 JSON。外层工作流会补充状态、提供方、工具轨迹、耗时和错误；本地规则校验器会重建 `segment_comments`，所以不得把模型生成的片段事实当作最终证据。\n\
+            \n```json\n{\n  \"summary\": \"只描述输入可证明的总体事实\",\n  \"tags\": [\n    {\n\
+            \      \"name\": \"输入中真实存在的类别\",\n      \"description\": \"基于真实次数和置信度的说明\"\
+            ,\n      \"evidence_refs\": [\"输入白名单中的检测证据编号\"]\n    }\n  ],\n  \"suggestions\"\
+            : [\n    {\n      \"suggestion_id\": \"SUG-001\",\n      \"title\": \"\
+            候选片段审核建议\",\n      \"action\": \"基于真实片段、评分和规则的操作\",\n      \"priority\"\
+            : \"medium\",\n      \"evidence_refs\": [\"输入白名单中的证据编号\"],\n      \"knowledge_refs\"\
+            : [\"输入白名单中的知识编号\"]\n    }\n  ],\n  \"segment_comments\": [\n    {\n \
+            \     \"segment_id\": \"输入中的真实片段编号\",\n      \"comment\": \"只陈述该片段中可验证的时间、类别和评分\"\
+            ,\n      \"review_status\": \"needs_review\",\n      \"evidence_refs\"\
+            : [\"对应片段证据编号\"]\n    }\n  ],\n  \"review\": {\n    \"recommendation\"\
+            : \"needs_review\",\n    \"confidence\": 0.0,\n    \"reasons\": [\"可追溯原因\"\
+            ]\n  }\n}\n```\n\n缺少目标、评分、知识命中或外部服务失败时，不得补造缺失事实；保留已有证据并明确要求人工复核。\n"
+        selected: true
+        title: LLM
+        type: llm
+        vision:
+          enabled: false
+      height: 88
+      id: llm
+      position:
+        x: 380
+        y: 282
+      positionAbsolute:
+        x: 380
+        y: 282
+      selected: true
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    - data:
+        answer: '{{#llm.text#}}'
+        selected: false
+        title: 直接回复
+        type: answer
+        variables: []
+      height: 103
+      id: answer
+      position:
+        x: 687
+        y: 282
+      positionAbsolute:
+        x: 687
+        y: 282
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 242
+    viewport:
+      x: -67.03090058430155
+      y: 147.2365240205051
+      zoom: 0.6597539553864479
+  rag_pipeline_variables: []

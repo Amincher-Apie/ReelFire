@@ -208,5 +208,22 @@ Embedding 模型。
 6. 记录 DSL 文件的 SHA-256、发布时间和 Prompt 版本；
 7. DSL 可以进入评审，但应用 API Key 仍只能安全私下传递。
 
+### 实际交付记录
+
+| 项目 | 实际值 |
+|---|---|
+| 仓库文件 | `agent/dify/reelfire_chatflow_v1.0.0.yml` |
+| 导出时间 | 2026-07-27 16:00:45（Asia/Shanghai） |
+| 应用发布标签 | `reelfire-chatflow-v1.0.0` |
+| Prompt 版本 | `review_agent_v3` |
+| Dify DSL Schema 版本 | `0.6.0` |
+| 文件大小 | 7,716 字节 |
+| SHA-256 | `1B539F414278E51DDE8FDFEE7173D6632FEE96499B648CC68CC6FB748884186F` |
+| 安全扫描 | Dify 应用 Key 0、`sk-` Key 0、Bearer Token 0、非空 secret 字段 0、私人邮箱 0、本机路径 0 |
+
+DSL 中的顶层 `version: 0.6.0` 是 Dify 导出格式版本，不替代团队定义的应用发布
+标签 `reelfire-chatflow-v1.0.0`。另一工作区导入 DSL 后仍需自行安装模型插件、配置
+模型供应商凭据、重新发布并创建该新应用自己的 API Key。
+
 在 Sandbox 套餐中始终运行最新发布版本。版本名、发布时间、DSL 哈希和真实
 `/info` 验证结果共同作为本次交接证据。
