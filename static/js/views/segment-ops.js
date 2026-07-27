@@ -55,25 +55,10 @@ export async function deleteSegment(segId) {
       "/api/jobs/" + encodeURIComponent(editorState.jobId) + "/segments/" + encodeURIComponent(segId)
     );
     pushUndo();
-    editorState.segments = editorState.segments.filter((s) => s.id !== segId);
-    if (editorState.selectedSegmentId === segId) {
-      editorState.selectedSegmentId = null;
-    }
-    markDirty();
-    renderSegmentList();
-    renderTimeline();
-    renderStatsDashboard();
     showToast("片段已删除", "success");
+    await loadEditorData(editorState.jobId);
   } catch (err) {
     showToast(err.message || "删除片段失败", "error");
-    // Fallback: remove from local state anyway
-    editorState.segments = editorState.segments.filter((s) => s.id !== segId);
-    if (editorState.selectedSegmentId === segId) {
-      editorState.selectedSegmentId = null;
-    }
-    renderSegmentList();
-    renderTimeline();
-    renderStatsDashboard();
   }
 }
 
@@ -154,30 +139,6 @@ export async function mergeSelectedSegments() {
     }
   } catch (err) {
     showToast(err.message || "合并失败", "error");
-    // Fallback: merge locally
-    // Use short ID: "M-" + timestamp suffix to prevent exponential growth
-    const shortId = "M-" + Date.now().toString(36).slice(-4);
-    const merged = {
-      id: shortId,
-      start: Math.min(seg1.start, seg2.start),
-      end: Math.max(seg1.end, seg2.end),
-      score: Math.max(seg1.score || 0, seg2.score || 0),
-      order: Math.min(seg1.order || 0, seg2.order || 0),
-      source_keyframes: [
-        ...(seg1.source_keyframes || []),
-        ...(seg2.source_keyframes || []),
-      ],
-      type: "merged",
-    };
-    editorState.segments = [
-      ...editorState.segments.filter((s) => s.id !== seg1.id && s.id !== seg2.id),
-      merged,
-    ].sort((a, b) => (a.order || 0) - (b.order || 0));
-    editorState.selectedSegmentId = merged.id;
-    markDirty();
-    renderSegmentList();
-    renderTimeline();
-    renderStatsDashboard();
   }
 }
 
@@ -218,39 +179,6 @@ export async function splitSegment(segId, splitTime) {
     }
   } catch (err) {
     showToast(err.message || "拆分失败", "error");
-    // Fallback: split locally — use single-letter suffix for brevity
-    const seg = editorState.segments.find((s) => s.id === segId);
-    if (!seg) return;
-    // Truncate base ID to prevent runaway names from repeated splits
-    const baseId = segId.length > 12 ? segId.slice(0, 8) + "…" : segId;
-    const segA = {
-      id: baseId + "a",
-      start: seg.start,
-      end: splitTime,
-      score: seg.score || 0,
-      order: seg.order || 0,
-      source_keyframes: [...(seg.source_keyframes || [])],
-      type: "split",
-    };
-    const segB = {
-      id: baseId + "b",
-      start: splitTime,
-      end: seg.end,
-      score: seg.score || 0,
-      order: (seg.order || 0) + 1,
-      source_keyframes: [...(seg.source_keyframes || [])],
-      type: "split",
-    };
-    editorState.segments = [
-      ...editorState.segments.filter((s) => s.id !== segId),
-      segA,
-      segB,
-    ].sort((a, b) => (a.order || 0) - (b.order || 0));
-    editorState.selectedSegmentId = segA.id;
-    markDirty();
-    renderSegmentList();
-    renderTimeline();
-    renderStatsDashboard();
   }
 }
 

@@ -51,6 +51,8 @@ async function autoSaveToServer() {
         order: seg.order,
         score: seg.score,
         source_keyframes: seg.source_keyframes || [],
+        source: seg.source || seg.type || "cv",
+        source_segment_ids: seg.source_segment_ids || [],
         review: rev.recommendation || "",
         review_note: rev.note || "",
       };
@@ -209,6 +211,8 @@ export function exportReview() {
         end: seg.end,
         score: seg.score,
         source_keyframes: seg.source_keyframes || [],
+        source: seg.source || seg.type || "cv",
+        source_segment_ids: seg.source_segment_ids || [],
         review: review.recommendation || null,
         review_note: review.note || null,
       };
@@ -262,6 +266,8 @@ export function saveReview() {
         order: seg.order,
         score: seg.score,
         source_keyframes: seg.source_keyframes || [],
+        source: seg.source || seg.type || "cv",
+        source_segment_ids: seg.source_segment_ids || [],
         review: rev.recommendation || "",
         review_note: rev.note || "",
       };
@@ -309,6 +315,8 @@ export function createRoughCut() {
         order: seg.order,
         score: seg.score,
         source_keyframes: seg.source_keyframes || [],
+        source: seg.source || seg.type || "cv",
+        source_segment_ids: seg.source_segment_ids || [],
         review: rev.recommendation || "",
         review_note: rev.note || "",
       };

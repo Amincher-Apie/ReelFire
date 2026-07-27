@@ -44,6 +44,16 @@ function initApp() {
   const emptyCreate = byId("projects-empty-create");
   if (emptyCreate) emptyCreate.addEventListener("click", () => byId("project-dialog").showModal());
 
+  // Project archive/restore button on detail page
+  const archiveBtn = byId("project-archive-button");
+  if (archiveBtn) {
+    archiveBtn.addEventListener("click", async () => {
+      const { appState: st } = await import("./state/app-state.js");
+      const { toggleArchiveProject } = await import("./views/projects.js");
+      if (st.currentProject) toggleArchiveProject(st.currentProject);
+    });
+  }
+
   // Projects retry
   const projectsRetry = byId("projects-retry-button");
   if (projectsRetry) projectsRetry.addEventListener("click", loadProjects);

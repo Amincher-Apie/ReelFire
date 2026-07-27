@@ -771,8 +771,14 @@ export async function submitAnalysis() {
     hideTaskStages();
     hideProgressDetail();
     byId("cancel-analysis-button").hidden = true;
-    setResultState("error", "failed", error.message);
-    showToast(error.message, "error");
+    // Special handling for archived project
+    if (error.status === 409) {
+      setResultState("error", "failed", "项目已归档，请恢复为 active 后再上传新任务。");
+      showToast("项目已归档，请恢复为 active 后再上传新任务。", "error");
+    } else {
+      setResultState("error", "failed", error.message);
+      showToast(error.message, "error");
+    }
   }
 }
 

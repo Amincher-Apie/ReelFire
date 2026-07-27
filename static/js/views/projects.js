@@ -131,12 +131,20 @@ function showProjectMenu(card, project, anchorBtn) {
     menu.remove();
     promptRename(project);
   });
+
+  const isArchived = project.status === "archived";
+  const archiveBtn = createElement("button", "", isArchived ? "恢复项目" : "归档项目");
+  archiveBtn.addEventListener("click", () => {
+    menu.remove();
+    toggleArchiveProject(project);
+  });
+
   const deleteBtn = createElement("button", "danger", "删除项目");
   deleteBtn.addEventListener("click", () => {
     menu.remove();
     confirmDelete(project);
   });
-  menu.append(renameBtn, deleteBtn);
+  menu.append(renameBtn, archiveBtn, deleteBtn);
 
   const rect = anchorBtn.getBoundingClientRect();
   menu.style.position = "fixed";
@@ -188,13 +196,44 @@ async function promptRename(project) {
 }
 
 async function confirmDelete(project) {
-  if (!window.confirm("确定要删除项目「" + project.name + "」吗？此操作可以撤销。")) return;
+  const isArchived = project.status === "archived";
+  if (!window.confirm("确定删除项目「" + project.name + "」吗？删除后无法恢复。")) return;
   try {
     await api.delete("/api/projects/" + encodeURIComponent(project.id));
     showToast("项目已删除", "success");
+    // If we're on the detail page for this project, go back to list
+    if (appState.currentProjectId === project.id) {
+      showProjectsView();
+    } else {
+      await loadProjects();
+    }
+  } catch (err) {
+    if (err.status === 409) {
+      showToast("该项目仍包含任务，请先删除项目中的任务，或将项目归档。", "error");
+    } else {
+      showToast(err.message || "删除失败", "error");
+    }
+  }
+}
+
+export async function toggleArchiveProject(project) {
+  const isArchived = project.status === "archived";
+  const newStatus = isArchived ? "active" : "archived";
+  const actionLabel = isArchived ? "恢复" : "归档";
+
+  if (!isArchived && !window.confirm("确定归档项目「" + project.name + "」吗？归档后无法上传新任务，但已有任务仍可读取和下载。")) return;
+
+  try {
+    await api.patch("/api/projects/" + encodeURIComponent(project.id), { status: newStatus });
+    showToast("项目已" + actionLabel, "success");
+    if (appState.currentProjectId === project.id) {
+      // Refresh detail page
+      project.status = newStatus;
+      await openProject(project);
+    }
     await loadProjects();
   } catch (err) {
-    showToast(err.message || "删除失败", "error");
+    showToast(err.message || actionLabel + "失败", "error");
   }
 }
 
@@ -207,30 +246,112 @@ export async function openProject(project) {
 
   showView("project-detail");
   byId("project-detail-name").textContent = project.name;
-  byId("project-detail-game").textContent = gameTypeLabel(project.game_type);
-  byId("project-detail-date").textContent = "创建于 " + formatDate(project.created_at);
 
+  const gameEl = byId("project-detail-game");
+  if (gameEl) {
+    gameEl.textContent = gameTypeLabel(project.game_type);
+    gameEl.className = "project-game-badge " + (project.game_type || "other");
+  }
+
+  const dateEl = byId("project-detail-date");
+  if (dateEl) dateEl.textContent = "创建于 " + formatDate(project.created_at);
+
+  // Show project status badge
+  const statusBadge = byId("project-detail-status");
+  if (statusBadge) {
+    const isArchived = project.status === "archived";
+    statusBadge.textContent = isArchived ? "已归档" : "活跃";
+    statusBadge.className = "status-badge " + (isArchived ? "archived" : "active");
+    statusBadge.hidden = false;
+  }
+
+  // Show archive/restore button
+  const archiveBtn = byId("project-archive-button");
+  if (archiveBtn) {
+    const isArchived = project.status === "archived";
+    archiveBtn.textContent = isArchived ? "恢复项目" : "归档项目";
+    archiveBtn.className = isArchived ? "button secondary small" : "button ghost small";
+    archiveBtn.hidden = false;
+  }
+
+  // Refresh project detail stats from API
+  await refreshProjectDetail(project.id);
   await loadProjectJobs(project.id);
 }
 
-async function loadProjectJobs(projectId) {
+async function refreshProjectDetail(projectId) {
+  try {
+    const payload = await api.get("/api/projects/" + encodeURIComponent(projectId));
+    const proj = payload.project;
+    if (proj) {
+      appState.currentProject = proj;
+      // Update job count stats
+      const countEl = byId("project-job-count");
+      if (countEl) countEl.textContent = String(proj.job_count != null ? proj.job_count : "—");
+
+      // Render jobs_by_status breakdown
+      const statusBreakdown = proj.jobs_by_status;
+      if (statusBreakdown) {
+        ["created", "queued", "running", "completed", "failed"].forEach((status) => {
+          const el = byId("project-stat-" + status);
+          if (el) el.textContent = String(statusBreakdown[status] != null ? statusBreakdown[status] : 0);
+        });
+      }
+    }
+  } catch (err) {
+    // Project detail API might not be available on old backend — silently degrade
+    const countEl = byId("project-job-count");
+    if (countEl) countEl.textContent = "—";
+  }
+}
+
+async function loadProjectJobs(projectId, statusFilter = "", page = 0) {
   const loading = byId("project-jobs-loading");
   const empty = byId("project-jobs-empty");
   const error = byId("project-jobs-error");
   const table = byId("project-jobs-table");
+  const pagination = byId("project-jobs-pagination");
 
   if (loading) loading.hidden = false;
   if (empty) empty.hidden = true;
   if (error) error.hidden = true;
   if (table) table.hidden = true;
+  if (pagination) pagination.hidden = true;
+
+  const limit = 20;
+  const offset = page * limit;
 
   try {
-    const payload = await api.get("/api/jobs");
-    const allJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
-    // For now, display all jobs since jobs aren't linked to projects in filesystem
-    // In the future, filter by project_id
-    const jobs = allJobs;
+    // Use project-scoped jobs endpoint
+    let url = "/api/projects/" + encodeURIComponent(projectId) + "/jobs?limit=" + limit + "&offset=" + offset;
+    if (statusFilter) url += "&status=" + encodeURIComponent(statusFilter);
+
+    let jobs = [];
+    let total = 0;
+
+    try {
+      const payload = await api.get(url);
+      jobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+      total = payload.total != null ? payload.total : jobs.length;
+    } catch (err) {
+      // Fallback: if project-scoped endpoint unavailable, filter from global list
+      if (err.status === 404) {
+        const payload = await api.get("/api/jobs");
+        const allJobs = Array.isArray(payload.jobs) ? payload.jobs : [];
+        // Filter by project_name match as best-effort fallback
+        const projName = appState.currentProjectName || "";
+        jobs = allJobs.filter((j) => j.project_name === projName || j.project_id === projectId);
+        total = jobs.length;
+        // Apply manual pagination
+        jobs = jobs.slice(offset, offset + limit);
+      } else {
+        throw err;
+      }
+    }
+
     renderProjectJobsTable(jobs);
+    renderProjectJobsPagination(total, limit, offset, projectId, statusFilter);
+
     if (loading) loading.hidden = true;
     if (jobs.length === 0) {
       if (empty) empty.hidden = false;
@@ -243,6 +364,32 @@ async function loadProjectJobs(projectId) {
       error.hidden = false;
       byId("project-jobs-error-msg").textContent = err.message || "加载任务列表失败";
     }
+  }
+}
+
+function renderProjectJobsPagination(total, limit, offset, projectId, statusFilter) {
+  const pagination = byId("project-jobs-pagination");
+  if (!pagination) return;
+  if (total <= limit) { pagination.hidden = true; return; }
+
+  pagination.hidden = false;
+  const totalPages = Math.ceil(total / limit);
+  const currentPage = Math.floor(offset / limit);
+
+  const prevBtn = pagination.querySelector(".pagination-prev");
+  const nextBtn = pagination.querySelector(".pagination-next");
+  const info = pagination.querySelector(".pagination-info");
+
+  if (prevBtn) {
+    prevBtn.disabled = currentPage <= 0;
+    prevBtn.onclick = () => loadProjectJobs(projectId, statusFilter, currentPage - 1);
+  }
+  if (nextBtn) {
+    nextBtn.disabled = currentPage >= totalPages - 1;
+    nextBtn.onclick = () => loadProjectJobs(projectId, statusFilter, currentPage + 1);
+  }
+  if (info) {
+    info.textContent = `第 ${currentPage + 1}/${totalPages} 页，共 ${total} 个任务`;
   }
 }
 
@@ -259,31 +406,37 @@ function renderProjectJobsTable(jobs) {
   jobs.forEach((job) => {
     const tr = document.createElement("tr");
     const statusClass = "history-status " + (job.status || "");
+    const jobName = job.job_id || "—";
+    const assetName = job.original_asset_name || job.asset_name || "—";
+    const statusLabel = statusLabels[job.status] || job.status || "未知";
+
     tr.innerHTML =
-      '<td>' + (job.project_name || "—") + '</td>' +
-      '<td>' + (job.original_asset_name || job.asset_name || "—") + '</td>' +
-      '<td><span class="' + statusClass + '">' + (statusLabels[job.status] || job.status || "未知") + '</span></td>' +
+      '<td><code class="job-id-cell" title="' + (job.job_id || "") + '">' + (job.job_id ? job.job_id.substring(0, 8) : "—") + '</code></td>' +
+      '<td>' + assetName + '</td>' +
+      '<td><span class="' + statusClass + '">' + statusLabel + '</span></td>' +
       '<td>' + formatDate(job.created_at) + '</td>' +
       '<td><div class="table-actions"></div></td>';
 
     const actions = tr.querySelector(".table-actions");
-    if (job.status === "completed") {
+    if (job.status === "completed" && job.job_id) {
       const openBtn = createElement("button", "button secondary small", "剪辑台");
       openBtn.type = "button";
       openBtn.addEventListener("click", () => {
         window.location.href = "/jobs/" + encodeURIComponent(job.job_id) + "/editor";
       });
       actions.append(openBtn);
-    } else if (job.status === "failed") {
+    } else if (job.status === "failed" && job.job_id) {
       const retryBtn = createElement("button", "button secondary small", "重试");
       retryBtn.type = "button";
       retryBtn.addEventListener("click", () => retryJob(job.job_id));
       actions.append(retryBtn);
     }
-    const delBtn = createElement("button", "button ghost small", "删除");
-    delBtn.type = "button";
-    delBtn.addEventListener("click", () => deleteJobFromProject(job.job_id));
-    actions.append(delBtn);
+    if (job.job_id) {
+      const delBtn = createElement("button", "button ghost small", "删除");
+      delBtn.type = "button";
+      delBtn.addEventListener("click", () => deleteJobFromProject(job.job_id));
+      actions.append(delBtn);
+    }
 
     tbody.append(tr);
   });
@@ -361,7 +514,12 @@ export function showProjectsView() {
 }
 
 export function backToProjectDetail() {
-  if (appState.currentProjectId) {
+  if (appState.currentProjectId && appState.currentProject) {
+    showView("project-detail");
+    // Refresh header and stats from API
+    refreshProjectDetail(appState.currentProjectId);
+    loadProjectJobs(appState.currentProjectId);
+  } else if (appState.currentProjectId) {
     showView("project-detail");
     loadProjectJobs(appState.currentProjectId);
   } else {

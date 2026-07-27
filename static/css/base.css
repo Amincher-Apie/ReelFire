@@ -1574,6 +1574,88 @@ td:first-child {
   font-weight: 700;
 }
 
+/* Section heading actions row */
+
+.section-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Project stats overview bar */
+
+.project-stats-bar {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.project-stat-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 80px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+}
+
+.project-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--text-faint);
+  letter-spacing: 0.04em;
+}
+
+.project-stat-card strong {
+  margin-top: 4px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* Pagination bar */
+
+.pagination-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 12px 20px 8px;
+}
+
+.pagination-info {
+  font-size: 13px;
+  color: var(--text-faint);
+}
+
+/* Project status badges */
+
+.status-badge.archived {
+  background: var(--warning-soft, #fff3e0);
+  color: var(--warning, #e6a23c);
+}
+
+.status-badge.active {
+  background: var(--success-soft, #e8f5e9);
+  color: var(--success, #35d399);
+}
+
+/* Job ID cell */
+
+.job-id-cell {
+  font-size: 12px;
+  font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  color: var(--text-faint);
+  background: var(--panel-soft);
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
 /* ═══════════════════════════════════════════════════════════════════
    Task Stages & Progress
    ═══════════════════════════════════════════════════════════════════ */

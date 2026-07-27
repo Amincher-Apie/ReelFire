@@ -96,9 +96,9 @@ function renderSegmentCard(seg, idx) {
 
   // Header: type badge + confidence
   const header = createElement("div", "segment-card-header");
-  const segType = seg.type || "auto";
-  const typeLabel = segType === "manual" ? "手动" : segType === "merged" ? "合并" : segType === "split" ? "拆分" : "自动";
-  const typeBadge = createElement("span", "segment-type-badge " + segType, typeLabel);
+  const segSource = seg.source || seg.type || "cv";
+  const typeLabel = segSource === "manual" ? "手动" : segSource === "merged" ? "合并" : segSource === "split" ? "拆分" : "自动";
+  const typeBadge = createElement("span", "segment-type-badge " + segSource, typeLabel);
   const confidence = createElement("span", "segment-confidence " + confidenceClass(seg.score), formatNumber(Number(seg.score) * 100, 0) + "%");
   header.append(typeBadge, confidence);
 
@@ -184,7 +184,8 @@ export function renderSegmentDetail(segmentId) {
   byId("detail-time").textContent = formatTime(seg.start) + " – " + formatTime(seg.end);
   byId("detail-duration").textContent = formatDuration(seg.end - seg.start);
   byId("detail-keyframes").textContent = (seg.source_keyframes || []).join("、");
-  byId("detail-type").textContent = seg.type === "manual" ? "手动添加" : seg.type === "merged" ? "合并片段" : seg.type === "split" ? "拆分片段" : "自动检测";
+  const src = seg.source || seg.type || "cv";
+  byId("detail-type").textContent = src === "manual" ? "手动添加" : src === "merged" ? "合并片段" : src === "split" ? "拆分片段" : "自动检测";
   byId("detail-confidence").textContent = formatNumber(Number(seg.score) * 100, 0) + "%";
 
   const agentStatus = comment ? comment.status : "pending";
@@ -383,9 +384,13 @@ export function normalizeEditorData(payload) {
         order: seg.order != null ? Number(seg.order) : 0,
         start: Number.isFinite(start) && start >= 0 ? start : 0,
         end: Number.isFinite(end) && end >= start ? end : start,
+        duration: seg.duration != null ? Number(seg.duration) : 0,
         score: seg.score != null ? Number(seg.score) : 0,
         source_keyframes: Array.isArray(seg.source_keyframes) ? seg.source_keyframes : [],
-        type: seg.type || "auto",
+        source: seg.source || seg.type || "cv",
+        source_segment_ids: Array.isArray(seg.source_segment_ids) ? seg.source_segment_ids : [],
+        review: seg.review || "",
+        review_note: seg.review_note || "",
       };
     });
 

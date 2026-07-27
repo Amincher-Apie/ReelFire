@@ -105,13 +105,41 @@
           <h1 id="project-detail-heading">
             <span id="project-detail-name"></span>
             <span id="project-detail-game" class="project-game-badge"></span>
+            <span id="project-detail-status" class="status-badge active" hidden></span>
           </h1>
           <p id="project-detail-date"></p>
         </div>
-        <button id="project-start-analysis" class="button primary" type="button">
-          <svg viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="M12 5v14M5 12h14"/></svg>
-          新建分析任务
-        </button>
+        <div class="section-heading-actions">
+          <button id="project-archive-button" class="button ghost small" type="button" hidden>归档项目</button>
+          <button id="project-start-analysis" class="button primary" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true" style="width:16px;height:16px"><path d="M12 5v14M5 12h14"/></svg>
+            新建分析任务
+          </button>
+        </div>
+      </div>
+
+      <!-- 项目状态概览 -->
+      <div class="project-stats-bar" id="project-stats-bar">
+        <div class="project-stat-card">
+          <span class="project-stat-label">总任务</span>
+          <strong id="project-job-count">—</strong>
+        </div>
+        <div class="project-stat-card">
+          <span class="project-stat-label">排队中</span>
+          <strong id="project-stat-created">0</strong>
+        </div>
+        <div class="project-stat-card">
+          <span class="project-stat-label">运行中</span>
+          <strong id="project-stat-running">0</strong>
+        </div>
+        <div class="project-stat-card">
+          <span class="project-stat-label">已完成</span>
+          <strong id="project-stat-completed">0</strong>
+        </div>
+        <div class="project-stat-card">
+          <span class="project-stat-label">失败</span>
+          <strong id="project-stat-failed">0</strong>
+        </div>
       </div>
 
       <div class="project-detail-panel panel">
@@ -133,6 +161,11 @@
             <thead><tr><th>任务名称</th><th>视频文件</th><th>状态</th><th>创建时间</th><th>操作</th></tr></thead>
             <tbody id="project-jobs-body"></tbody>
           </table>
+        </div>
+        <div id="project-jobs-pagination" class="pagination-bar" hidden>
+          <button class="button ghost small pagination-prev" type="button">← 上一页</button>
+          <span class="pagination-info"></span>
+          <button class="button ghost small pagination-next" type="button">下一页 →</button>
         </div>
       </div>
     </section>
