@@ -826,6 +826,36 @@ Agent 评论状态：
 
 后端不得把前端拼接文案或未经 Agent 验证的规则文案标记为 `ready`。
 
+Agent 新版逐片段对象在保留上述兼容字段的基础上增加：
+
+```text
+action_recommendation
+explanation.highlight_type
+explanation.trigger_rule
+explanation.time_range
+explanation.detections[]
+explanation.keyframe_refs[]
+explanation.detection_box_refs[]
+boundary_suggestion
+```
+
+完整语义见 `docs/AGENT_FEEDBACK_CONTRACT.md`。聚合接口可以原样透传这些字段，
+不得把 `detection_count` 改写成连续帧数，也不得由前端根据文字反推证据。
+
+### 6.2.1 反馈接口待后端实现的冻结语义
+
+Agent 已冻结 `agent/schemas/agent_feedback.schema.json`，建议后端后续提供：
+
+```text
+POST /api/jobs/{job_id}/segments/{segment_id}/feedback
+GET  /api/jobs/{job_id}/feedback
+GET  /api/statistics/agent-feedback
+```
+
+这些路由当前尚未在本分支实现，不能作为已上线接口调用。后端实现时必须保留
+`decision/rejection_reason/original_boundary/final_boundary/original_order/
+final_order/reexported/recorded_at` 的冻结含义。
+
 ### 6.3 当前错误
 
 当前编辑契约定义：

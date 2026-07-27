@@ -196,7 +196,7 @@ Day 02～Day 03 的代码接入遵循以下原则：
 - [x] 三态审核建议口径明确；
 - [x] 事实引用和禁止虚构规则明确；
 - [x] 密钥与调用日志安全边界明确；
-- [x] 知识库、输入输出 Schema 和 Prompt v2 通过本地资产测试。
+- [x] 知识库、输入输出 Schema 和 Prompt v3 通过本地资产测试。
 - [x] 本地 Ollama 已完成真实 Embedding，并保存两组 Top-K=5 检索结果。
 
 ## 11. Day 02 验收
@@ -256,3 +256,14 @@ Dify 调用采用有限指数退避并加入抖动：默认最多尝试 3 次，
 Day 04 的成功、失败和低置信度用例、用途、输入输出、局限及实测命令统一记录在
 `docs/evidence/DAY04_AGENT_ACCEPTANCE.md`。测试夹具只验证契约与降级行为，不冒充
 真实比赛视频；真实 Dify 在线调用仍以有效的已发布 Chatflow 应用 Key 为前提。
+
+## 14. 最终阶段逐片段解释与反馈闭环
+
+最终阶段在原有 `segment_comments[]` 契约内增加结构化 `explanation`、
+`action_recommendation` 和 `boundary_suggestion`，保留旧字段供 Editor 兼容。
+逐片段事实由规则校验器从 CV 摘要重建，不直接相信模型草稿。
+
+人工反馈使用独立 `agent_feedback.schema.json`，统计工具只采用每个候选片段的最新
+记录，输出采纳率、拒绝原因、边界调整、顺序变化、重新导出和规则优化建议。
+完整字段、角色归属与接口建议见 `docs/AGENT_FEEDBACK_CONTRACT.md`，最终验收边界见
+`docs/evidence/AGENT_FINAL_ACCEPTANCE.md`。

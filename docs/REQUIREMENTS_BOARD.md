@@ -54,12 +54,12 @@
 | BE-03 | Day 2 | 通过/待复核/不通过三态审核接口 | 后端工程师 | `TODO` | PM-02 | 状态校验和持久化测试 |
 | BE-04 | Day 3 | 类别、置信度、关键帧时间、审核状态统计 | 后端工程师 | `TODO` | CV-03, BE-03 | 统计 API 和核对记录 |
 | BE-05 | Day 3～4 | 审核包与 HTML/PDF 分析报告 | 后端工程师、前端工程师 | `TODO` | BE-04 | 可下载文件和回归 |
-| AG-01 | Day 1 | 媒体分类/审核知识库与引用格式 | Agent/工作流工程师 | `TODO` | PM-02 | 知识条目、检索测试 |
-| AG-02 | Day 1 | Agent 输入输出、状态、Prompt 和失败策略 | Agent/工作流工程师 | `TODO` | PM-02 | Schema、流程图、Prompt v1 |
-| AG-03 | Day 2 | 视觉报告解析、知识库检索、建议生成/校验三工具 | Agent/工作流工程师 | `TODO` | AG-01, AG-02 | 工作流代码和工具测试 |
-| AG-04 | Day 2 | Agent 调用日志：job_id、工具轨迹、耗时、状态、错误 | Agent/工作流工程师、后端工程师 | `TODO` | AG-03, BE-01 | 日志记录与查询测试 |
-| AG-05 | Day 3 | 真实 CV 报告生成摘要、标签、建议、三态和引用 | Agent/工作流工程师 | `TODO` | AG-03, CV-03 | 真实 Agent 报告 |
-| AG-06 | Day 4 | 空检测、低置信度、无命中、超时/不可用测试 | Agent/工作流工程师 | `TODO` | AG-05 | 成功与失败案例、失败分析 |
+| AG-01 | Day 1 | 媒体分类/审核知识库与引用格式 | Agent/工作流工程师 | `REVIEW` | PM-02 | `agent/knowledge/`、检索测试 |
+| AG-02 | Day 1 | Agent 输入输出、状态、Prompt 和失败策略 | Agent/工作流工程师 | `REVIEW` | PM-02 | `agent/schemas/`、`agent/prompts/review_agent_v3.md`、`docs/AGENT_WORKFLOW.md` |
+| AG-03 | Day 2 | 视觉报告解析、知识库检索、建议生成/校验三工具 | Agent/工作流工程师 | `REVIEW` | AG-01, AG-02 | `agent/tools/`、`tests/test_agent_tools.py`、`tests/test_agent_workflow.py` |
+| AG-04 | Day 2 | Agent 调用日志：job_id、工具轨迹、耗时、状态、错误 | Agent/工作流工程师、后端工程师 | `REVIEW` | AG-03, BE-01 | Agent trace、调用持久化与 `tests/test_agent_execution.py` |
+| AG-05 | Day 3 | 真实 CV 报告生成摘要、标签、建议、三态和引用 | Agent/工作流工程师 | `REVIEW` | AG-03, CV-03 | `segment_comments[].explanation`、证据映射与契约测试 |
+| AG-06 | Day 4 | 空检测、低置信度、无命中、超时/不可用测试 | Agent/工作流工程师 | `REVIEW` | AG-05 | `docs/evidence/AGENT_FINAL_ACCEPTANCE.md`、Agent 失败路径测试 |
 | UI-01 | Day 1 | 登录、Agent、三态、图表和报告原型 | 前端工程师 | `TODO` | PM-02 | 原型与字段表 |
 | UI-02 | Day 2 | 认证、素材元数据、Agent Mock 和图表骨架 | 前端工程师 | `TODO` | BE-02, AG-02 | 页面和前端语法检查 |
 | UI-03 | Day 3 | 真实 Agent、三态、统计、轨迹、模型对比与报告 | 前端工程师 | `TODO` | AG-05, BE-03～05, CV-04 | 浏览器流程和截图 |

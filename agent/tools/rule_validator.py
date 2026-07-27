@@ -72,6 +72,30 @@ class RuleValidatorTool:
             evidence_ids,
         )
 
+        segment_states = {
+            item["review_status"] for item in segment_comments
+        }
+        if "reject" in segment_states:
+            review = {
+                "recommendation": "reject",
+                "confidence": min(review["confidence"], 0.8),
+                "reasons": list(
+                    dict.fromkeys(
+                        [*review["reasons"], "存在低评分且证据充分的拒绝片段"]
+                    )
+                ),
+            }
+        elif "needs_review" in segment_states and review["recommendation"] == "pass":
+            review = {
+                "recommendation": "needs_review",
+                "confidence": min(review["confidence"], 0.6),
+                "reasons": list(
+                    dict.fromkeys(
+                        [*review["reasons"], "至少一个片段需要人工复核"]
+                    )
+                ),
+            }
+
         if not visual_summary.get("detected_classes"):
             if review["recommendation"] != "needs_review":
                 raise OutputValidationError(
@@ -225,6 +249,7 @@ class RuleValidatorTool:
                     f"{field}.detected_classes 必须是数组"
                 )
             max_confidence = 0.0
+            classes_by_name: dict[str, dict[str, Any]] = {}
             for class_index, detected in enumerate(raw_classes):
                 if not isinstance(detected, dict):
                     raise OutputValidationError(
@@ -234,6 +259,7 @@ class RuleValidatorTool:
                     detected.get("name"),
                     f"{field}.detected_classes[{class_index}].name",
                 )
+                classes_by_name[class_name] = detected
                 label = self._class_label(class_name)
                 track_count = detected.get("track_count", 0)
                 if (
@@ -255,8 +281,24 @@ class RuleValidatorTool:
                     refs.extend(
                         ref
                         for ref in class_refs
-                        if isinstance(ref, str) and ref in evidence_ids
+                            if isinstance(ref, str) and ref in evidence_ids
                     )
+
+            detection_details = self._segment_detection_details(
+                raw,
+                classes_by_name,
+                evidence_ids,
+                field,
+            )
+            if detection_details:
+                max_confidence = max(
+                    item["max_confidence"] for item in detection_details
+                )
+            low_confidence = not detection_details or any(
+                item["average_confidence"] < 0.5
+                or item["max_confidence"] < 0.7
+                for item in detection_details
+            )
 
             score = raw.get("score")
             score_value = None
@@ -279,17 +321,48 @@ class RuleValidatorTool:
             elif score_value >= 0.7:
                 score_reason = f"CV 精彩度评分为 {score_value:.3f}"
                 action_text = "评分较高，建议优先复核"
-                review_status = (
-                    "pass" if max_confidence >= 0.7 else "needs_review"
-                )
+                review_status = "pass" if not low_confidence else "needs_review"
             elif score_value >= 0.4:
                 score_reason = f"CV 精彩度评分为 {score_value:.3f}"
                 action_text = "评分中等，建议结合关键帧复核"
                 review_status = "needs_review"
+            elif score_value < 0.25 and not low_confidence:
+                score_reason = f"CV 精彩度评分为 {score_value:.3f}"
+                action_text = "评分较低且检测证据充分，建议拒绝"
+                review_status = "reject"
             else:
                 score_reason = f"CV 精彩度评分为 {score_value:.3f}"
                 action_text = "评分较低，建议人工确认是否保留"
                 review_status = "needs_review"
+
+            keyframe_refs = [
+                f"ev:keyframe:{source_id}"
+                for source_id in raw.get("source_keyframes", [])
+                if f"ev:keyframe:{source_id}" in evidence_ids
+            ]
+            detection_refs = list(
+                dict.fromkeys(
+                    ref
+                    for item in detection_details
+                    for ref in item["evidence_refs"]
+                    if ref.startswith("ev:detection:")
+                )
+            )
+            refs.extend(keyframe_refs)
+            refs.extend(detection_refs)
+            boundary = self._boundary_suggestion(
+                start,
+                end,
+                detection_details,
+            )
+            highlight_type = self._highlight_type(
+                raw.get("reason"),
+                {item["class_name"].casefold() for item in detection_details},
+            )
+            trigger_rule = (
+                str(raw.get("reason", "")).strip()
+                or "CV 未提供触发规则"
+            )
 
             comments.append(
                 {
@@ -300,10 +373,203 @@ class RuleValidatorTool:
                     ),
                     "score_reason": score_reason,
                     "review_status": review_status,
+                    "action_recommendation": {
+                        "pass": "adopt",
+                        "needs_review": "needs_review",
+                        "reject": "reject",
+                    }[review_status],
+                    "explanation": {
+                        "highlight_type": highlight_type,
+                        "trigger_rule": trigger_rule,
+                        "time_range": {
+                            "start": round(start, 6),
+                            "end": round(end, 6),
+                        },
+                        "detections": detection_details,
+                        "keyframe_refs": keyframe_refs,
+                        "detection_box_refs": detection_refs,
+                    },
+                    "boundary_suggestion": boundary,
                     "evidence_refs": list(dict.fromkeys(refs))[:20],
                 }
             )
         return comments
+
+    def _segment_detection_details(
+        self,
+        segment: dict[str, Any],
+        classes_by_name: dict[str, dict[str, Any]],
+        evidence_ids: set[str],
+        field: str,
+    ) -> list[dict[str, Any]]:
+        raw_details = segment.get("detections_summary", [])
+        if not isinstance(raw_details, list):
+            raise OutputValidationError(f"{field}.detections_summary 必须是数组")
+        details = []
+        for index, raw in enumerate(raw_details):
+            owner = f"{field}.detections_summary[{index}]"
+            if not isinstance(raw, dict):
+                raise OutputValidationError(f"{owner} 必须是对象")
+            class_name = self._string(raw.get("class"), f"{owner}.class")
+            average = self._bounded_confidence(
+                raw.get("confidence", 0),
+                f"{owner}.confidence",
+            )
+            maximum = self._bounded_confidence(
+                raw.get("confidence_max", average),
+                f"{owner}.confidence_max",
+            )
+            observed = raw.get("detection_count", 0)
+            if isinstance(observed, bool) or not isinstance(observed, int) or observed < 0:
+                raise OutputValidationError(
+                    f"{owner}.detection_count 必须是非负整数"
+                )
+            consecutive = raw.get("consecutive_frame_count")
+            if (
+                isinstance(consecutive, bool)
+                or consecutive is not None
+                and (not isinstance(consecutive, int) or consecutive < 0)
+            ):
+                raise OutputValidationError(
+                    f"{owner}.consecutive_frame_count 必须是非负整数或 null"
+                )
+            first_seen = self._finite_number(
+                raw.get("first_seen"),
+                f"{owner}.first_seen",
+            )
+            last_seen = self._finite_number(
+                raw.get("last_seen"),
+                f"{owner}.last_seen",
+            )
+            class_refs = classes_by_name.get(class_name, {}).get(
+                "evidence_refs",
+                [],
+            )
+            refs = [
+                ref
+                for ref in class_refs
+                if isinstance(ref, str) and ref in evidence_ids
+            ]
+            details.append(
+                {
+                    "class_name": class_name,
+                    "track_id": raw.get("track_id"),
+                    "first_seen": round(first_seen, 6),
+                    "last_seen": round(last_seen, 6),
+                    "observed_frame_count": observed,
+                    "consecutive_frame_count": consecutive,
+                    "average_confidence": round(average, 6),
+                    "max_confidence": round(maximum, 6),
+                    "evidence_refs": list(dict.fromkeys(refs)),
+                }
+            )
+
+        if details:
+            return details
+
+        for class_name, raw in classes_by_name.items():
+            refs = [
+                ref
+                for ref in raw.get("evidence_refs", [])
+                if isinstance(ref, str) and ref in evidence_ids
+            ]
+            first_seen = raw.get("first_seen")
+            last_seen = raw.get("last_seen")
+            details.append(
+                {
+                    "class_name": class_name,
+                    "track_id": None,
+                    "first_seen": (
+                        round(float(first_seen), 6)
+                        if isinstance(first_seen, (int, float))
+                        and not isinstance(first_seen, bool)
+                        else None
+                    ),
+                    "last_seen": (
+                        round(float(last_seen), 6)
+                        if isinstance(last_seen, (int, float))
+                        and not isinstance(last_seen, bool)
+                        else None
+                    ),
+                    "observed_frame_count": max(
+                        0,
+                        int(raw.get("detection_count", 0)),
+                    ),
+                    "consecutive_frame_count": raw.get(
+                        "consecutive_frame_count"
+                    ),
+                    "average_confidence": round(
+                        float(raw.get("average_confidence", 0)),
+                        6,
+                    ),
+                    "max_confidence": round(
+                        float(raw.get("max_confidence", 0)),
+                        6,
+                    ),
+                    "evidence_refs": list(dict.fromkeys(refs)),
+                }
+            )
+        return details
+
+    @staticmethod
+    def _boundary_suggestion(
+        start: float,
+        end: float,
+        detections: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        observed = [
+            item
+            for item in detections
+            if item.get("first_seen") is not None
+            and item.get("last_seen") is not None
+        ]
+        if not observed:
+            return {
+                "action": "manual_review",
+                "suggested_start": None,
+                "suggested_end": None,
+                "reason": "缺少可验证的目标出现时间，无法自动建议边界",
+            }
+        first_seen = min(float(item["first_seen"]) for item in observed)
+        last_seen = max(float(item["last_seen"]) for item in observed)
+        review_start = first_seen - start <= 0.25
+        review_end = end - last_seen <= 0.25
+        if review_start and review_end:
+            action = "review_both"
+            reason = "目标证据同时接近片段起止边界，建议人工检查前后缓冲"
+        elif review_start:
+            action = "review_start"
+            reason = "目标证据接近片段起点，建议人工检查前置缓冲"
+        elif review_end:
+            action = "review_end"
+            reason = "目标证据接近片段终点，建议人工检查后置缓冲"
+        else:
+            action = "keep"
+            reason = "目标证据位于片段边界内，当前边界可保留"
+        return {
+            "action": action,
+            "suggested_start": round(start, 6),
+            "suggested_end": round(end, 6),
+            "reason": reason,
+        }
+
+    @staticmethod
+    def _highlight_type(reason: Any, classes: set[str]) -> str:
+        normalized_reason = str(reason or "").strip().casefold()
+        kill_classes = {"kill", "kill_feed", "kill_notification"}
+        if classes & kill_classes and "kill" in normalized_reason:
+            return "击杀事件候选"
+        return {
+            "enemy_engagement": "敌方角色交互候选",
+            "high_motion": "高运动强度候选",
+            "scene_change": "场景变化候选",
+        }.get(normalized_reason, "未分类高光候选")
+
+    def _bounded_confidence(self, value: Any, field: str) -> float:
+        result = self._finite_number(value, field)
+        if not 0 <= result <= 1:
+            raise OutputValidationError(f"{field} 必须位于 0 到 1")
+        return result
 
     def _validate_review(self, raw_review: Any) -> dict[str, Any]:
         if not isinstance(raw_review, dict):

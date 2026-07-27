@@ -2,7 +2,7 @@
 
 `agent/` 独立负责把 CV 流程生成的 `analysis_report.json` 转换为有证据引用的内容摘要、知识规则和审核建议。模型或向量服务失败不能修改原始 CV 报告。
 
-## Day 02～Day 03 工具与逐片段输出
+## Agent 工具与逐片段输出
 
 当前已实现四个工具：
 
@@ -10,6 +10,10 @@
 - `KnowledgeRetrieverTool`：构建内存向量索引，执行向量召回和规则重排；Embedding 不可用时自动返回 `degraded` 并使用确定性规则检索；
 - `AdviceGeneratorTool`：调用已配置模型或确定性规则生成摘要、标签和建议；
 - `RuleValidatorTool`：校验结构、引用边界和禁止虚构项。
+
+另提供独立的 `FeedbackAnalyzerTool`：读取后端持久化的人工采用、拒绝、边界、
+顺序和重新导出记录，输出采纳率、常见拒绝原因、边界调整统计和规则优化建议。
+反馈契约见 `docs/AGENT_FEEDBACK_CONTRACT.md`。
 
 完整工作流由 `AgentService` 编排：
 
@@ -133,7 +137,7 @@ agent_report = service.run_analysis_report(
     provider={"type": "ollama", "model": "qwen3:0.6b"},
     output_dir=Path("outputs/job_id"),
 )
-backend_record = to_backend_agent_call(agent_report, prompt_version="v2")
+backend_record = to_backend_agent_call(agent_report, prompt_version="v3")
 ```
 
 适配器不会修改原始 CV 报告。Agent 的 `degraded` 状态会映射为后端
@@ -155,9 +159,20 @@ agent_report = service.run_analysis_report(
 ```
 
 适配器会按源数组顺序为缺少 ID 的片段稳定生成 `seg_001`、`seg_002` 等编号，
-但不会补造缺失的评分。最终编辑页评论至少包含
-`segment_id/comment/evidence_refs`，并始终引用
+但不会补造缺失的评分。最终编辑页评论包含
+`segment_id/comment/action_recommendation/explanation/boundary_suggestion/evidence_refs`，
+并始终引用
 `ev:segment:<segment_id>`；无评分或证据不足时状态为 `needs_review`。
+
+`explanation.detections[]` 区分观察帧数与连续帧数。只有 CV 显式提供
+`consecutive_frame_count` 时才会返回具体数值；关键帧和检测框通过证据引用关联，
+缺失字段保持 `null` 或空数组。
+
+反馈统计命令：
+
+```powershell
+python -m agent.analyze_feedback feedback.json --output feedback_summary.json
+```
 
 模型返回无效引用、虚构事件或示例占位文本时，校验工具会拒绝模型草稿，记录错误并改用确定性输出。输入损坏时返回 `failed`；模型、Embedding 或落盘服务可恢复失败时返回 `degraded`。
 
@@ -167,4 +182,5 @@ agent_report = service.run_analysis_report(
 python -m unittest tests.test_agent_tools -v
 python -m unittest tests.test_agent_workflow -v
 python -m unittest tests.test_agent_contracts -v
+python -m unittest tests.test_agent_feedback -v
 ```
