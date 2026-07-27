@@ -5,6 +5,12 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+_TEST_ULTRALYTICS_DIR = (
+    Path(tempfile.gettempdir()) / "reelfire-ultralytics-tests"
+)
+_TEST_ULTRALYTICS_DIR.mkdir(parents=True, exist_ok=True)
+os.environ["YOLO_CONFIG_DIR"] = str(_TEST_ULTRALYTICS_DIR)
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from cv_engine.video_processor import VideoProcessor
