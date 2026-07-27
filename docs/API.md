@@ -508,7 +508,9 @@ output
 GET /api/jobs/{job_id}/editor
 ```
 
-页面负责播放、时间轴定位、精彩片段列表和 Agent 评论状态展示，不运行 YOLO，不在浏览器中生成 Agent 评论。
+首个 YOLO 分块完成后页面即可打开。页面负责播放、时间轴定位、增量精彩片段
+列表和 Agent 评论状态展示；YOLO 继续在后台运行，页面不在浏览器中运行模型或
+生成 Agent 评论。
 
 页面结构、DOM 身份和交互规则以：
 
@@ -1054,7 +1056,30 @@ Editor 评论仍只来自 `agent_report.json.segment_comments[]` 或带可验证
     "start": 120.0,
     "end": 180.0
   },
-  "chunks": []
+  "video": {
+    "duration": 300.0,
+    "width": 1920,
+    "height": 1080,
+    "fps": 30.0
+  },
+  "chunks": [
+    {
+      "id": "chunk_0001",
+      "index": 1,
+      "start": 0.0,
+      "end": 60.0,
+      "status": "completed",
+      "provisional_segments": []
+    },
+    {
+      "id": "chunk_0003",
+      "index": 3,
+      "start": 120.0,
+      "end": 180.0,
+      "status": "running",
+      "provisional_segments": []
+    }
+  ]
 }
 ```
 
@@ -1065,12 +1090,17 @@ queued → initializing → sampling → detecting → finalizing → completed
                                                     └──────→ failed
 ```
 
+读取视频元数据后立即预建立完整逻辑分块队列，`chunks[].status` 按
+`queued → running → completed` 变化。这里不预写物理视频文件，避免首帧结果
+被全量切片 I/O 延迟。
+
 每个已完成分块包含时间范围、采样数量、已落盘关键帧和暂定片段。暂定片段带
 `provisional=true`，仅用于分析过程反馈；最终 `analysis_report.json` 中的
 `segments[]` 仍由全部采样元数据统一归并，且 `provisional=false`。
 
 进度单独原子写入 `analysis_progress.json`。最终报告继续写入
-`analysis_report.json`，现有 Editor、Agent 与粗剪接口无需读取中间文件。
+`analysis_report.json`。Editor 在首块完成后读取中间进度并实时追加暂定片段；
+Agent、审核保存与粗剪仍等待最终报告。
 
 最终报告新增：
 

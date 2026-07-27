@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import math
 import threading
+from copy import deepcopy
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -190,7 +191,7 @@ def _notify_progress(
     payload: dict[str, Any],
 ) -> None:
     if callback is not None:
-        callback(payload)
+        callback(deepcopy(payload))
 
 
 def analyze_video(
@@ -236,6 +237,21 @@ def analyze_video(
     samples: list[dict[str, Any]] = []
     keyframes: list[dict[str, Any]] = []
     analysis_chunks: list[dict[str, Any]] = []
+    chunk_queue: list[dict[str, Any]] = [
+        {
+            "id": f"chunk_{index + 1:04d}",
+            "index": index + 1,
+            "start": round(index * chunk_duration, 3),
+            "end": round(min(duration, (index + 1) * chunk_duration), 3),
+            "status": "queued",
+            "sample_count": 0,
+            "keyframes": [],
+            "keyframe_ids": [],
+            "provisional_segments": [],
+            "segment_ids": [],
+        }
+        for index in range(total_chunks)
+    ]
     previous = None
     processed_samples = 0
     keyframe_dir = job_dir / "keyframes"
@@ -256,7 +272,8 @@ def analyze_video(
             "processed_frames": 0,
             "total_frames": estimated_samples,
             "current_chunk": None,
-            "chunks": [],
+            "chunks": chunk_queue,
+            "video": video,
         },
     )
 
@@ -273,6 +290,7 @@ def analyze_video(
         if not frames:
             continue
 
+        chunk_queue[chunk_index]["status"] = "running"
         _notify_progress(
             progress_callback,
             {
@@ -295,7 +313,8 @@ def analyze_video(
                     "start": float(chunk["start"]),
                     "end": float(chunk["end"]),
                 },
-                "chunks": analysis_chunks,
+                "chunks": chunk_queue,
+                "video": video,
             },
         )
 
@@ -405,6 +424,7 @@ def analyze_video(
             "segment_ids": [],
         }
         analysis_chunks.append(chunk_summary)
+        chunk_queue[chunk_index] = chunk_summary
         _notify_progress(
             progress_callback,
             {
@@ -421,7 +441,8 @@ def analyze_video(
                 "processed_frames": processed_samples,
                 "total_frames": estimated_samples,
                 "current_chunk": None,
-                "chunks": analysis_chunks,
+                "chunks": chunk_queue,
+                "video": video,
             },
         )
 
@@ -505,6 +526,7 @@ def analyze_video(
             "total_frames": processed_samples,
             "current_chunk": None,
             "chunks": analysis_chunks,
+            "video": video,
         },
     )
     return {
@@ -649,6 +671,7 @@ class AnalysisService:
                     "total_frames": report.get("total_sampled_frames", 0),
                     "current_chunk": None,
                     "chunks": chunks,
+                    "video": video,
                 },
             )
         except Exception as exc:  # Persist every background failure.

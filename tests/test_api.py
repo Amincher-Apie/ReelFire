@@ -138,6 +138,13 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(html.count('id="agent-run-panel"'), 1)
         self.assertEqual(html.count('id="agent-run-detail"'), 1)
         self.assertEqual(html.count('id="agent-retry-button"'), 1)
+        self.assertEqual(html.count('id="live-analysis-panel"'), 1)
+        self.assertEqual(html.count('id="live-analysis-progress"'), 1)
+        self.assertIn('id="save-review-button"', html)
+        self.assertIn(
+            'id="save-review-button" class="button secondary" type="button" disabled',
+            html,
+        )
         self.assertIn("时间片段（start:end）", html)
         self.assertIn("Agent 评论", html)
         self.assertIn("Agent 分析进度", html)
@@ -157,6 +164,75 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(pending.status_code, 409)
 
         jobs = self.app.extensions["job_service"]
+        jobs.update_job(job_id, status="running")
+        jobs.write_progress(
+            job_id,
+            {
+                "stage": "detecting",
+                "message": "已完成 1/2 个分析分块",
+                "percent": 50.0,
+                "total_chunks": 2,
+                "completed_chunks": 1,
+                "processed_frames": 20,
+                "total_frames": 40,
+                "current_chunk": None,
+                "video": {
+                    "duration": 20.0,
+                    "width": 1280,
+                    "height": 720,
+                    "fps": 24.0,
+                },
+                "chunks": [
+                    {
+                        "id": "chunk_0001",
+                        "index": 1,
+                        "start": 0.0,
+                        "end": 10.0,
+                        "status": "completed",
+                        "provisional_segments": [
+                            {
+                                "id": "seg_c0001_01",
+                                "order": 1,
+                                "start": 2.0,
+                                "end": 7.5,
+                                "score": 0.82,
+                                "source_keyframes": ["kf_c0001_01"],
+                                "provisional": True,
+                            }
+                        ],
+                    },
+                    {
+                        "id": "chunk_0002",
+                        "index": 2,
+                        "start": 10.0,
+                        "end": 20.0,
+                        "status": "queued",
+                        "provisional_segments": [],
+                    },
+                ],
+            },
+        )
+        live = self.client.get(f"/api/jobs/{job_id}/editor")
+        self.assertEqual(live.status_code, 200, live.get_json())
+        live_payload = live.get_json()
+        self.assertEqual(live_payload["job"]["status"], "running")
+        self.assertFalse(live_payload["actions_enabled"])
+        self.assertTrue(live_payload["live_analysis"]["ready"])
+        self.assertFalse(live_payload["live_analysis"]["final"])
+        self.assertEqual(live_payload["live_analysis"]["completed_chunks"], 1)
+        self.assertEqual(
+            [item["id"] for item in live_payload["highlights"]],
+            ["seg_c0001_01"],
+        )
+        self.assertEqual(
+            live_payload["highlights"][0]["agent_comment_status"],
+            "pending",
+        )
+        self.assertEqual(
+            live_payload["video"]["preview_status"],
+            "source_unverified",
+        )
+
         jobs.write_report(
             job_id,
             {
@@ -192,6 +268,8 @@ class ApiTestCase(unittest.TestCase):
         self.assertEqual(without_agent.status_code, 200)
         first = without_agent.get_json()
         self.assertEqual(first["contract_version"], "1.0")
+        self.assertTrue(first["actions_enabled"])
+        self.assertTrue(first["live_analysis"]["final"])
         self.assertEqual(first["highlights"][0]["agent_comment_status"], "pending")
         self.assertIsNone(first["highlights"][0]["agent_review_status"])
         self.assertIsNone(first["highlights"][0]["agent_comment"])

@@ -3,14 +3,14 @@
 ## 1. 文档状态
 
 - 契约版本：`1.0`
-- 适用页面：视频分析完成后的剪辑预览页
-- 数据方向：后端最终结果 → 前端只读展示
+- 适用页面：首个 YOLO 分块完成后的增量剪辑预览页
+- 数据方向：后端分块进度/最终结果 → 前端增量展示
 - 当前实现：`GET /api/jobs/{job_id}/editor`
 - 兼容原则：允许新增字段，不允许在同一主版本中删除字段或改变字段类型
 
 ## 2. 设计目标
 
-剪辑预览页不读取 YOLO 原始采样帧来推导业务文案，也不在浏览器中生成 Agent 评论。后端负责合并任务信息、CV 分析报告和 Agent 最终输出，前端只消费一个稳定的聚合结果。
+剪辑预览页不读取 YOLO 原始采样帧来推导业务文案，也不在浏览器中生成 Agent 评论。首个分块完成后，后端从进度文件聚合暂定片段；全片完成后切换为 CV 最终报告和 Agent 最终输出。前端始终消费同一个聚合接口。
 
 数据处理边界：
 
@@ -34,7 +34,8 @@ Accept: application/json
 | --- | --- | --- | --- |
 | `job_id` | string | 是 | ReelFire 公共任务编号 |
 
-任务必须已经生成 `analysis_report.json`。未完成或报告不存在时返回 `409`。
+任务必须至少完成一个 YOLO 分块。首块尚未完成时返回 `409`；首块完成后即使
+`analysis_report.json` 尚未生成也返回运行中契约。
 
 ### 3.2 成功响应
 
@@ -74,9 +75,29 @@ Accept: application/json
     "rough_cut_url": null,
     "contact_sheet_url": "/outputs/20260725_120000_1a2b3c4d/result/contact_sheet.jpg",
     "ratio": "16:9"
-  }
+  },
+  "live_analysis": {
+    "ready": true,
+    "final": true,
+    "stage": "completed",
+    "message": "视频分块分析和最终报告已完成",
+    "percent": 100.0,
+    "total_chunks": 12,
+    "completed_chunks": 12,
+    "chunks": []
+  },
+  "actions_enabled": true
 }
 ```
+
+运行中响应保持相同结构，但有以下差异：
+
+- `job.status="running"`；
+- `highlights[]` 是已完成分块的暂定片段，ID 采用
+  `seg_c{chunk}_{local}`；
+- `agent_comment_status="pending"`；
+- `live_analysis.final=false`；
+- `actions_enabled=false`，不得保存审核或生成粗剪。
 
 ### 3.3 字段定义
 
@@ -86,7 +107,7 @@ Accept: application/json
 | --- | --- | --- | --- |
 | `job_id` | string | 否 | 任务编号 |
 | `project_name` | string | 否 | 项目名称 |
-| `status` | string | 否 | 当前必须为 `completed` |
+| `status` | string | 否 | `running`、`completed`；失败后若已有分块也可为 `failed` |
 | `created_at` | string | 是 | ISO 8601 时间 |
 | `completed_at` | string | 是 | ISO 8601 时间 |
 
@@ -140,6 +161,22 @@ Agent 评论状态：
 | `contact_sheet_url` | string | 是 | 关键帧联系表地址 |
 | `ratio` | string | 是 | `16:9`、`9:16` 或 `1:1` |
 
+#### `live_analysis`
+
+| 字段 | 类型 | 说明 |
+| --- | --- | --- |
+| `ready` | boolean | 已至少有一个可供 Editor 消费的分块 |
+| `final` | boolean | 是否已切换为最终报告片段 |
+| `stage` | string | 当前分析阶段 |
+| `message` | string | 可直接展示的进度说明 |
+| `percent` | number | `0..100` 总进度 |
+| `total_chunks` | integer | 预建立的分块总数 |
+| `completed_chunks` | integer | 已完成 YOLO 分析的分块数 |
+| `chunks[]` | object[] | 各逻辑分块的 ID、范围、状态和暂定片段 ID |
+
+`actions_enabled` 是最终写操作闸门。只有其为 `true` 时，前端才能保存审核、
+启动 Agent 或生成粗剪。
+
 ## 4. Agent 结果兼容规则
 
 聚合层按以下优先级读取逐片段评论：
@@ -179,7 +216,7 @@ Editor 1.0 仍只按照上述 `agent_report.json.segment_comments[]` 和带可�
 ```json
 {
   "ok": false,
-  "error": "分析报告尚未生成，不能打开剪辑预览"
+  "error": "首个 YOLO 分块尚未完成，暂时不能打开剪辑预览"
 }
 ```
 
@@ -189,14 +226,20 @@ Editor 1.0 仍只按照上述 `agent_report.json.segment_comments[]` 和带可�
 | `401` | 项目任务未登录，`AUTH_REQUIRED` |
 | `403` | 当前用户无权访问项目任务，`JOB_ACCESS_DENIED` |
 | `404` | 任务或源视频不存在 |
-| `409` | 任务未完成或报告尚未生成 |
+| `409` | 首个 YOLO 分块尚未完成 |
 | `500` | 持久化数据损坏或服务内部错误 |
 
 ## 6. 前端消费约束
 
 - 页面只请求聚合接口，不直接读取 `samples` 推导评论。
+- `live_analysis.final=false` 时每约 1.6 秒重新请求聚合接口；仅追加新片段，
+  不得重置用户已有排序或播放位置。
+- 暂定片段切换为最终片段时，按时间区间重叠关系保留用户排序；未匹配的最终
+  片段按后端顺序追加。
+- `actions_enabled=false` 时禁用保存审核和生成粗剪，并明确说明仍在后台分析。
 - 页面通过 Agent 调用接口创建并轮询真实生命周期：
   `queued → running → completed/needs_review/failed`。
+- Agent 只能在 `live_analysis.final=true` 后启动。
 - `needs_review` 携带 `model_generation_failed` 风险标记时，页面必须明确显示
   “规则降级结果”，不得显示为在线 Dify 成功。
 - 时间显示可在前端格式化，但不得改变原始秒数。

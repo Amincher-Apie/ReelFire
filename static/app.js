@@ -323,7 +323,7 @@ function updateJobNavigation(jobId, editorReady = false) {
   } else {
     editorLink.setAttribute("aria-disabled", "true");
     editorLink.setAttribute("tabindex", "-1");
-    editorLink.title = "视频分析完成后可进入剪辑工作台";
+    editorLink.title = "首个 YOLO 分块完成后可进入剪辑工作台";
   }
 }
 
@@ -676,15 +676,24 @@ function renderAnalysisProgress(progress) {
       const chunk = chunks[index];
       const current =
         value.current_chunk && Number(value.current_chunk.index) === index + 1;
-      const status = chunk ? "completed" : current ? "running" : "pending";
+      const rawStatus = chunk && typeof chunk.status === "string"
+        ? chunk.status
+        : null;
+      const status =
+        rawStatus === "completed" || (chunk && !rawStatus && !current)
+          ? "completed"
+          : rawStatus === "running" || current
+            ? "running"
+            : "pending";
       const item = createElement("span", `analysis-chunk ${status}`);
       item.setAttribute("role", "listitem");
-      item.textContent = chunk
-        ? `${index + 1} 已完成`
-        : current
-          ? `${index + 1} 分析中`
-          : `${index + 1} 等待`;
-      item.title = chunk
+      item.textContent =
+        status === "completed"
+          ? `${index + 1} 已完成`
+          : status === "running"
+            ? `${index + 1} 分析中`
+            : `${index + 1} 排队中`;
+      item.title = chunk && Number.isFinite(Number(chunk.start))
         ? `${formatDuration(chunk.start)} – ${formatDuration(chunk.end)}`
         : `分析分块 ${index + 1}`;
       track.append(item);
@@ -941,6 +950,11 @@ async function pollJob(jobId) {
     const job = payload.job;
     state.currentJob = job;
     renderAnalysisProgress(job.progress);
+    updateJobNavigation(
+      jobId,
+      job.status === "completed" ||
+        Number(job.progress && job.progress.completed_chunks) > 0,
+    );
     if (job.status === "completed") {
       logTool("GET", `/api/jobs/${jobId}`, "任务已完成");
       await loadReport(jobId);

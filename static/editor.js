@@ -20,6 +20,7 @@ const state = {
   orderDirty: false,
   agentPollTimer: null,
   agentCallId: null,
+  analysisPollTimer: null,
 };
 
 // ── 工具函数 ─────────────────────────────────────────────────────────
@@ -869,7 +870,10 @@ function setAgentProgress(status, detail, call) {
   badge.className = "agent-run-badge " + status;
   retry.hidden = true;
 
-  if (status === "queued" || status === "pending") {
+  if (status === "waiting") {
+    badge.textContent = "等待 YOLO";
+    queued.classList.add("active");
+  } else if (status === "queued" || status === "pending") {
     badge.textContent = status === "queued" ? "排队中" : "检查中";
     queued.classList.add("active");
   } else if (status === "running") {
@@ -1020,6 +1024,14 @@ function startAgentRun(forceNew) {
 }
 
 function ensureAgentRun() {
+  if (!state.editorData || state.editorData.status !== "completed") {
+    setAgentProgress(
+      "waiting",
+      "YOLO 仍在后台处理分块；最终报告生成后将自动启动 Agent。",
+      null
+    );
+    return Promise.resolve(null);
+  }
   var hasReadyComment = state.agentComments.some(function (comment) {
     return comment.status === "completed" && comment.summary;
   });
@@ -1056,12 +1068,19 @@ function ensureAgentRun() {
 // ── 数据加载 ─────────────────────────────────────────────────────────
 function loadEditorData(jobId) {
   state.jobId = jobId;
+  stopAnalysisPolling();
   setView("loading");
 
   api.get("/api/jobs/" + encodeURIComponent(jobId) + "/editor").then(
     function (payload) {
-      applyEditorData(payload);
-      ensureAgentRun();
+      var data = applyEditorData(payload);
+      if (!data) return;
+      if (data.status === "completed") {
+        ensureAgentRun();
+      } else {
+        ensureAgentRun();
+        scheduleAnalysisPolling();
+      }
     },
     function (error) {
       setView("error");
@@ -1125,7 +1144,95 @@ function normalizeEditorData(payload) {
     }),
     keyframes: [],
     output: payload.output || {},
+    live_analysis: payload.live_analysis || {},
+    actions_enabled: payload.actions_enabled === true,
   };
+}
+
+function mergeLiveSegments(existing, incoming) {
+  var incomingById = new Map(
+    incoming.map(function (segment) {
+      return [segment.id, segment];
+    })
+  );
+  var merged = existing.map(function (segment) {
+    return incomingById.has(segment.id)
+      ? Object.assign({}, segment, incomingById.get(segment.id))
+      : segment;
+  });
+  var existingIds = new Set(existing.map(function (segment) {
+    return segment.id;
+  }));
+  incoming.forEach(function (segment) {
+    if (!existingIds.has(segment.id)) merged.push(segment);
+  });
+  return merged;
+}
+
+function segmentOverlap(first, second) {
+  return Math.max(
+    0,
+    Math.min(Number(first.end), Number(second.end)) -
+      Math.max(Number(first.start), Number(second.start))
+  );
+}
+
+function reconcileFinalSegments(existing, incoming) {
+  var remaining = incoming.slice();
+  var reconciled = [];
+  existing.forEach(function (provisional) {
+    var bestIndex = -1;
+    var bestOverlap = 0;
+    remaining.forEach(function (finalSegment, index) {
+      var overlap = segmentOverlap(provisional, finalSegment);
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap;
+        bestIndex = index;
+      }
+    });
+    if (bestIndex >= 0 && bestOverlap > 0) {
+      reconciled.push(remaining.splice(bestIndex, 1)[0]);
+    }
+  });
+  return reconciled.concat(
+    remaining.sort(function (first, second) {
+      return Number(first.order) - Number(second.order);
+    })
+  );
+}
+
+function renderLiveAnalysis(live) {
+  var value = live && typeof live === "object" ? live : {};
+  var total = Number(value.total_chunks) || 0;
+  var completed = Number(value.completed_chunks) || 0;
+  var percent = Math.max(0, Math.min(100, Number(value.percent) || 0));
+  var final = value.final === true;
+  var failed = state.editorData && state.editorData.status === "failed";
+  var badge = byId("live-analysis-badge");
+  byId("live-analysis-progress").value = percent;
+  byId("live-analysis-progress").textContent = Math.round(percent) + "%";
+  byId("live-analysis-count").textContent =
+    completed + " / " + total + " 个分块";
+  byId("live-analysis-detail").textContent = failed
+    ? value.message || "YOLO 后台分析失败；已完成的分块仍可预览。"
+    : final
+    ? "全部 YOLO 分块与最终片段归并已经完成。"
+    : value.message || "后台正在继续处理后续分块，新片段会自动加入时间轴。";
+  badge.className =
+    "live-analysis-badge " + (failed ? "failed" : final ? "completed" : "running");
+  badge.textContent = failed ? "分析失败" : final ? "分析完成" : "后台分析中";
+}
+
+function setEditorActionAvailability(enabled) {
+  ["save-review-button", "rough-cut-button"].forEach(function (id) {
+    var button = byId(id);
+    button.disabled = !enabled;
+    if (enabled) {
+      button.removeAttribute("title");
+    } else {
+      button.title = "YOLO 全部分块完成后可执行此操作";
+    }
+  });
 }
 
 function applyEditorData(payload) {
@@ -1135,19 +1242,40 @@ function applyEditorData(payload) {
   } catch (error) {
     setView("error");
     byId("editor-error-message").textContent = error.message;
-    return;
+    return null;
   }
-  state.editorData = data;
-  state.video = data.video || null;
-  state.segments = Array.isArray(data.segments)
+  var previousData = state.editorData;
+  var previousSegments = state.segments.slice();
+  var previousSelection = previousSegments.find(function (segment) {
+    return segment.id === state.selectedSegmentId;
+  });
+  var previousVideoPath = state.video && state.video.path;
+  var incoming = Array.isArray(data.segments)
     ? data.segments.slice().sort(function (first, second) {
         return Number(first.order) - Number(second.order);
       })
     : [];
+  var addedCount = 0;
+
+  state.editorData = data;
+  state.video = data.video || null;
+  if (!previousData) {
+    state.segments = incoming;
+  } else if (
+    data.status === "completed" &&
+    previousData.status !== "completed"
+  ) {
+    state.segments = reconcileFinalSegments(previousSegments, incoming);
+  } else {
+    state.segments = mergeLiveSegments(previousSegments, incoming);
+    addedCount = Math.max(0, state.segments.length - previousSegments.length);
+  }
   normalizeSegmentOrder();
   state.agentComments = Array.isArray(data.agent_comments) ? data.agent_comments : [];
   state.keyframes = Array.isArray(data.keyframes) ? data.keyframes : [];
-  setSequenceSaveState(false);
+  if (!previousData) setSequenceSaveState(false);
+  renderLiveAnalysis(data.live_analysis);
+  setEditorActionAvailability(data.actions_enabled);
 
   // 更新头部任务信息
   byId("header-job-id").textContent = data.job_id || state.jobId || "—";
@@ -1158,16 +1286,81 @@ function applyEditorData(payload) {
 
   setView("content");
 
-  renderVideo();
+  if (!previousData || previousVideoPath !== (state.video && state.video.path)) {
+    renderVideo();
+  }
   renderTimeline();
   renderSegmentList();
   renderClipSequence();
   bindTimelineEvents();
 
-  // 默认选中第一个片段
-  if (state.segments.length > 0) {
-    selectSegment(state.segments[0].id);
+  if (previousSelection && data.status === "completed") {
+    var replacement = state.segments
+      .slice()
+      .sort(function (first, second) {
+        return segmentOverlap(previousSelection, second) -
+          segmentOverlap(previousSelection, first);
+      })[0];
+    if (replacement && segmentOverlap(previousSelection, replacement) > 0) {
+      state.selectedSegmentId = replacement.id;
+    }
   }
+  if (!state.segments.some(function (segment) {
+    return segment.id === state.selectedSegmentId;
+  })) {
+    state.selectedSegmentId = state.segments.length ? state.segments[0].id : null;
+  }
+  if (state.selectedSegmentId) {
+    selectSegment(state.selectedSegmentId);
+  }
+  if (addedCount > 0) {
+    announceSequence(
+      "YOLO 新增 " + addedCount + " 个精彩片段，已追加到剪辑序列末尾。"
+    );
+  }
+  return data;
+}
+
+function stopAnalysisPolling() {
+  if (state.analysisPollTimer) window.clearTimeout(state.analysisPollTimer);
+  state.analysisPollTimer = null;
+}
+
+function scheduleAnalysisPolling() {
+  stopAnalysisPolling();
+  state.analysisPollTimer = window.setTimeout(pollEditorAnalysis, 1600);
+}
+
+function pollEditorAnalysis() {
+  stopAnalysisPolling();
+  api.get("/api/jobs/" + encodeURIComponent(state.jobId) + "/editor").then(
+    function (payload) {
+      var previousStatus = state.editorData ? state.editorData.status : null;
+      var data = applyEditorData(payload);
+      if (!data) return;
+      if (data.status === "completed") {
+        if (previousStatus !== "completed") {
+          showToast("YOLO 分析完成，正式片段已归并", "success");
+          ensureAgentRun();
+        }
+        return;
+      }
+      if (data.status === "failed") {
+        setAgentProgress(
+          "failed",
+          "YOLO 分析未完成，不能启动 Agent。",
+          null
+        );
+        return;
+      }
+      scheduleAnalysisPolling();
+    },
+    function (error) {
+      byId("live-analysis-detail").textContent =
+        "增量状态暂时读取失败，将自动重试：" + error.message;
+      scheduleAnalysisPolling();
+    }
+  );
 }
 
 // ── JSON 报告弹窗 ────────────────────────────────────────────────────
@@ -1228,7 +1421,15 @@ function initEditor() {
 
 // ── 保存审核 ───────────────────────────────────────────────────────────
 function saveReview() {
-  if (!state.jobId || !state.segments.length) return;
+  if (
+    !state.jobId ||
+    !state.segments.length ||
+    !state.editorData ||
+    !state.editorData.actions_enabled
+  ) {
+    showToast("YOLO 全部分块完成后才能保存审核", "info");
+    return;
+  }
   var button = byId("save-review-button");
   setButtonLoading(button, true, "保存中…");
   var body = {
@@ -1273,8 +1474,18 @@ function saveReview() {
 
 // ── 生成粗剪 ───────────────────────────────────────────────────────────
 function createRoughCut() {
-  if (!state.jobId || !state.segments.length) {
-    showToast("当前没有可生成粗剪的精彩片段", "error");
+  if (
+    !state.jobId ||
+    !state.segments.length ||
+    !state.editorData ||
+    !state.editorData.actions_enabled
+  ) {
+    showToast(
+      state.editorData && !state.editorData.actions_enabled
+        ? "YOLO 全部分块完成后才能生成粗剪"
+        : "当前没有可生成粗剪的精彩片段",
+      "error"
+    );
     return;
   }
   var button = byId("rough-cut-button");
@@ -1320,10 +1531,18 @@ function setButtonLoading(button, loading, label) {
   if (!originalLabel) {
     button.dataset.originalLabel = button.textContent.trim();
   }
-  button.disabled = loading;
+  var finalAction =
+    button.id === "save-review-button" || button.id === "rough-cut-button";
+  button.disabled =
+    loading ||
+    (finalAction &&
+      (!state.editorData || state.editorData.actions_enabled !== true));
   button.classList.toggle("is-loading", loading);
   button.textContent = loading ? label : button.dataset.originalLabel;
 }
 
 document.addEventListener("DOMContentLoaded", initEditor);
-window.addEventListener("beforeunload", stopAgentPolling);
+window.addEventListener("beforeunload", function () {
+  stopAgentPolling();
+  stopAnalysisPolling();
+});

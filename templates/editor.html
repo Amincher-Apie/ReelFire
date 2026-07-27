@@ -91,6 +91,22 @@
     <!-- 主内容区 -->
     <div id="editor-content" class="editor-content" hidden>
 
+      <section id="live-analysis-panel" class="live-analysis-panel"
+               aria-labelledby="live-analysis-heading">
+        <div class="live-analysis-copy">
+          <p class="panel-kicker">LIVE YOLO PIPELINE</p>
+          <h2 id="live-analysis-heading">后台分块分析</h2>
+          <p id="live-analysis-detail" aria-live="polite">
+            正在读取分块队列状态。
+          </p>
+        </div>
+        <div class="live-analysis-meter">
+          <progress id="live-analysis-progress" max="100" value="0">0%</progress>
+          <span id="live-analysis-count">0 / 0 个分块</span>
+        </div>
+        <span id="live-analysis-badge" class="live-analysis-badge running">分析中</span>
+      </section>
+
       <section id="agent-run-panel" class="agent-run-panel" aria-labelledby="agent-run-heading">
         <div class="agent-run-copy">
           <p class="panel-kicker">AGENT WORKFLOW</p>
@@ -278,8 +294,10 @@
 
       <!-- 底部工具栏 -->
       <footer class="editor-toolbar" role="toolbar" aria-label="编辑操作">
-        <button id="save-review-button" class="button secondary" type="button">保存审核</button>
-        <button id="rough-cut-button" class="button primary" type="button">生成粗剪视频</button>
+        <button id="save-review-button" class="button secondary" type="button" disabled
+                title="YOLO 全部分块完成后可保存审核">保存审核</button>
+        <button id="rough-cut-button" class="button primary" type="button" disabled
+                title="YOLO 全部分块完成后可生成粗剪">生成粗剪视频</button>
         <button id="view-report-button" class="button ghost" type="button">查看 JSON 报告</button>
         <a id="back-workbench-link" href="/jobs/{{ job_id }}/analysis" class="button ghost">返回分析工作台</a>
       </footer>

@@ -338,6 +338,30 @@ class TestAnalysisServiceMultiSegment(unittest.TestCase):
         )
         self.assertEqual(report['analysis_mode'], 'streaming_chunks')
         self.assertEqual(len(report['analysis_chunks']), 2)
+        queued = progress_updates[0]
+        self.assertEqual(
+            [chunk['status'] for chunk in queued['chunks']],
+            ['queued', 'queued'],
+        )
+        self.assertEqual(queued['video']['duration'], 30.0)
+        first_completed = next(
+            update
+            for update in progress_updates
+            if update['completed_chunks'] == 1
+            and update['current_chunk'] is None
+        )
+        self.assertEqual(
+            [chunk['status'] for chunk in first_completed['chunks']],
+            ['completed', 'queued'],
+        )
+        self.assertTrue(
+            all(
+                segment['id'].startswith('seg_c0001_')
+                for segment in first_completed['chunks'][0][
+                    'provisional_segments'
+                ]
+            )
+        )
         self.assertEqual(
             [item['stage'] for item in progress_updates][-1],
             'finalizing',

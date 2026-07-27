@@ -38,7 +38,8 @@ GET /api/jobs/{job_id}/editor
 4. 允许用户通过片段列表或时间轴定位视频。
 5. 允许用户调整粗剪片段的输出顺序，并保存为审核快照。
 6. 根据已审核的片段顺序生成多片段粗剪。
-7. 自动启动并轮询 Agent 调用，展示排队、运行、完成、失败或规则降级状态。
+7. 首个 YOLO 分块完成后进入页面，轮询后台分析并实时追加新片段。
+8. 最终报告生成后自动启动并轮询 Agent 调用，展示排队、运行、完成、失败或规则降级状态。
 
 页面不负责：
 
@@ -64,6 +65,11 @@ document
 │   └── button#editor-export-button
 │       └── 初始状态：disabled
 └── main#editor-main
+    ├── section#live-analysis-panel
+    │   ├── status#live-analysis-detail
+    │   ├── progress#live-analysis-progress
+    │   ├── output#live-analysis-count
+    │   └── status#live-analysis-badge
     ├── section#agent-run-panel
     │   ├── status#agent-run-detail
     │   ├── list：排队、分析、结果
@@ -127,6 +133,7 @@ document
 | --- | --- | --- |
 | `job.project_name` | 页面标题辅助文本 | 原样显示 |
 | `job.status` | `#editor-job-status` | 映射为中文状态文本 |
+| `live_analysis.*` | `#live-analysis-panel` | 显示后台分块数、进度和最终状态 |
 | `video.url` | `#editor-video.src` | 原样赋值 |
 | `video.duration` | 时间轴最大值 | 设置为 `range.max` |
 | `highlights.length` | `#highlight-count` | 显示“共 N 段” |
@@ -151,6 +158,14 @@ document
 - 片段列表已经渲染。
 - 时间轴可拖动。
 - 点击片段列表或时间轴标记可以定位视频。
+
+### `streaming`
+
+- 首个分块已经完成，视频、时间轴和排序可操作。
+- 每约 1.6 秒读取一次 Editor 聚合接口。
+- 新暂定片段只追加到输出序列末尾，不覆盖用户已调整的顺序。
+- 保存审核和生成粗剪保持禁用，Agent 显示“等待 YOLO”。
+- 最终报告到达后，按时间重叠把暂定片段映射为正式片段，再开放写操作。
 
 ### `empty`
 
@@ -215,6 +230,7 @@ document
 ### Agent 评论
 
 - 页面使用 Agent 调用接口启动和轮询真实任务，但不在前端生成评论。
+- YOLO 尚未完成时不得创建 Agent 调用。
 - 没有调用记录且没有现有 Agent 报告时，页面自动创建 Prompt v2 调用。
 - `queued/running`：显示当前运行状态并继续轮询。
 - `completed/needs_review`：重新请求 Editor 聚合接口读取最终评论。

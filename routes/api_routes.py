@@ -927,38 +927,73 @@ def get_editor_contract(job_id: str):
     jobs, _, _ = _services()
     access = require_job_access(job_id)
     job = jobs.get_job_detail(job_id)
-    if job.get("status") != "completed" or not job.get("report_available"):
-        raise JobStateConflictError("分析报告尚未生成，不能打开剪辑预览")
+    status = str(job.get("status", ""))
+    progress = jobs.read_progress(job_id)
+    completed_chunks = int(progress.get("completed_chunks") or 0)
+    report_ready = status == "completed" and bool(job.get("report_available"))
+    live_ready = status in {"running", "failed"} and completed_chunks > 0
+    if not report_ready and not live_ready:
+        raise JobStateConflictError(
+            "首个 YOLO 分块尚未完成，暂时不能打开剪辑预览"
+        )
 
-    report = jobs.read_report(job_id)
-    duration = _duration(job, report)
+    report = jobs.read_report(job_id) if report_ready else {}
+    progress_video = progress.get("video")
+    duration_source = dict(report)
+    if isinstance(progress_video, dict):
+        duration_source.setdefault("video", progress_video)
+        duration_source.setdefault("duration", progress_video.get("duration"))
+    duration = _duration(job, duration_source)
     if duration is None:
-        raise FileValidationError("分析报告缺少有效的视频时长")
+        raise FileValidationError("分析进度缺少有效的视频时长")
     source_video = jobs.get_input_video(job_id)
     job_dir = jobs.job_dir(job_id)
     preview_video = source_video
-    preview_status = "source"
-    try:
-        preview_video = ensure_browser_preview(
-            source_video,
-            job_dir / "result" / "editor_preview_h264.mp4",
-        )
-        if preview_video != source_video.resolve():
-            preview_status = "transcoded"
-    except (FileNotFoundError, RuntimeError):
-        current_app.logger.warning(
-            "Could not prepare browser preview for job %s; serving source video",
-            job_id,
-        )
-        preview_status = "source_unverified"
+    preview_status = "source_unverified" if live_ready else "source"
+    if report_ready:
+        try:
+            preview_video = ensure_browser_preview(
+                source_video,
+                job_dir / "result" / "editor_preview_h264.mp4",
+            )
+            if preview_video != source_video.resolve():
+                preview_status = "transcoded"
+        except (FileNotFoundError, RuntimeError):
+            current_app.logger.warning(
+                "Could not prepare browser preview for job %s; serving source video",
+                job_id,
+            )
+            preview_status = "source_unverified"
     preview_relative = preview_video.relative_to(job_dir).as_posix()
-    comments, missing_comment_status = _agent_comments(job_dir)
+    comments, missing_comment_status = (
+        _agent_comments(job_dir) if report_ready else ({}, "pending")
+    )
 
-    raw_segments = report.get("segments", [])
+    if report_ready:
+        raw_segments = report.get("segments", [])
+    else:
+        raw_segments = []
+        for chunk in progress.get("chunks", []):
+            if not isinstance(chunk, dict):
+                continue
+            chunk_status = chunk.get("status")
+            if chunk_status not in {None, "completed"}:
+                continue
+            provisional = chunk.get("provisional_segments", [])
+            if isinstance(provisional, list):
+                raw_segments.extend(
+                    segment
+                    for segment in provisional
+                    if isinstance(segment, dict)
+                )
+        raw_segments = [
+            {**segment, "order": index}
+            for index, segment in enumerate(raw_segments, start=1)
+        ]
     try:
         segments = (
             adapt_legacy_segments(raw_segments, duration)
-            if access["is_legacy"]
+            if report_ready and access["is_legacy"]
             else validate_editor_segments(raw_segments, duration)
         )
     except EditorSegmentValidationError as exc:
@@ -1011,6 +1046,35 @@ def get_editor_contract(job_id: str):
             filename=relative,
         )
 
+    raw_chunks = progress.get("chunks", [])
+    live_chunks = []
+    if isinstance(raw_chunks, list):
+        for chunk in raw_chunks:
+            if not isinstance(chunk, dict):
+                continue
+            provisional = chunk.get("provisional_segments", [])
+            live_chunks.append(
+                {
+                    "id": str(chunk.get("id", "")),
+                    "index": int(chunk.get("index") or 0),
+                    "start": chunk.get("start"),
+                    "end": chunk.get("end"),
+                    "status": str(
+                        chunk.get("status")
+                        or (
+                            "completed"
+                            if chunk.get("provisional_segments") is not None
+                            else "queued"
+                        )
+                    ),
+                    "segment_ids": [
+                        str(item.get("id"))
+                        for item in provisional
+                        if isinstance(item, dict) and item.get("id")
+                    ],
+                }
+            )
+
     return jsonify(
         ok=True,
         contract_version="1.0",
@@ -1039,4 +1103,24 @@ def get_editor_contract(job_id: str):
             "contact_sheet_url": output_url(output.get("contact_sheet")),
             "ratio": output.get("ratio") or recommended.get("output_ratio"),
         },
+        live_analysis={
+            "ready": True,
+            "final": report_ready,
+            "stage": str(
+                progress.get("stage")
+                or ("completed" if report_ready else "detecting")
+            ),
+            "message": str(progress.get("message") or ""),
+            "percent": float(progress.get("percent") or 0.0),
+            "total_chunks": int(
+                progress.get("total_chunks")
+                or len(report.get("analysis_chunks", []))
+            ),
+            "completed_chunks": int(
+                progress.get("completed_chunks")
+                or len(report.get("analysis_chunks", []))
+            ),
+            "chunks": live_chunks,
+        },
+        actions_enabled=report_ready,
     )

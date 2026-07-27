@@ -59,6 +59,7 @@
   display: grid;
   grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
   grid-template-areas:
+    "live live"
     "agent agent"
     "media preview"
     "toolbar toolbar";
@@ -72,7 +73,76 @@
   letter-spacing: -0.02em;
 }
 
-/* ---- Agent 运行状态 ---- */
+/* ---- YOLO / Agent 运行状态 ---- */
+
+.live-analysis-panel {
+  grid-area: live;
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.4fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel-soft));
+}
+
+.live-analysis-copy h2,
+.live-analysis-copy p {
+  margin: 0;
+}
+
+.live-analysis-copy h2 {
+  margin-top: 2px;
+  font-size: 14px;
+}
+
+.live-analysis-copy #live-analysis-detail {
+  margin-top: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.live-analysis-meter {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.live-analysis-meter progress {
+  width: 100%;
+  height: 9px;
+  accent-color: var(--accent);
+}
+
+.live-analysis-badge {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 4px 10px;
+  border: 1px solid color-mix(in srgb, var(--warning) 42%, var(--border));
+  border-radius: 999px;
+  color: var(--warning);
+  background: var(--panel);
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.live-analysis-badge.completed {
+  border-color: color-mix(in srgb, var(--success) 42%, var(--border));
+  color: var(--success);
+}
+
+.live-analysis-badge.failed {
+  border-color: color-mix(in srgb, var(--danger) 42%, var(--border));
+  color: var(--danger);
+}
 
 .agent-run-panel {
   grid-area: agent;
@@ -1252,6 +1322,14 @@
     grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.5fr);
   }
 
+  .live-analysis-panel {
+    grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.5fr);
+  }
+
+  .live-analysis-badge {
+    justify-self: start;
+  }
+
   .agent-run-actions {
     grid-column: 1 / -1;
     justify-content: flex-start;
@@ -1279,12 +1357,14 @@
   .editor-content {
     grid-template-columns: 1fr;
     grid-template-areas:
+      "live"
       "agent"
       "preview"
       "media"
       "toolbar";
   }
 
+  .live-analysis-panel,
   .agent-run-panel {
     grid-template-columns: 1fr;
   }
