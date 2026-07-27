@@ -60,9 +60,11 @@ Agent 继续沿用 `agent_report.json.segment_comments[]`，不会另建前端�
 
 检测框继续位于 `samples[].objects[].bbox` 或 `keyframes[].objects[].bbox`。如果 CV 不提供连续帧数、关键帧或检测框，Agent 会保留 `null`/空数组，不会制造数据。
 
-## 4. 后端反馈记录
+## 4. 反馈记录 Schema（后端尚未持久化）
 
-单条人工操作记录使用 `agent/schemas/agent_feedback.schema.json`。后端负责持久化，Agent 负责定义语义和统计：
+单条人工操作记录使用 `agent/schemas/agent_feedback.schema.json`。Agent 当前
+只冻结语义并提供离线统计；本轮后端没有实现反馈事件持久化、写入 API、数据库
+表或 migration：
 
 ```json
 {
@@ -97,11 +99,14 @@ Agent 继续沿用 `agent_report.json.segment_comments[]`，不会另建前端�
 - `GET /api/jobs/{job_id}/feedback`
 - `GET /api/statistics/agent-feedback`
 
-具体路由和数据库迁移由后端工程师实现。后端不得提交 API Key；Dify 应用 Key 仍只通过本机环境变量或部署平台密钥管理传递。
+以上仅为后续接口建议，不是已上线能力。具体路由和数据库迁移仍待独立设计与
+评审。后端不得提交 API Key；Dify 应用 Key 仍只通过本机环境变量或部署平台
+密钥管理传递。
 
 ## 5. 统计与规则建议
 
-`FeedbackAnalyzerTool` 对同一 `job_id + segment_id` 只采用时间最新的反馈，输出：
+离线 `FeedbackAnalyzerTool` 对同一 `job_id + segment_id` 只采用时间最新的
+反馈，输出：
 
 - 候选采纳率；
 - 三态数量；
@@ -120,12 +125,14 @@ python -m agent.analyze_feedback feedback.json --output feedback_summary.json
 
 输出须通过 `agent/schemas/agent_feedback_summary.schema.json`。统计建议只供 CV/产品负责人调参评审，不能自动修改生产阈值。
 
+该命令读取调用者明确提供的本地 JSON 文件，不代表后端已经收集用户反馈。
+
 ## 6. 跨角色验收
 
 | 角色 | 验收条件 |
 |---|---|
 | CV/数据工程师 | 正式报告提供真实 `reason`、出现时间、置信度、关键帧、检测框；连续帧数缺失时明确缺失 |
-| 后端工程师 | 按反馈 Schema 持久化，返回稳定 `job_id/segment_id`，统计接口不改变字段语义 |
-| 前端工程师 | 从 `report-data.agent.segment_comments[]` 展示解释；提交实际人工操作，不从文字反推字段 |
+| 后端工程师 | 当前仅从 `report-data.agent.segment_comments[]` 安全公开解释；反馈持久化仍待后续实现 |
+| 前端工程师 | 从 `report-data.agent.segment_comments[]` 展示解释；当前没有反馈写入 API，不从文字反推字段 |
 | 产品负责人 | 使用真实成功、低置信度、空结果和失败案例完成浏览器端回归 |
 | Agent/工作流工程师 | Schema、Prompt、规则校验、降级、反馈统计和测试全部通过 |

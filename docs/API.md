@@ -650,6 +650,10 @@ Provider 或 FFmpeg。
       "availability": "unavailable",
       "status": null,
       "summary": null,
+      "tags": [],
+      "suggestions": [],
+      "review": null,
+      "evidence_refs": [],
       "segment_comments": [],
       "knowledge_refs": [],
       "calls": {
@@ -692,18 +696,32 @@ Provider 或 FFmpeg。
   片段；Agent 评论也不会改写 CV 数据。
 - `review.latest` 使用 SQLite 审核历史既有的最新优先顺序，仅公开状态、
   标签、备注、片段/关键帧快照和时间。历史只公开总数与固定三态计数。
-- `agent.segment_comments` 和知识引用只读取任务根目录中的正式
-  `agent_report.json`，绝不从 `agent_calls.result` 构造。正式文件不存在时
-  `availability=unavailable` 并返回空数组；文件损坏、Job 不匹配、结构
-  无效或公开内容包含私密路径/非法 JSON 值时 `availability=invalid`，但
-  整个接口仍返回 `200`，且调用历史摘要继续保留。`calls` 仅为 SQLite
-  调用历史的固定五态摘要。
+- `report_data.agent` 是前端完整 Agent 面板唯一正式来源；前端不得直接读取
+  `agent_calls.result`、`result_path` 或任务目录中的 `agent_report.json`。
+  该块固定返回 `availability/status/summary/tags/suggestions/review/
+  evidence_refs/segment_comments/knowledge_refs/calls`。
+- Agent v3 的 `tags[]`、`suggestions[]`、整体 `review`、整体
+  `evidence_refs[]`，以及逐片段 `action_recommendation/explanation/
+  boundary_suggestion` 都经过逐层白名单、枚举、有限数值和路径检查。
+  `observed_frame_count` 保持“观察到的帧数”语义，
+  `consecutive_frame_count` 缺失时保持 `null`，不得相互改写。
+- 历史 Agent v2 报告缺少 v3 字段时仍为 ready，使用
+  `tags=[]/suggestions=[]/review=null/evidence_refs=[]`，并保留旧
+  `segment_comments` 和 `knowledge_refs`。
+- 正式文件不存在时 `availability=unavailable`；文件损坏、Job 不匹配、
+  顶层/嵌套类型错误、非法枚举、非有限数值、私密键或绝对路径时
+  `availability=invalid`。两种情况均返回固定空业务结构，不影响 CV、
+  review、statistics 或 rough_cut，整个接口仍返回 `200`。
+- `status=degraded` 是可公开的安全降级结果，`availability=ready`；业务字段
+  仍经过与 completed 相同的白名单。`calls` 仅为 SQLite 调用历史的固定五态
+  摘要。
 - `rough_cut.available` 只有在相对元数据指向任务目录内真实存在的文件时
   才为 `true`。`download_url` 使用现有受任务权限保护的 `/outputs/...`
   路由；仅有元数据但文件缺失时返回不可用零值。
 - 审核、Agent 或粗剪为空属于正常业务状态，接口仍返回 `200`。
-- 响应使用公开字段白名单，不返回绝对路径、SQLite 内部 ID、用户 ID、
-  Provider 地址、API Key、Authorization、Token 或完整 Agent 调用结果。
+- 响应使用公开字段白名单，不返回绝对路径、SQLite 内部 ID、用户/项目 ID、
+  provider/request_id、trace、errors、Prompt、模型原始响应、API Key、
+  Authorization、Token 或完整 Agent 调用结果。
 
 错误语义：
 
@@ -839,8 +857,11 @@ explanation.detection_box_refs[]
 boundary_suggestion
 ```
 
-完整语义见 `docs/AGENT_FEEDBACK_CONTRACT.md`。聚合接口可以原样透传这些字段，
-不得把 `detection_count` 改写成连续帧数，也不得由前端根据文字反推证据。
+完整语义见 `docs/AGENT_FEEDBACK_CONTRACT.md`。完整字段只通过
+`GET /api/jobs/<job_id>/report-data` 的严格白名单公开；Editor 接口继续只提供
+`agent_comment/agent_comment_status/agent_review_status/
+agent_evidence_refs` 简略字段，不复制完整 Agent 面板。不得把
+`detection_count` 改写成连续帧数，也不得由前端根据文字反推证据。
 
 ### 6.2.1 反馈接口待后端实现的冻结语义
 

@@ -113,4 +113,3 @@ detections_summary / peak_enemy_count / reason
 5. 部署环境通过环境变量注入 Dify 应用 Key；不得把 Key 写入 Git、镜像或前端代码。
 6. 线上执行一个真实视频任务，确认：
    `CV completed -> Agent Dify -> report-data -> Editor -> rough cut`。
-

@@ -13,6 +13,7 @@ from services.agent_call_service import (
     create_agent_call,
     mark_agent_call_running,
 )
+from services.report_data_service import _public_agent
 
 
 class FakeAnalysisService:
@@ -254,6 +255,130 @@ class ReportDataApiTestCase(unittest.TestCase):
         )
         return path
 
+    def _agent_v3_report(self) -> dict:
+        return {
+            "schema_version": "1.0",
+            "job_id": self.job_id,
+            "status": "completed",
+            "provider": {
+                "type": "dify",
+                "model": "private-model",
+                "request_id": "private-request-id",
+            },
+            "summary": "Grounded Agent v3 summary",
+            "tags": [
+                {
+                    "name": "enemy",
+                    "description": "Observed in CV detections",
+                    "evidence_refs": ["ev:detection:1"],
+                    "internal_rank": 99,
+                }
+            ],
+            "suggestions": [
+                {
+                    "suggestion_id": "SUG-001",
+                    "title": "Review candidate",
+                    "action": "Check the detected sequence",
+                    "priority": "high",
+                    "evidence_refs": ["ev:segment:seg_cv_001"],
+                    "knowledge_refs": ["KB-CORE-001"],
+                    "model_score": 0.99,
+                }
+            ],
+            "segment_comments": [
+                {
+                    "segment_id": "seg_cv_001",
+                    "title": "Segment one",
+                    "comment": "Evidence-grounded comment",
+                    "score_reason": "CV score and detections",
+                    "review_status": "pass",
+                    "action_recommendation": "adopt",
+                    "explanation": {
+                        "highlight_type": "enemy_engagement",
+                        "trigger_rule": "enemy_engagement",
+                        "time_range": {"start": 10.0, "end": 15.0},
+                        "detections": [
+                            {
+                                "class_name": "enemy",
+                                "track_id": "17",
+                                "first_seen": 10.5,
+                                "last_seen": 14.5,
+                                "observed_frame_count": 23,
+                                "consecutive_frame_count": None,
+                                "average_confidence": 0.78,
+                                "max_confidence": 0.93,
+                                "evidence_refs": ["ev:detection:1"],
+                                "private_model_rank": 7,
+                            }
+                        ],
+                        "keyframe_refs": ["ev:keyframe:kf_001"],
+                        "detection_box_refs": ["ev:detection:1"],
+                        "unknown_explanation": "must-not-leak",
+                    },
+                    "boundary_suggestion": {
+                        "action": "review_end",
+                        "suggested_start": None,
+                        "suggested_end": 14.8,
+                        "reason": "Last observation precedes current end",
+                        "internal_delta": -0.2,
+                    },
+                    "evidence_refs": ["ev:segment:seg_cv_001"],
+                    "model_raw_comment": "must-not-leak",
+                }
+            ],
+            "review": {
+                "recommendation": "pass",
+                "confidence": 0.91,
+                "reasons": ["Evidence is sufficient"],
+                "internal_reasoning": "must-not-leak",
+            },
+            "evidence_refs": [
+                {
+                    "ref_id": "ev:detection:1",
+                    "type": "detection",
+                    "source_id": "sample_001",
+                    "timestamp": 10.5,
+                    "class_name": "enemy",
+                    "confidence": 0.93,
+                    "value": {"bbox": [1, 2, 3, 4]},
+                    "database_rank": 4,
+                }
+            ],
+            "knowledge_refs": [
+                {
+                    "knowledge_id": "KB-CORE-001",
+                    "category": "review_policy",
+                    "title": "Core rule",
+                    "similarity": 0.88,
+                }
+            ],
+            "trace": {
+                "started_at": "2026-07-27T10:00:00+00:00",
+                "finished_at": "2026-07-27T10:00:01+00:00",
+                "duration_ms": 1000,
+                "degraded": False,
+                "tools": [],
+            },
+            "errors": [],
+            "model_raw_response": "must-not-leak",
+            "unknown_top_level": "must-not-leak",
+        }
+
+    def _store_agent_report(self, report: dict) -> Path:
+        path = self.jobs.agent_report_path(self.job_id)
+        path.write_text(
+            json.dumps(report, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return path
+
+    def _agent_response(self) -> tuple[dict, dict]:
+        response = self.owner.get(
+            f"/api/jobs/{self.job_id}/report-data"
+        )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        return response.get_json()["report_data"]["agent"], response.get_json()
+
     def test_owner_receives_complete_whitelisted_contract_without_writes(
         self,
     ) -> None:
@@ -342,6 +467,10 @@ class ReportDataApiTestCase(unittest.TestCase):
         self.assertEqual(agent["availability"], "unavailable")
         self.assertIsNone(agent["status"])
         self.assertIsNone(agent["summary"])
+        self.assertEqual(agent["tags"], [])
+        self.assertEqual(agent["suggestions"], [])
+        self.assertIsNone(agent["review"])
+        self.assertEqual(agent["evidence_refs"], [])
         self.assertEqual(agent["segment_comments"], [])
         self.assertEqual(agent["knowledge_refs"], [])
         self.assertEqual(agent["calls"]["history_count"], 1)
@@ -375,7 +504,274 @@ class ReportDataApiTestCase(unittest.TestCase):
                 )
                 agent = response.get_json()["report_data"]["agent"]
                 self.assertEqual(agent["availability"], "invalid")
+                self.assertEqual(agent["tags"], [])
+                self.assertEqual(agent["suggestions"], [])
+                self.assertIsNone(agent["review"])
+                self.assertEqual(agent["evidence_refs"], [])
                 self.assertEqual(agent["segment_comments"], [])
+
+    def test_agent_v3_complete_contract_is_strictly_whitelisted(self) -> None:
+        self._store_agent_report(self._agent_v3_report())
+
+        agent, payload = self._agent_response()
+
+        self.assertEqual(
+            set(agent),
+            {
+                "availability",
+                "status",
+                "summary",
+                "tags",
+                "suggestions",
+                "review",
+                "evidence_refs",
+                "segment_comments",
+                "knowledge_refs",
+                "calls",
+            },
+        )
+        self.assertEqual(agent["availability"], "ready")
+        self.assertEqual(agent["status"], "completed")
+        self.assertEqual(agent["summary"], "Grounded Agent v3 summary")
+        self.assertEqual(
+            agent["tags"],
+            [
+                {
+                    "name": "enemy",
+                    "description": "Observed in CV detections",
+                    "evidence_refs": ["ev:detection:1"],
+                }
+            ],
+        )
+        self.assertEqual(
+            agent["suggestions"][0],
+            {
+                "suggestion_id": "SUG-001",
+                "title": "Review candidate",
+                "action": "Check the detected sequence",
+                "priority": "high",
+                "evidence_refs": ["ev:segment:seg_cv_001"],
+                "knowledge_refs": ["KB-CORE-001"],
+            },
+        )
+        self.assertEqual(
+            agent["review"],
+            {
+                "recommendation": "pass",
+                "confidence": 0.91,
+                "reasons": ["Evidence is sufficient"],
+            },
+        )
+        self.assertEqual(
+            agent["evidence_refs"][0],
+            {
+                "ref_id": "ev:detection:1",
+                "type": "detection",
+                "source_id": "sample_001",
+                "timestamp": 10.5,
+                "class_name": "enemy",
+                "confidence": 0.93,
+                "value": {"bbox": [1, 2, 3, 4]},
+            },
+        )
+        comment = agent["segment_comments"][0]
+        self.assertEqual(comment["action_recommendation"], "adopt")
+        self.assertEqual(
+            comment["explanation"]["time_range"],
+            {"start": 10.0, "end": 15.0},
+        )
+        detection = comment["explanation"]["detections"][0]
+        self.assertEqual(detection["observed_frame_count"], 23)
+        self.assertIsNone(detection["consecutive_frame_count"])
+        self.assertEqual(
+            comment["boundary_suggestion"],
+            {
+                "action": "review_end",
+                "suggested_start": None,
+                "suggested_end": 14.8,
+                "reason": "Last observation precedes current end",
+            },
+        )
+        self.assertEqual(
+            agent["knowledge_refs"],
+            [
+                {
+                    "knowledge_id": "KB-CORE-001",
+                    "category": "review_policy",
+                    "title": "Core rule",
+                }
+            ],
+        )
+        serialized = json.dumps(payload, ensure_ascii=False)
+        for forbidden in (
+            "provider",
+            "private-request-id",
+            "trace",
+            "errors",
+            "model_raw_response",
+            "unknown_top_level",
+            "internal_rank",
+            "model_score",
+            "private_model_rank",
+            "unknown_explanation",
+            "internal_delta",
+            "internal_reasoning",
+            "database_rank",
+            "similarity",
+            "model_raw_comment",
+            "must-not-leak",
+        ):
+            self.assertNotIn(forbidden, serialized)
+
+    def test_agent_v3_degraded_still_returns_safe_business_fields(self) -> None:
+        report = self._agent_v3_report()
+        report["status"] = "degraded"
+        report["review"]["recommendation"] = "needs_review"
+        self._store_agent_report(report)
+
+        agent, _ = self._agent_response()
+
+        self.assertEqual(agent["availability"], "ready")
+        self.assertEqual(agent["status"], "degraded")
+        self.assertEqual(
+            agent["review"]["recommendation"],
+            "needs_review",
+        )
+        self.assertEqual(len(agent["tags"]), 1)
+        self.assertEqual(len(agent["suggestions"]), 1)
+
+    def test_agent_v2_missing_v3_fields_remains_ready(self) -> None:
+        self._write_agent_report()
+
+        agent, _ = self._agent_response()
+
+        self.assertEqual(agent["availability"], "ready")
+        self.assertEqual(agent["status"], "completed")
+        self.assertEqual(agent["tags"], [])
+        self.assertEqual(agent["suggestions"], [])
+        self.assertIsNone(agent["review"])
+        self.assertEqual(agent["evidence_refs"], [])
+        self.assertEqual(
+            agent["segment_comments"][0]["comment"],
+            "official comment",
+        )
+
+    def test_invalid_agent_v3_enums_fail_closed(self) -> None:
+        mutations = (
+            ("review", lambda report: report["review"].update(
+                recommendation="accepted"
+            )),
+            ("action", lambda report: report["segment_comments"][0].update(
+                action_recommendation="accept"
+            )),
+            ("boundary", lambda report: report["segment_comments"][0][
+                "boundary_suggestion"
+            ].update(action="trim")),
+            ("priority", lambda report: report["suggestions"][0].update(
+                priority="urgent"
+            )),
+            ("evidence_type", lambda report: report["evidence_refs"][0].update(
+                type="file"
+            )),
+        )
+        for label, mutate in mutations:
+            with self.subTest(label=label):
+                report = self._agent_v3_report()
+                mutate(report)
+                self._store_agent_report(report)
+                agent, payload = self._agent_response()
+                self.assertEqual(agent["availability"], "invalid")
+                self.assertIsNone(agent["status"])
+                self.assertEqual(agent["tags"], [])
+                self.assertEqual(agent["suggestions"], [])
+                self.assertEqual(agent["segment_comments"], [])
+                self.assertNotIn("must-not-leak", json.dumps(payload))
+
+    def test_invalid_agent_v3_types_and_nonfinite_values_fail_closed(
+        self,
+    ) -> None:
+        mutations = (
+            ("tags", lambda report: report.update(tags={})),
+            ("suggestions", lambda report: report.update(suggestions={})),
+            ("review", lambda report: report.update(review=[])),
+            ("evidence", lambda report: report.update(evidence_refs={})),
+            ("comments", lambda report: report.update(segment_comments={})),
+            ("knowledge", lambda report: report.update(knowledge_refs={})),
+            ("nan", lambda report: report["review"].update(
+                confidence=float("nan")
+            )),
+            ("infinity", lambda report: report["evidence_refs"][0].update(
+                confidence=float("inf")
+            )),
+            ("unsupported", lambda report: report["evidence_refs"][0].update(
+                value={"unsupported": complex(1, 2)}
+            )),
+        )
+        for label, mutate in mutations:
+            with self.subTest(label=label):
+                report = self._agent_v3_report()
+                mutate(report)
+                if label == "unsupported":
+                    agent = _public_agent(
+                        report,
+                        "ready",
+                        {
+                            "history_count": 0,
+                            "status_counts": {},
+                        },
+                    )
+                    self.assertEqual(agent["availability"], "invalid")
+                    continue
+                self._store_agent_report(report)
+                agent, _ = self._agent_response()
+                self.assertEqual(agent["availability"], "invalid")
+                self.assertIsNone(agent["status"])
+
+    def test_agent_private_fields_and_paths_fail_closed_without_cv_loss(
+        self,
+    ) -> None:
+        mutations = (
+            ("result_path", "private-result"),
+            ("token", "private-token"),
+            ("owner_id", 999),
+            ("private_path", r"C:\private\report.json"),
+            ("nested_windows_path", r"C:\private\evidence.json"),
+            ("nested_unix_path", "/srv/private/evidence.json"),
+        )
+        for field, value in mutations:
+            with self.subTest(field=field):
+                report = self._agent_v3_report()
+                if field.startswith("nested_"):
+                    report["evidence_refs"][0]["value"] = {
+                        "note": value
+                    }
+                else:
+                    report[field] = value
+                self._store_agent_report(report)
+                response = self.owner.get(
+                    f"/api/jobs/{self.job_id}/report-data"
+                )
+                self.assertEqual(response.status_code, 200)
+                data = response.get_json()["report_data"]
+                self.assertEqual(
+                    data["agent"]["availability"],
+                    "invalid",
+                )
+                self.assertEqual(
+                    [item["id"] for item in data["cv"]["segments"]],
+                    ["seg_cv_001", "seg_cv_002"],
+                )
+                self.assertNotIn(
+                    str(value),
+                    response.get_data(as_text=True),
+                )
+
+    def test_missing_report_data_job_returns_404(self) -> None:
+        response = self.owner.get(
+            "/api/jobs/20260727_120000_deadbeef/report-data"
+        )
+
+        self.assertEqual(response.status_code, 404)
 
     def test_video_filename_is_cross_platform_safe_basename(self) -> None:
         for original_name in (

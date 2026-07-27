@@ -234,8 +234,14 @@ Editor 1.0 仍只按照上述 `agent_report.json.segment_comments[]` 和带可�
 }
 ```
 
-前端可以展示这些新增字段，但不得根据 `comment` 反推类别、连续帧数或检测框。
-反馈提交字段与后端待实现接口见 `docs/AGENT_FEEDBACK_CONTRACT.md`。
+完整 Agent 面板应从 `GET /api/jobs/{job_id}/report-data` 的
+`report_data.agent` 读取。`GET /editor` 仍只在每个 highlight 中提供
+`agent_comment/agent_comment_status/agent_review_status/
+agent_evidence_refs` 简略字段，不复制 `tags/suggestions/explanation` 等完整
+结构，避免形成第二套合同。前端不得直接读取 `agent_calls.result`、
+`result_path` 或任务目录中的 `agent_report.json`，也不得根据 `comment` 反推
+类别、连续帧数或检测框。反馈字段语义与尚未实现的后端接口建议见
+`docs/AGENT_FEEDBACK_CONTRACT.md`。
 
 ## 5. 错误响应
 

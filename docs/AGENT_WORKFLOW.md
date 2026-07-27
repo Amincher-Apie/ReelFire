@@ -267,3 +267,12 @@ Day 04 的成功、失败和低置信度用例、用途、输入输出、局限�
 记录，输出采纳率、拒绝原因、边界调整、顺序变化、重新导出和规则优化建议。
 完整字段、角色归属与接口建议见 `docs/AGENT_FEEDBACK_CONTRACT.md`，最终验收边界见
 `docs/evidence/AGENT_FINAL_ACCEPTANCE.md`。
+
+后端集成只通过 `GET /api/jobs/<job_id>/report-data` 的严格白名单向完整 Agent
+面板公开 v3 业务字段。Editor 聚合接口保持逐片段简略字段，不复制完整
+explanation/tags/suggestions。provider、request_id、trace、errors、Prompt、
+模型原始响应、内部路径和授权信息均不属于前端业务合同。
+
+`FeedbackAnalyzerTool` 与 `python -m agent.analyze_feedback` 当前是离线分析工具。
+本轮没有反馈事件写入 API、数据库表或 migration，也没有自动学习或自动修改
+Agent 规则。

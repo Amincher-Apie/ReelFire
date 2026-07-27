@@ -18,8 +18,11 @@ _FORBIDDEN_KEYS = frozenset(
         "api_key",
         "asset_id",
         "authorization",
+        "access_token",
+        "api_token",
         "job_row_id",
         "owner_id",
+        "private_path",
         "project_id",
         "requested_by",
         "result_path",
@@ -55,6 +58,25 @@ _KEYFRAME_FIELDS = (
     "label",
     "note",
     "image",
+)
+_AGENT_PRIORITIES = frozenset({"high", "medium", "low"})
+_AGENT_RECOMMENDATIONS = frozenset(
+    {"pass", "needs_review", "reject"}
+)
+_AGENT_ACTION_RECOMMENDATIONS = frozenset(
+    {"adopt", "needs_review", "reject"}
+)
+_AGENT_BOUNDARY_ACTIONS = frozenset(
+    {
+        "keep",
+        "review_start",
+        "review_end",
+        "review_both",
+        "manual_review",
+    }
+)
+_AGENT_EVIDENCE_TYPES = frozenset(
+    {"detection", "score", "keyframe", "segment", "report"}
 )
 
 
@@ -158,10 +180,436 @@ def _empty_agent(
         "availability": availability,
         "status": None,
         "summary": None,
+        "tags": [],
+        "suggestions": [],
+        "review": None,
+        "evidence_refs": [],
         "segment_comments": [],
         "knowledge_refs": [],
         "calls": copy.deepcopy(call_statistics),
     }
+
+
+def _agent_string(value: Any, field: str) -> str:
+    if not isinstance(value, str):
+        raise ReportDataValidationError(f"{field} must be a string")
+    return value
+
+
+def _agent_string_list(value: Any, field: str) -> list[str]:
+    if not isinstance(value, list) or any(
+        not isinstance(item, str) for item in value
+    ):
+        raise ReportDataValidationError(
+            f"{field} must be an array of strings"
+        )
+    return list(value)
+
+
+def _agent_number(
+    value: Any,
+    field: str,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> int | float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+    ):
+        raise ReportDataValidationError(
+            f"{field} must be a finite number"
+        )
+    if minimum is not None and value < minimum:
+        raise ReportDataValidationError(f"{field} is below its minimum")
+    if maximum is not None and value > maximum:
+        raise ReportDataValidationError(f"{field} exceeds its maximum")
+    return value
+
+
+def _agent_optional_number(
+    value: Any,
+    field: str,
+    *,
+    minimum: float = 0.0,
+) -> int | float | None:
+    if value is None:
+        return None
+    return _agent_number(value, field, minimum=minimum)
+
+
+def _public_agent_tags(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ReportDataValidationError("agent tags must be an array")
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ReportDataValidationError(
+                "agent tags must contain objects"
+            )
+        result.append(
+            {
+                "name": _agent_string(item.get("name"), "tag.name"),
+                "description": _agent_string(
+                    item.get("description"),
+                    "tag.description",
+                ),
+                "evidence_refs": _agent_string_list(
+                    item.get("evidence_refs"),
+                    "tag.evidence_refs",
+                ),
+            }
+        )
+    return result
+
+
+def _public_agent_suggestions(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ReportDataValidationError(
+            "agent suggestions must be an array"
+        )
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ReportDataValidationError(
+                "agent suggestions must contain objects"
+            )
+        priority = item.get("priority")
+        if priority not in _AGENT_PRIORITIES:
+            raise ReportDataValidationError(
+                "agent suggestion priority is invalid"
+            )
+        result.append(
+            {
+                "suggestion_id": _agent_string(
+                    item.get("suggestion_id"),
+                    "suggestion.suggestion_id",
+                ),
+                "title": _agent_string(
+                    item.get("title"),
+                    "suggestion.title",
+                ),
+                "action": _agent_string(
+                    item.get("action"),
+                    "suggestion.action",
+                ),
+                "priority": priority,
+                "evidence_refs": _agent_string_list(
+                    item.get("evidence_refs"),
+                    "suggestion.evidence_refs",
+                ),
+                "knowledge_refs": _agent_string_list(
+                    item.get("knowledge_refs"),
+                    "suggestion.knowledge_refs",
+                ),
+            }
+        )
+    return result
+
+
+def _public_agent_review(value: Any) -> dict[str, Any] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ReportDataValidationError("agent review must be an object")
+    recommendation = value.get("recommendation")
+    if recommendation not in _AGENT_RECOMMENDATIONS:
+        raise ReportDataValidationError(
+            "agent review recommendation is invalid"
+        )
+    return {
+        "recommendation": recommendation,
+        "confidence": _agent_number(
+            value.get("confidence"),
+            "review.confidence",
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        "reasons": _agent_string_list(
+            value.get("reasons"),
+            "review.reasons",
+        ),
+    }
+
+
+def _public_agent_evidence(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ReportDataValidationError(
+            "agent evidence_refs must be an array"
+        )
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ReportDataValidationError(
+                "agent evidence_refs must contain objects"
+            )
+        evidence_type = item.get("type")
+        if evidence_type not in _AGENT_EVIDENCE_TYPES:
+            raise ReportDataValidationError(
+                "agent evidence type is invalid"
+            )
+        public = {
+            "ref_id": _agent_string(
+                item.get("ref_id"),
+                "evidence.ref_id",
+            ),
+            "type": evidence_type,
+            "source_id": _agent_string(
+                item.get("source_id"),
+                "evidence.source_id",
+            ),
+        }
+        if "timestamp" in item:
+            public["timestamp"] = _agent_number(
+                item["timestamp"],
+                "evidence.timestamp",
+                minimum=0.0,
+            )
+        if "class_name" in item:
+            public["class_name"] = _agent_string(
+                item["class_name"],
+                "evidence.class_name",
+            )
+        if "confidence" in item:
+            public["confidence"] = _agent_number(
+                item["confidence"],
+                "evidence.confidence",
+                minimum=0.0,
+                maximum=1.0,
+            )
+        if "value" in item:
+            public["value"] = _copy_public_value(item["value"])
+        result.append(public)
+    return result
+
+
+def _public_agent_detection(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ReportDataValidationError(
+            "explanation detections must contain objects"
+        )
+    track_id = value.get("track_id")
+    if (
+        track_id is not None
+        and (
+            isinstance(track_id, bool)
+            or not isinstance(track_id, (str, int))
+        )
+    ):
+        raise ReportDataValidationError(
+            "detection.track_id has an invalid type"
+        )
+    observed = value.get("observed_frame_count")
+    consecutive = value.get("consecutive_frame_count")
+    if (
+        isinstance(observed, bool)
+        or not isinstance(observed, int)
+        or observed < 0
+    ):
+        raise ReportDataValidationError(
+            "observed_frame_count must be a non-negative integer"
+        )
+    if (
+        consecutive is not None
+        and (
+            isinstance(consecutive, bool)
+            or not isinstance(consecutive, int)
+            or consecutive < 0
+        )
+    ):
+        raise ReportDataValidationError(
+            "consecutive_frame_count must be null or non-negative"
+        )
+    return {
+        "class_name": _agent_string(
+            value.get("class_name"),
+            "detection.class_name",
+        ),
+        "track_id": track_id,
+        "first_seen": _agent_optional_number(
+            value.get("first_seen"),
+            "detection.first_seen",
+        ),
+        "last_seen": _agent_optional_number(
+            value.get("last_seen"),
+            "detection.last_seen",
+        ),
+        "observed_frame_count": observed,
+        "consecutive_frame_count": consecutive,
+        "average_confidence": _agent_number(
+            value.get("average_confidence"),
+            "detection.average_confidence",
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        "max_confidence": _agent_number(
+            value.get("max_confidence"),
+            "detection.max_confidence",
+            minimum=0.0,
+            maximum=1.0,
+        ),
+        "evidence_refs": _agent_string_list(
+            value.get("evidence_refs"),
+            "detection.evidence_refs",
+        ),
+    }
+
+
+def _public_agent_explanation(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ReportDataValidationError(
+            "segment explanation must be an object"
+        )
+    time_range = value.get("time_range")
+    detections = value.get("detections")
+    if not isinstance(time_range, dict):
+        raise ReportDataValidationError(
+            "explanation.time_range must be an object"
+        )
+    if not isinstance(detections, list):
+        raise ReportDataValidationError(
+            "explanation.detections must be an array"
+        )
+    start = _agent_number(
+        time_range.get("start"),
+        "explanation.time_range.start",
+        minimum=0.0,
+    )
+    end = _agent_number(
+        time_range.get("end"),
+        "explanation.time_range.end",
+        minimum=0.0,
+    )
+    if start > end:
+        raise ReportDataValidationError(
+            "explanation time range is invalid"
+        )
+    return {
+        "highlight_type": _agent_string(
+            value.get("highlight_type"),
+            "explanation.highlight_type",
+        ),
+        "trigger_rule": _agent_string(
+            value.get("trigger_rule"),
+            "explanation.trigger_rule",
+        ),
+        "time_range": {"start": start, "end": end},
+        "detections": [
+            _public_agent_detection(item) for item in detections
+        ],
+        "keyframe_refs": _agent_string_list(
+            value.get("keyframe_refs"),
+            "explanation.keyframe_refs",
+        ),
+        "detection_box_refs": _agent_string_list(
+            value.get("detection_box_refs"),
+            "explanation.detection_box_refs",
+        ),
+    }
+
+
+def _public_boundary_suggestion(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ReportDataValidationError(
+            "boundary_suggestion must be an object"
+        )
+    action = value.get("action")
+    if action not in _AGENT_BOUNDARY_ACTIONS:
+        raise ReportDataValidationError(
+            "boundary_suggestion action is invalid"
+        )
+    return {
+        "action": action,
+        "suggested_start": _agent_optional_number(
+            value.get("suggested_start"),
+            "boundary_suggestion.suggested_start",
+        ),
+        "suggested_end": _agent_optional_number(
+            value.get("suggested_end"),
+            "boundary_suggestion.suggested_end",
+        ),
+        "reason": _agent_string(
+            value.get("reason"),
+            "boundary_suggestion.reason",
+        ),
+    }
+
+
+def _public_agent_comments(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ReportDataValidationError(
+            "agent segment_comments must be an array"
+        )
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ReportDataValidationError(
+                "agent segment_comments must contain objects"
+            )
+        public: dict[str, Any] = {}
+        for field in (
+            "segment_id",
+            "title",
+            "comment",
+            "score_reason",
+        ):
+            if field in item:
+                public[field] = _agent_string(
+                    item[field],
+                    f"segment_comment.{field}",
+                )
+        if "review_status" in item:
+            if item["review_status"] not in _AGENT_RECOMMENDATIONS:
+                raise ReportDataValidationError(
+                    "segment review_status is invalid"
+                )
+            public["review_status"] = item["review_status"]
+        if "evidence_refs" in item:
+            public["evidence_refs"] = _agent_string_list(
+                item["evidence_refs"],
+                "segment_comment.evidence_refs",
+            )
+        if "action_recommendation" in item:
+            action = item["action_recommendation"]
+            if action not in _AGENT_ACTION_RECOMMENDATIONS:
+                raise ReportDataValidationError(
+                    "segment action_recommendation is invalid"
+                )
+            public["action_recommendation"] = action
+        if "explanation" in item:
+            public["explanation"] = _public_agent_explanation(
+                item["explanation"]
+            )
+        if "boundary_suggestion" in item:
+            public["boundary_suggestion"] = _public_boundary_suggestion(
+                item["boundary_suggestion"]
+            )
+        result.append(public)
+    return result
+
+
+def _public_agent_knowledge(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        raise ReportDataValidationError(
+            "agent knowledge_refs must be an array"
+        )
+    result: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ReportDataValidationError(
+                "agent knowledge_refs must contain objects"
+            )
+        result.append(
+            {
+                field: _agent_string(
+                    item.get(field),
+                    f"knowledge_ref.{field}",
+                )
+                for field in ("knowledge_id", "category", "title")
+            }
+        )
+    return result
 
 
 def _public_agent(
@@ -180,52 +628,32 @@ def _public_agent(
     try:
         _assert_no_private_data(agent_report)
         status = agent_report.get("status")
-        comments = agent_report.get("segment_comments")
-        knowledge_refs = agent_report.get("knowledge_refs")
-        if (
-            status not in {"completed", "degraded"}
-            or not isinstance(comments, list)
-            or not isinstance(knowledge_refs, list)
-        ):
+        if status not in {"completed", "degraded"}:
             return _empty_agent("invalid", call_statistics)
-
-        public_comments: list[dict[str, Any]] = []
-        for item in comments:
-            if not isinstance(item, dict):
-                return _empty_agent("invalid", call_statistics)
-            public_comments.append(
-                {
-                    field: _copy_public_value(item[field])
-                    for field in (
-                        "segment_id",
-                        "title",
-                        "comment",
-                        "score_reason",
-                        "review_status",
-                        "evidence_refs",
-                    )
-                    if field in item
-                }
-            )
-
-        public_knowledge: list[dict[str, Any]] = []
-        for item in knowledge_refs:
-            if not isinstance(item, dict):
-                return _empty_agent("invalid", call_statistics)
-            public_knowledge.append(
-                {
-                    field: _copy_public_value(item[field])
-                    for field in ("knowledge_id", "category", "title")
-                    if field in item
-                }
-            )
+        summary = agent_report.get("summary")
+        if summary is not None and not isinstance(summary, str):
+            return _empty_agent("invalid", call_statistics)
 
         public_agent = {
             "availability": "ready",
             "status": status,
-            "summary": _copy_public_value(agent_report.get("summary")),
-            "segment_comments": public_comments,
-            "knowledge_refs": public_knowledge,
+            "summary": summary,
+            "tags": _public_agent_tags(agent_report.get("tags", [])),
+            "suggestions": _public_agent_suggestions(
+                agent_report.get("suggestions", [])
+            ),
+            "review": _public_agent_review(
+                agent_report.get("review")
+            ),
+            "evidence_refs": _public_agent_evidence(
+                agent_report.get("evidence_refs", [])
+            ),
+            "segment_comments": _public_agent_comments(
+                agent_report.get("segment_comments")
+            ),
+            "knowledge_refs": _public_agent_knowledge(
+                agent_report.get("knowledge_refs")
+            ),
             "calls": copy.deepcopy(call_statistics),
         }
         _assert_no_private_data(public_agent)
