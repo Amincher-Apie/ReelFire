@@ -272,22 +272,10 @@ def analyze_video(
     highlight_result = extractor.extract(frame_results, fps, duration)
     segments = highlight_result.get("segments", [])
 
-    # 向后兼容：如果没有多片段，回退到单片段
+    # P0-2: 没有真实 FPS 事件（无敌人出现）时返回空 segments，
+    # 不再无条件生成 30 秒默认片段，由前端引导用户降低阈值或手动添加。
     if not segments:
-        segments = [{
-            "id": "seg_001",
-            "order": 1,
-            "start": start,
-            "end": end,
-            "score": best["highlight_score"],
-            "source_keyframes": [best["id"]],
-            "duration": round(end - start, 3),
-            "peak_enemy_count": 0,
-            "detected_classes": [],
-            "enemy_classes_in_segment": [],
-            "detections_summary": [],
-            "reason": "highlight_score",
-        }]
+        segments = []
 
     # 给 segment 补充 source_keyframes（关联关键帧）
     for seg in segments:
@@ -341,10 +329,11 @@ def analyze_video(
         "segment_tags": segment_tags,
         "ai_cover_prompt": ai_cover_prompt,
         "recommended_clip": {
-            "start_time": segments[0]["start"] if segments else start,
-            "end_time": segments[0]["end"] if segments else end,
+            "start_time": segments[0]["start"] if segments else None,
+            "end_time": segments[0]["end"] if segments else None,
             "output_ratio": output_ratio,
             "segment_count": len(segments),
+            "is_empty": not segments,
         },
         "output": {
             "video": None,

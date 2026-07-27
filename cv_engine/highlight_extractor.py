@@ -537,6 +537,221 @@ def _merge_segments_no_audio(
     return output_path
 
 
+def export_single_segment(
+    source_video: Path,
+    segment: dict[str, Any],
+    output_path: Path,
+    *,
+    output_ratio: str | None = None,
+    keep_audio: bool = True,
+    crf: int = 23,
+) -> Path:
+    """把单个片段从源视频切片导出为独立 mp4。
+
+    用于“单片段导出”场景：每个高光分别导出成一个 mp4 文件，
+    适合博主分别发布短视频。
+
+    Args:
+        source_video: 原始视频路径
+        segment: 片段字典，需含 start/end（秒）
+        output_path: 输出视频路径（建议 .mp4）
+        output_ratio: 可选，"16:9" / "9:16" / "1:1" / None（原比例）
+        keep_audio: 是否保留原音
+        crf: 编码质量（18~28，越小越清晰，默认 23）
+
+    Returns:
+        输出视频路径
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("FFmpeg 不可用，无法导出单片段")
+
+    source = Path(source_video).resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"输入视频不存在: {source}")
+
+    start = float(segment.get("start", 0.0))
+    end = float(segment.get("end", 0.0))
+    if end <= start:
+        raise ValueError(f"片段起止时间无效: start={start}, end={end}")
+
+    output_path = Path(output_path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 基础命令：精确切片（-ss 放到 -i 后面更精确，但放前面更快；这里用前者保证精度）
+    command: list[str] = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel", "error",
+        "-y",
+        "-ss", f"{start:.3f}",
+        "-to", f"{end:.3f}",
+        "-i", str(source),
+    ]
+
+    # 比例裁剪（如 9:16 竖屏）
+    video_filters: list[str] = []
+    if output_ratio == "9:16":
+        # 以画面中心裁剪为 9:16
+        video_filters.append("crop=ih*9/16:ih")
+    elif output_ratio == "1:1":
+        video_filters.append("crop=ih:ih")
+    elif output_ratio == "16:9":
+        # 16:9 一般就是原比例，不裁剪
+        pass
+
+    if video_filters:
+        command.extend(["-filter:v", ",".join(video_filters)])
+
+    # 视频编码
+    command.extend([
+        "-c:v", "libx264",
+        "-preset", "fast",
+        "-crf", str(int(crf)),
+        "-movflags", "+faststart",
+    ])
+
+    # 音频处理
+    if keep_audio:
+        command.extend(["-c:a", "aac", "-b:a", "160k"])
+    else:
+        command.extend(["-an"])
+
+    command.append(str(output_path))
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="backslashreplace",
+    )
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "未知错误").strip()
+        # 若带音频失败，降级为无音频
+        if keep_audio:
+            return export_single_segment(
+                source, segment, output_path,
+                output_ratio=output_ratio,
+                keep_audio=False,
+                crf=crf,
+            )
+        raise RuntimeError(f"FFmpeg 单片段导出失败：{detail[-1000:]}")
+
+    if not output_path.is_file() or output_path.stat().st_size <= 0:
+        output_path.unlink(missing_ok=True)
+        raise RuntimeError("FFmpeg 未生成有效输出文件")
+
+    return output_path
+
+
+def generate_proxy_video(
+    source_video: Path,
+    output_path: Path,
+    *,
+    target_height: int = 480,
+    target_fps: int = 24,
+    video_bitrate: str = "600k",
+    audio_bitrate: str = "64k",
+    max_duration: float | None = None,
+) -> Path:
+    """生成低码率代理视频，用于剪辑台快速预览。
+
+    代理视频特点：
+        - 较低分辨率（默认 480p）
+        - 较低码率（默认 600k）
+        - 较低帧率（默认 24fps）
+        - 保留音频但码率压缩
+        - 可选截取前 N 秒（用于预览片段）
+
+    Args:
+        source_video: 原始视频路径
+        output_path: 代理视频输出路径（建议 .mp4）
+        target_height: 目标高度（像素），默认 480
+        target_fps: 目标帧率，默认 24
+        video_bitrate: 视频码率，默认 "600k"
+        audio_bitrate: 音频码率，默认 "64k"
+        max_duration: 可选，只保留前 N 秒（None 表示完整视频）
+
+    Returns:
+        代理视频路径
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        raise RuntimeError("FFmpeg 不可用，无法生成代理视频")
+
+    source = Path(source_video).resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"输入视频不存在: {source}")
+
+    output_path = Path(output_path).resolve()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # 视频滤镜：缩放（保持宽高比，宽度自动计算）+ 帧率降采样
+    # -2 表示宽度自动按比例计算（必为偶数）
+    scale_filter = f"scale=-2:{int(target_height)}"
+    fps_filter = f"fps={int(target_fps)}"
+    vf = f"{scale_filter},{fps_filter}"
+
+    command: list[str] = [
+        ffmpeg,
+        "-hide_banner",
+        "-loglevel", "error",
+        "-y",
+    ]
+
+    if max_duration is not None and float(max_duration) > 0:
+        command.extend(["-t", f"{float(max_duration):.3f}"])
+
+    command.extend([
+        "-i", str(source),
+        "-vf", vf,
+        "-c:v", "libx264",
+        "-preset", "veryfast",
+        "-b:v", str(video_bitrate),
+        "-maxrate", str(video_bitrate),
+        "-bufsize", f"{video_bitrate}*2",
+        "-movflags", "+faststart",
+    ])
+
+    # 音频处理：audio_bitrate="0k" 视为无音频（降级模式）
+    if audio_bitrate == "0k":
+        command.extend(["-an"])
+    else:
+        command.extend(["-c:a", "aac", "-b:a", str(audio_bitrate)])
+
+    command.append(str(output_path))
+
+    result = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="backslashreplace",
+    )
+
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "未知错误").strip()
+        # 若带音频失败，降级为无音频版本（仅当当前还在尝试带音频时）
+        if audio_bitrate != "0k":
+            return generate_proxy_video(
+                source, output_path,
+                target_height=target_height,
+                target_fps=target_fps,
+                video_bitrate=video_bitrate,
+                audio_bitrate="0k",
+                max_duration=max_duration,
+            )
+        raise RuntimeError(f"FFmpeg 代理视频生成失败：{detail[-1000:]}")
+
+    if not output_path.is_file() or output_path.stat().st_size <= 0:
+        output_path.unlink(missing_ok=True)
+        raise RuntimeError("FFmpeg 未生成有效输出文件")
+
+    return output_path
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="精彩片段提取器")
     parser.add_argument(
